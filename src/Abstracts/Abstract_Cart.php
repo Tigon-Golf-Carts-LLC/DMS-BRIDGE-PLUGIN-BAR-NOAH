@@ -1094,12 +1094,26 @@ abstract class Abstract_Cart
             }
         }
 
-        // Electric Bedlift
+        // Electric Bedlift — based on payload cartAttributes.hasBedLift
         $this->attributes['pa_electric-bed-lift'] = $this->generated_attributes->attributes['electric-bed-lift']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['electric-bed-lift']['options']['NO']
-        );
+        $has_bed_lift = !empty($this->cart['cartAttributes']['hasBedLift']);
+        $bed_lift_value = $has_bed_lift ? 'YES' : 'NO';
+        if (isset($this->generated_attributes->attributes['electric-bed-lift']['options'][$bed_lift_value])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['electric-bed-lift']['options'][$bed_lift_value]
+            );
+        } else {
+            $new_bl_term = wp_insert_term(
+                ucfirst(strtolower($bed_lift_value)),
+                'pa_electric-bed-lift',
+                ['slug' => sanitize_title($bed_lift_value)]
+            );
+            if (!is_wp_error($new_bl_term)) {
+                $this->generated_attributes->attributes['electric-bed-lift']['options'][$bed_lift_value] = $new_bl_term['term_id'];
+                array_push($this->taxonomy_terms, $new_bl_term['term_id']);
+            }
+        }
 
         // Extended top
         $this->attributes['pa_extended-top'] = $this->generated_attributes->attributes['extended-top']['object'];
