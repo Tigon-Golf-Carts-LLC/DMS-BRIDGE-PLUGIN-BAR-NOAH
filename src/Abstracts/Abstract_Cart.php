@@ -1309,12 +1309,34 @@ abstract class Abstract_Cart
                     }
                 }
             }
+
+            // Epic used products also get pa_epic-cart-colors (with auto-creation)
+            if ($make_lower === 'epic') {
+                $this->attributes['pa_epic-cart-colors'] = $this->generated_attributes->attributes['epic-cart-colors']['object'];
+                $epic_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+                if (isset($this->generated_attributes->attributes['epic-cart-colors']['options'][$epic_color_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['epic-cart-colors']['options'][$epic_color_upper]
+                    );
+                } else {
+                    $new_epic_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                        'pa_epic-cart-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                    );
+                    if (!is_wp_error($new_epic_term)) {
+                        $this->generated_attributes->attributes['epic-cart-colors']['options'][$epic_color_upper] = $new_epic_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_epic_term['term_id']);
+                    }
+                }
+            }
         } elseif (array_search($make_lower, $make_attrs) !== false) {
             $this->attributes["pa_$make_lower-cart-colors"] = $this->generated_attributes->attributes[$make_lower . '-cart-colors']['object'];
             $make_cart_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
 
-            // Club Car / Denago: auto-create missing cart color terms
-            if (in_array($make_lower, ['club-car', 'denago']) && !isset($this->generated_attributes->attributes[$make_lower . '-cart-colors']['options'][$make_cart_color_upper])) {
+            // Club Car / Denago / Epic: auto-create missing cart color terms
+            if (in_array($make_lower, ['club-car', 'denago', 'epic']) && !isset($this->generated_attributes->attributes[$make_lower . '-cart-colors']['options'][$make_cart_color_upper])) {
                 $new_color_term = wp_insert_term(
                     ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
                     "pa_$make_lower-cart-colors",
@@ -1333,8 +1355,8 @@ abstract class Abstract_Cart
             $this->attributes["pa_$make_lower-seat-colors"] = $this->generated_attributes->attributes[$make_lower . '-seat-colors']['object'];
             $make_seat_color_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
 
-            // Club Car / Denago: auto-create missing seat color terms
-            if (in_array($make_lower, ['club-car', 'denago']) && !isset($this->generated_attributes->attributes[$make_lower . '-seat-colors']['options'][$make_seat_color_upper])) {
+            // Club Car / Denago / Epic: auto-create missing seat color terms
+            if (in_array($make_lower, ['club-car', 'denago', 'epic']) && !isset($this->generated_attributes->attributes[$make_lower . '-seat-colors']['options'][$make_seat_color_upper])) {
                 $new_sc_term = wp_insert_term(
                     ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
                     "pa_$make_lower-seat-colors",
