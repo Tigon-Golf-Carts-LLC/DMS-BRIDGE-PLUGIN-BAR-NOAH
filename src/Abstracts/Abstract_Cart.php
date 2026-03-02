@@ -1742,6 +1742,28 @@ abstract class Abstract_Cart
                     }
                 }
             }
+
+            // Polaris used products also get pa_polaris-cart-colors (with auto-creation)
+            if ($make_lower === 'polaris') {
+                $this->attributes['pa_polaris-cart-colors'] = $this->generated_attributes->attributes['polaris-cart-colors']['object'];
+                $pol_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+                if (isset($this->generated_attributes->attributes['polaris-cart-colors']['options'][$pol_color_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['polaris-cart-colors']['options'][$pol_color_upper]
+                    );
+                } else {
+                    $new_pol_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                        'pa_polaris-cart-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                    );
+                    if (!is_wp_error($new_pol_term)) {
+                        $this->generated_attributes->attributes['polaris-cart-colors']['options'][$pol_color_upper] = $new_pol_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_pol_term['term_id']);
+                    }
+                }
+            }
         } elseif (array_search($make_lower, $make_attrs) !== false) {
             // Navitas uses singular "cart-color" / "seat-color" instead of plural
             if ($make_lower === 'navitas') {
@@ -1786,8 +1808,8 @@ abstract class Abstract_Cart
                 $this->attributes["pa_$make_lower-cart-colors"] = $this->generated_attributes->attributes[$make_lower . '-cart-colors']['object'];
                 $make_cart_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
 
-                // Club Car / Denago / Epic / Evolution / EZGO / ICON: auto-create missing cart color terms
-                if (in_array($make_lower, ['club-car', 'denago', 'epic', 'evolution', 'ezgo', 'icon']) && !isset($this->generated_attributes->attributes[$make_lower . '-cart-colors']['options'][$make_cart_color_upper])) {
+                // Club Car / Denago / Epic / Evolution / EZGO / ICON / Polaris: auto-create missing cart color terms
+                if (in_array($make_lower, ['club-car', 'denago', 'epic', 'evolution', 'ezgo', 'icon', 'polaris']) && !isset($this->generated_attributes->attributes[$make_lower . '-cart-colors']['options'][$make_cart_color_upper])) {
                     $new_color_term = wp_insert_term(
                         ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
                         "pa_$make_lower-cart-colors",
