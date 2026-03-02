@@ -1167,10 +1167,33 @@ abstract class Abstract_Cart
 
         // Fender Flares
         $this->attributes['pa_fender-flares'] = $this->generated_attributes->attributes['fender-flares']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['fender-flares']['options']['YES']
-        );
+        $fender_raw = $this->cart['cartAttributes']['hasFenderFlares'] ?? false;
+        if ($fender_raw && $fender_raw !== true && is_string($fender_raw)) {
+            // String value from payload (e.g. "Fender Flare", "Fender Flare w/ Running Light")
+            $fender_label = ucwords(strtolower($fender_raw));
+        } elseif ($fender_raw) {
+            // Boolean true – default to "Yes"
+            $fender_label = 'Yes';
+        } else {
+            $fender_label = 'No';
+        }
+        $fender_upper = strtoupper($fender_label);
+        if (isset($this->generated_attributes->attributes['fender-flares']['options'][$fender_upper])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['fender-flares']['options'][$fender_upper]
+            );
+        } else {
+            $new_fender_term = wp_insert_term(
+                $fender_label,
+                'pa_fender-flares',
+                ['slug' => sanitize_title($fender_label)]
+            );
+            if (!is_wp_error($new_fender_term)) {
+                $this->generated_attributes->attributes['fender-flares']['options'][$fender_upper] = $new_fender_term['term_id'];
+                array_push($this->taxonomy_terms, $new_fender_term['term_id']);
+            }
+        }
 
         // LED Accents
         if (strtoupper($this->make_with_symbol) == 'DENAGO®') {
