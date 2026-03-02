@@ -1221,19 +1221,41 @@ abstract class Abstract_Cart
                     }
                 }
             }
+
+            // Denago used products also get pa_denago-cart-colors (with auto-creation)
+            if ($make_lower === 'denago') {
+                $this->attributes['pa_denago-cart-colors'] = $this->generated_attributes->attributes['denago-cart-colors']['object'];
+                $dn_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+                if (isset($this->generated_attributes->attributes['denago-cart-colors']['options'][$dn_color_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['denago-cart-colors']['options'][$dn_color_upper]
+                    );
+                } else {
+                    $new_dn_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                        'pa_denago-cart-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                    );
+                    if (!is_wp_error($new_dn_term)) {
+                        $this->generated_attributes->attributes['denago-cart-colors']['options'][$dn_color_upper] = $new_dn_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_dn_term['term_id']);
+                    }
+                }
+            }
         } elseif (array_search($make_lower, $make_attrs) !== false) {
             $this->attributes["pa_$make_lower-cart-colors"] = $this->generated_attributes->attributes[$make_lower . '-cart-colors']['object'];
             $make_cart_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
 
-            // Club Car: auto-create missing color terms
-            if ($make_lower === 'club-car' && !isset($this->generated_attributes->attributes[$make_lower . '-cart-colors']['options'][$make_cart_color_upper])) {
-                $new_cc_term = wp_insert_term(
+            // Club Car / Denago: auto-create missing cart color terms
+            if (in_array($make_lower, ['club-car', 'denago']) && !isset($this->generated_attributes->attributes[$make_lower . '-cart-colors']['options'][$make_cart_color_upper])) {
+                $new_color_term = wp_insert_term(
                     ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
-                    'pa_club-car-cart-colors',
+                    "pa_$make_lower-cart-colors",
                     ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
                 );
-                if (!is_wp_error($new_cc_term)) {
-                    $this->generated_attributes->attributes[$make_lower . '-cart-colors']['options'][$make_cart_color_upper] = $new_cc_term['term_id'];
+                if (!is_wp_error($new_color_term)) {
+                    $this->generated_attributes->attributes[$make_lower . '-cart-colors']['options'][$make_cart_color_upper] = $new_color_term['term_id'];
                 }
             }
 
