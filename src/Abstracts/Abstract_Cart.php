@@ -1702,7 +1702,7 @@ abstract class Abstract_Cart
                 }
             }
 
-            // Navitas used products also get pa_navitas-cart-color (with auto-creation)
+            // Navitas used products also get pa_navitas-cart-color and pa_navitas-seat-color (with auto-creation)
             if ($make_lower === 'navitas') {
                 $this->attributes['pa_navitas-cart-color'] = $this->generated_attributes->attributes['navitas-cart-color']['object'];
                 $nav_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
@@ -1722,9 +1722,28 @@ abstract class Abstract_Cart
                         array_push($this->taxonomy_terms, $new_nav_term['term_id']);
                     }
                 }
+
+                $this->attributes['pa_navitas-seat-color'] = $this->generated_attributes->attributes['navitas-seat-color']['object'];
+                $nav_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['navitas-seat-color']['options'][$nav_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['navitas-seat-color']['options'][$nav_seat_upper]
+                    );
+                } else {
+                    $new_nav_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_navitas-seat-color',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_nav_sc_term)) {
+                        $this->generated_attributes->attributes['navitas-seat-color']['options'][$nav_seat_upper] = $new_nav_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_nav_sc_term['term_id']);
+                    }
+                }
             }
         } elseif (array_search($make_lower, $make_attrs) !== false) {
-            // Navitas uses singular "cart-color" / no seat-colors attribute
+            // Navitas uses singular "cart-color" / "seat-color" instead of plural
             if ($make_lower === 'navitas') {
                 $this->attributes['pa_navitas-cart-color'] = $this->generated_attributes->attributes['navitas-cart-color']['object'];
                 $nav_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
@@ -1742,6 +1761,25 @@ abstract class Abstract_Cart
                     if (!is_wp_error($new_nav_term)) {
                         $this->generated_attributes->attributes['navitas-cart-color']['options'][$nav_color_upper] = $new_nav_term['term_id'];
                         array_push($this->taxonomy_terms, $new_nav_term['term_id']);
+                    }
+                }
+
+                $this->attributes['pa_navitas-seat-color'] = $this->generated_attributes->attributes['navitas-seat-color']['object'];
+                $nav_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['navitas-seat-color']['options'][$nav_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['navitas-seat-color']['options'][$nav_seat_upper]
+                    );
+                } else {
+                    $new_nav_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_navitas-seat-color',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_nav_sc_term)) {
+                        $this->generated_attributes->attributes['navitas-seat-color']['options'][$nav_seat_upper] = $new_nav_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_nav_sc_term['term_id']);
                     }
                 }
             } else {
