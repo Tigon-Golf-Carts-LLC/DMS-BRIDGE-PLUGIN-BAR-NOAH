@@ -1439,6 +1439,28 @@ abstract class Abstract_Cart
                     }
                 }
             }
+
+            // EZGO used products also get pa_ezgo-seat-colors (with auto-creation)
+            if ($make_lower === 'ezgo') {
+                $this->attributes['pa_ezgo-seat-colors'] = $this->generated_attributes->attributes['ezgo-seat-colors']['object'];
+                $ezgo_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['ezgo-seat-colors']['options'][$ezgo_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['ezgo-seat-colors']['options'][$ezgo_seat_upper]
+                    );
+                } else {
+                    $new_ezgo_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_ezgo-seat-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_ezgo_sc_term)) {
+                        $this->generated_attributes->attributes['ezgo-seat-colors']['options'][$ezgo_seat_upper] = $new_ezgo_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_ezgo_sc_term['term_id']);
+                    }
+                }
+            }
         } elseif (array_search($make_lower, $make_attrs) !== false) {
             $this->attributes["pa_$make_lower-cart-colors"] = $this->generated_attributes->attributes[$make_lower . '-cart-colors']['object'];
             $make_cart_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
@@ -1463,8 +1485,8 @@ abstract class Abstract_Cart
             $this->attributes["pa_$make_lower-seat-colors"] = $this->generated_attributes->attributes[$make_lower . '-seat-colors']['object'];
             $make_seat_color_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
 
-            // Club Car / Denago / Epic / Evolution: auto-create missing seat color terms
-            if (in_array($make_lower, ['club-car', 'denago', 'epic', 'evolution']) && !isset($this->generated_attributes->attributes[$make_lower . '-seat-colors']['options'][$make_seat_color_upper])) {
+            // Club Car / Denago / Epic / Evolution / EZGO: auto-create missing seat color terms
+            if (in_array($make_lower, ['club-car', 'denago', 'epic', 'evolution', 'ezgo']) && !isset($this->generated_attributes->attributes[$make_lower . '-seat-colors']['options'][$make_seat_color_upper])) {
                 $new_sc_term = wp_insert_term(
                     ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
                     "pa_$make_lower-seat-colors",
