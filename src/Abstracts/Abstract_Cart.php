@@ -1115,6 +1115,26 @@ abstract class Abstract_Cart
             }
         }
 
+        // Electric Range — all new inventory defaults to 40 Miles
+        $this->attributes['pa_electric-range'] = $this->generated_attributes->attributes['electric-range']['object'];
+        $electric_range_value = '40 MILES';
+        if (isset($this->generated_attributes->attributes['electric-range']['options'][$electric_range_value])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['electric-range']['options'][$electric_range_value]
+            );
+        } else {
+            $new_er_term = wp_insert_term(
+                '40 Miles',
+                'pa_electric-range',
+                ['slug' => '40-miles']
+            );
+            if (!is_wp_error($new_er_term)) {
+                $this->generated_attributes->attributes['electric-range']['options'][$electric_range_value] = $new_er_term['term_id'];
+                array_push($this->taxonomy_terms, $new_er_term['term_id']);
+            }
+        }
+
         // Extended top
         $this->attributes['pa_extended-top'] = $this->generated_attributes->attributes['extended-top']['object'];
         array_push(
