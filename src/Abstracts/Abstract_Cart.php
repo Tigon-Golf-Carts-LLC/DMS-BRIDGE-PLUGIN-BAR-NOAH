@@ -1249,10 +1249,34 @@ abstract class Abstract_Cart
 
         // Lift kit
         $this->attributes['pa_lift-kit'] = $this->generated_attributes->attributes['lift-kit']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['lift-kit']['options'][($this->cart['cartAttributes']['isLifted'] ? '3 INCH' : 'NO')]
-        );
+        $lift_raw = $this->cart['cartAttributes']['liftKit'] ?? null;
+        $is_lifted = $this->cart['cartAttributes']['isLifted'] ?? false;
+        if ($lift_raw && $lift_raw !== true && is_string($lift_raw)) {
+            // String value from payload (e.g. "3 Inch", "112 Inches", "2.5 Inch")
+            $lift_label = ucwords(strtolower($lift_raw));
+        } elseif ($lift_raw === true || $is_lifted) {
+            // Boolean true with no specific size – default to "Yes"
+            $lift_label = 'Yes';
+        } else {
+            $lift_label = 'No';
+        }
+        $lift_upper = strtoupper($lift_label);
+        if (isset($this->generated_attributes->attributes['lift-kit']['options'][$lift_upper])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['lift-kit']['options'][$lift_upper]
+            );
+        } else {
+            $new_lift_term = wp_insert_term(
+                $lift_label,
+                'pa_lift-kit',
+                ['slug' => sanitize_title($lift_label)]
+            );
+            if (!is_wp_error($new_lift_term)) {
+                $this->generated_attributes->attributes['lift-kit']['options'][$lift_upper] = $new_lift_term['term_id'];
+                array_push($this->taxonomy_terms, $new_lift_term['term_id']);
+            }
+        }
 
         // Location
         $this->attributes['pa_location'] = $this->generated_attributes->attributes['location']['object'];
