@@ -1137,10 +1137,33 @@ abstract class Abstract_Cart
 
         // Extended top
         $this->attributes['pa_extended-top'] = $this->generated_attributes->attributes['extended-top']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['extended-top']['options'][$this->cart['cartAttributes']['hasExtendedTop'] ? 'YES' : 'NO']
-        );
+        $ext_top_raw = $this->cart['cartAttributes']['hasExtendedTop'];
+        if ($ext_top_raw && $ext_top_raw !== true && preg_match('/\d+/', $ext_top_raw, $ext_m)) {
+            // Value contains a number (e.g. "84 Inches") – use the specific size
+            $ext_top_label = $ext_m[0] . ' Inches';
+        } elseif ($ext_top_raw) {
+            // Boolean true with no size – default to 84 Inches
+            $ext_top_label = '84 Inches';
+        } else {
+            $ext_top_label = 'No';
+        }
+        $ext_top_upper = strtoupper($ext_top_label);
+        if (isset($this->generated_attributes->attributes['extended-top']['options'][$ext_top_upper])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['extended-top']['options'][$ext_top_upper]
+            );
+        } else {
+            $new_ext_term = wp_insert_term(
+                $ext_top_label,
+                'pa_extended-top',
+                ['slug' => sanitize_title($ext_top_label)]
+            );
+            if (!is_wp_error($new_ext_term)) {
+                $this->generated_attributes->attributes['extended-top']['options'][$ext_top_upper] = $new_ext_term['term_id'];
+                array_push($this->taxonomy_terms, $new_ext_term['term_id']);
+            }
+        }
 
         // Fender Flares
         $this->attributes['pa_fender-flares'] = $this->generated_attributes->attributes['fender-flares']['object'];
