@@ -1049,28 +1049,30 @@ abstract class Abstract_Cart
             );
         }
 
-        // TODO - Model Specific
-        // Brush Guard
-        if (strtoupper($this->make_with_symbol) == 'DENAGO®' || strtoupper($this->make_with_symbol) == 'EVOLUTION®') {
-            $this->attributes['pa_brush-guard'] = $this->generated_attributes->attributes['brush-guard']['object'];
-            array_push(
-                $this->taxonomy_terms,
-                $this->generated_attributes->attributes['brush-guard']['options']['YES']
-            );
-        } else {
-            $this->attributes['pa_brush-guard'] = $this->generated_attributes->attributes['brush-guard']['object'];
-            array_push(
-                $this->taxonomy_terms,
-                $this->generated_attributes->attributes['brush-guard']['options']['NO']
-            );
-        }
-
-        // Cargo Rack
-        $this->attributes['pa_cargo-rack'] = $this->generated_attributes->attributes['cargo-rack']['object'];
+        // Brush Guard — based on payload addedFeatures.brushGuard
+        $this->attributes['pa_brush-guard'] = $this->generated_attributes->attributes['brush-guard']['object'];
+        $brush_guard_value = (isset($this->cart['addedFeatures']['brushGuard']) && $this->cart['addedFeatures']['brushGuard']) ? 'YES' : 'NO';
         array_push(
             $this->taxonomy_terms,
-            $this->generated_attributes->attributes['cargo-rack']['options']['NO']
+            $this->generated_attributes->attributes['brush-guard']['options'][$brush_guard_value]
         );
+
+        // Cargo Rack — based on payload cartAttributes.cargoRack
+        $this->attributes['pa_cargo-rack'] = $this->generated_attributes->attributes['cargo-rack']['object'];
+        $cargo_rack_value = !empty($this->cart['cartAttributes']['cargoRack'])
+            ? strtoupper($this->cart['cartAttributes']['cargoRack'])
+            : 'NO';
+        if (isset($this->generated_attributes->attributes['cargo-rack']['options'][$cargo_rack_value])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['cargo-rack']['options'][$cargo_rack_value]
+            );
+        } else {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['cargo-rack']['options']['NO']
+            );
+        }
 
         // Drivetrain
         $this->attributes['pa_drivetrain'] = $this->generated_attributes->attributes['drivetrain']['object'];
@@ -1149,7 +1151,35 @@ abstract class Abstract_Cart
             "yamaha"
         ];
         $make_lower = strtolower($this->brand_hyphenated);
-        if (array_search($make_lower, $make_attrs) !== false) {
+
+        // USED products always get pa_cart-color (with auto-creation of missing color terms)
+        if ($this->cart['isUsed']) {
+            $this->attributes['pa_cart-color'] = $this->generated_attributes->attributes['cart-color']['object'];
+            $cart_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+            if (isset($this->generated_attributes->attributes['cart-color']['options'][$cart_color_upper])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes['cart-color']['options'][$cart_color_upper]
+                );
+            } else {
+                // Color term doesn't exist — create it
+                $new_term = wp_insert_term(
+                    ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                    'pa_cart-color',
+                    ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                );
+                if (!is_wp_error($new_term)) {
+                    $this->generated_attributes->attributes['cart-color']['options'][$cart_color_upper] = $new_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_term['term_id']);
+                }
+            }
+
+            $this->attributes['pa_seat-color'] = $this->generated_attributes->attributes['seat-color']['object'];
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['seat-color']['options'][strtoupper($this->cart['cartAttributes']['seatColor'])]
+            );
+        } elseif (array_search($make_lower, $make_attrs) !== false) {
             $this->attributes["pa_$make_lower-cart-colors"] = $this->generated_attributes->attributes[$make_lower . '-cart-colors']['object'];
             array_push(
                 $this->taxonomy_terms,
