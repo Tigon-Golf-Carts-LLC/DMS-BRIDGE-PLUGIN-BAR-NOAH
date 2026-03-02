@@ -1304,6 +1304,48 @@ abstract class Abstract_Cart
             }
         }
 
+        // Model (from make + model in payload)
+        $this->attributes['pa_model'] = $this->generated_attributes->attributes['model']['object'];
+        $make_upper = strtoupper($this->make_with_symbol);
+        $model_raw  = $this->cart['cartType']['model'] ?? '';
+        // Build the label using the same special-case make names used elsewhere
+        if ($make_upper == 'STAR®') {
+            $model_label = 'STAR EV® ' . strtoupper($model_raw);
+        } elseif ($make_upper == 'EZGO®') {
+            $model_label = 'EZ-GO® ' . strtoupper($model_raw);
+        } else {
+            $model_label = $make_upper . ' ' . strtoupper($model_raw);
+        }
+        // Apply the same DS / Precedent / Crown / Drive2 overrides
+        if ($model_raw == 'DS') {
+            $model_label = $make_upper . ' DS ELECTRIC';
+        } elseif ($model_raw == 'Precedent') {
+            $model_label = $make_upper . ' PRECEDENT ELECTRIC';
+        } elseif ($model_raw == '4L') {
+            $model_label = $make_upper . ' CROWN 4 LIFTED';
+        } elseif ($model_raw == '6L') {
+            $model_label = $make_upper . ' CROWN 6 LIFTED';
+        } elseif ($model_raw == 'Drive 2') {
+            $model_label = $make_upper . ' DRIVE2';
+        }
+        $model_upper = strtoupper($model_label);
+        if (isset($this->generated_attributes->attributes['model']['options'][$model_upper])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['model']['options'][$model_upper]
+            );
+        } else {
+            $new_model_term = wp_insert_term(
+                $model_label,
+                'pa_model',
+                ['slug' => sanitize_title($model_label)]
+            );
+            if (!is_wp_error($new_model_term)) {
+                $this->generated_attributes->attributes['model']['options'][$model_upper] = $new_model_term['term_id'];
+                array_push($this->taxonomy_terms, $new_model_term['term_id']);
+            }
+        }
+
         // Location – always assign both the state and city+state terms (with auto-creation)
         $this->attributes['pa_location'] = $this->generated_attributes->attributes['location']['object'];
         $loc_city  = Attributes::$locations[$this->location_id]['city'] ?? '';
