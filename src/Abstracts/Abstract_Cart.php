@@ -1200,6 +1200,26 @@ abstract class Abstract_Cart
                         array_push($this->taxonomy_terms, $new_cc_term['term_id']);
                     }
                 }
+
+                // Club Car used products also get pa_club-car-seat-colors (with auto-creation)
+                $this->attributes['pa_club-car-seat-colors'] = $this->generated_attributes->attributes['club-car-seat-colors']['object'];
+                $cc_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['club-car-seat-colors']['options'][$cc_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['club-car-seat-colors']['options'][$cc_seat_upper]
+                    );
+                } else {
+                    $new_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_club-car-seat-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_sc_term)) {
+                        $this->generated_attributes->attributes['club-car-seat-colors']['options'][$cc_seat_upper] = $new_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_sc_term['term_id']);
+                    }
+                }
             }
         } elseif (array_search($make_lower, $make_attrs) !== false) {
             $this->attributes["pa_$make_lower-cart-colors"] = $this->generated_attributes->attributes[$make_lower . '-cart-colors']['object'];
@@ -1223,9 +1243,23 @@ abstract class Abstract_Cart
             );
 
             $this->attributes["pa_$make_lower-seat-colors"] = $this->generated_attributes->attributes[$make_lower . '-seat-colors']['object'];
+            $make_seat_color_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+
+            // Club Car: auto-create missing seat color terms
+            if ($make_lower === 'club-car' && !isset($this->generated_attributes->attributes[$make_lower . '-seat-colors']['options'][$make_seat_color_upper])) {
+                $new_sc_term = wp_insert_term(
+                    ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                    'pa_club-car-seat-colors',
+                    ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                );
+                if (!is_wp_error($new_sc_term)) {
+                    $this->generated_attributes->attributes[$make_lower . '-seat-colors']['options'][$make_seat_color_upper] = $new_sc_term['term_id'];
+                }
+            }
+
             array_push(
                 $this->taxonomy_terms,
-                $this->generated_attributes->attributes[$make_lower . '-seat-colors']['options'][strtoupper($this->cart['cartAttributes']['seatColor'])]
+                $this->generated_attributes->attributes[$make_lower . '-seat-colors']['options'][$make_seat_color_upper]
             );
         } else {
             $this->attributes['pa_cart-color'] = $this->generated_attributes->attributes['cart-color']['object'];
