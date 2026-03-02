@@ -1278,6 +1278,32 @@ abstract class Abstract_Cart
             }
         }
 
+        // Mileage (from odometer)
+        $this->attributes['pa_mileage'] = $this->generated_attributes->attributes['mileage']['object'];
+        $odometer_raw = $this->cart['odometer'] ?? null;
+        if ($odometer_raw !== null && $odometer_raw !== '') {
+            $mileage_label = intval($odometer_raw) . ' Mileage';
+        } else {
+            $mileage_label = '0 Mileage';
+        }
+        $mileage_upper = strtoupper($mileage_label);
+        if (isset($this->generated_attributes->attributes['mileage']['options'][$mileage_upper])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['mileage']['options'][$mileage_upper]
+            );
+        } else {
+            $new_mileage_term = wp_insert_term(
+                $mileage_label,
+                'pa_mileage',
+                ['slug' => sanitize_title($mileage_label)]
+            );
+            if (!is_wp_error($new_mileage_term)) {
+                $this->generated_attributes->attributes['mileage']['options'][$mileage_upper] = $new_mileage_term['term_id'];
+                array_push($this->taxonomy_terms, $new_mileage_term['term_id']);
+            }
+        }
+
         // Location – always assign both the state and city+state terms (with auto-creation)
         $this->attributes['pa_location'] = $this->generated_attributes->attributes['location']['object'];
         $loc_city  = Attributes::$locations[$this->location_id]['city'] ?? '';
