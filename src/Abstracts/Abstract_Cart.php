@@ -1222,7 +1222,7 @@ abstract class Abstract_Cart
                 }
             }
 
-            // Denago used products also get pa_denago-cart-colors (with auto-creation)
+            // Denago used products also get pa_denago-cart-colors and pa_denago-seat-colors (with auto-creation)
             if ($make_lower === 'denago') {
                 $this->attributes['pa_denago-cart-colors'] = $this->generated_attributes->attributes['denago-cart-colors']['object'];
                 $dn_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
@@ -1240,6 +1240,25 @@ abstract class Abstract_Cart
                     if (!is_wp_error($new_dn_term)) {
                         $this->generated_attributes->attributes['denago-cart-colors']['options'][$dn_color_upper] = $new_dn_term['term_id'];
                         array_push($this->taxonomy_terms, $new_dn_term['term_id']);
+                    }
+                }
+
+                $this->attributes['pa_denago-seat-colors'] = $this->generated_attributes->attributes['denago-seat-colors']['object'];
+                $dn_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['denago-seat-colors']['options'][$dn_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['denago-seat-colors']['options'][$dn_seat_upper]
+                    );
+                } else {
+                    $new_dn_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_denago-seat-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_dn_sc_term)) {
+                        $this->generated_attributes->attributes['denago-seat-colors']['options'][$dn_seat_upper] = $new_dn_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_dn_sc_term['term_id']);
                     }
                 }
             }
@@ -1267,11 +1286,11 @@ abstract class Abstract_Cart
             $this->attributes["pa_$make_lower-seat-colors"] = $this->generated_attributes->attributes[$make_lower . '-seat-colors']['object'];
             $make_seat_color_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
 
-            // Club Car: auto-create missing seat color terms
-            if ($make_lower === 'club-car' && !isset($this->generated_attributes->attributes[$make_lower . '-seat-colors']['options'][$make_seat_color_upper])) {
+            // Club Car / Denago: auto-create missing seat color terms
+            if (in_array($make_lower, ['club-car', 'denago']) && !isset($this->generated_attributes->attributes[$make_lower . '-seat-colors']['options'][$make_seat_color_upper])) {
                 $new_sc_term = wp_insert_term(
                     ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
-                    'pa_club-car-seat-colors',
+                    "pa_$make_lower-seat-colors",
                     ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
                 );
                 if (!is_wp_error($new_sc_term)) {
