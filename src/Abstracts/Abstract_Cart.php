@@ -1196,19 +1196,55 @@ abstract class Abstract_Cart
         }
 
         // LED Accents
-        if (strtoupper($this->make_with_symbol) == 'DENAGO®') {
-            $this->attributes['pa_led-accents'] = $this->generated_attributes->attributes['led-accents']['object'];
-            array_push(
-                $this->taxonomy_terms,
-                $this->generated_attributes->attributes['led-accents']['options']['YES'],
-                $this->generated_attributes->attributes['led-accents']['options']['LIGHT BAR']
-            );
+        $this->attributes['pa_led-accents'] = $this->generated_attributes->attributes['led-accents']['object'];
+        $led_raw = $this->cart['cartAttributes']['LEDs'] ?? null;
+        if (is_array($led_raw) && !empty($led_raw)) {
+            // Array of LED types from payload (e.g. ["Antennas", "Under Glow", "Wheel Rings"])
+            // Also push "Yes" since the product has LEDs
+            if (isset($this->generated_attributes->attributes['led-accents']['options']['YES'])) {
+                array_push($this->taxonomy_terms, $this->generated_attributes->attributes['led-accents']['options']['YES']);
+            }
+            foreach ($led_raw as $led_item) {
+                $led_item_upper = strtoupper($led_item);
+                if (isset($this->generated_attributes->attributes['led-accents']['options'][$led_item_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['led-accents']['options'][$led_item_upper]
+                    );
+                } else {
+                    $new_led_term = wp_insert_term(
+                        ucwords(strtolower($led_item)),
+                        'pa_led-accents',
+                        ['slug' => sanitize_title($led_item)]
+                    );
+                    if (!is_wp_error($new_led_term)) {
+                        $this->generated_attributes->attributes['led-accents']['options'][$led_item_upper] = $new_led_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_led_term['term_id']);
+                    }
+                }
+            }
+        } elseif ($led_raw && $led_raw !== true && is_string($led_raw)) {
+            // Single string value
+            $led_upper = strtoupper($led_raw);
+            if (isset($this->generated_attributes->attributes['led-accents']['options'][$led_upper])) {
+                array_push($this->taxonomy_terms, $this->generated_attributes->attributes['led-accents']['options'][$led_upper]);
+            } else {
+                $new_led_term = wp_insert_term(
+                    ucwords(strtolower($led_raw)),
+                    'pa_led-accents',
+                    ['slug' => sanitize_title($led_raw)]
+                );
+                if (!is_wp_error($new_led_term)) {
+                    $this->generated_attributes->attributes['led-accents']['options'][$led_upper] = $new_led_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_led_term['term_id']);
+                }
+            }
+        } elseif ($led_raw === true) {
+            // Boolean true – default to "Yes"
+            array_push($this->taxonomy_terms, $this->generated_attributes->attributes['led-accents']['options']['YES']);
         } else {
-            $this->attributes['pa_led-accents'] = $this->generated_attributes->attributes['led-accents']['object'];
-            array_push(
-                $this->taxonomy_terms,
-                $this->generated_attributes->attributes['led-accents']['options']['NO']
-            );
+            // No LEDs
+            array_push($this->taxonomy_terms, $this->generated_attributes->attributes['led-accents']['options']['NO']);
         }
 
         // Lift kit
