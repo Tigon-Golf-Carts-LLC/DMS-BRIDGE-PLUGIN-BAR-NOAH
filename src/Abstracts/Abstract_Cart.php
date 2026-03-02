@@ -1278,13 +1278,58 @@ abstract class Abstract_Cart
             }
         }
 
-        // Location
+        // Location – always assign both the state and city+state terms (with auto-creation)
         $this->attributes['pa_location'] = $this->generated_attributes->attributes['location']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['location']['options'][strtoupper(Attributes::$locations[$this->location_id]['city'] . ' ' . Attributes::$locations[$this->location_id]['state'])],
-            $this->generated_attributes->attributes['location']['options'][strtoupper(Attributes::$locations[$this->location_id]['state'])]
-        );
+        $loc_city  = Attributes::$locations[$this->location_id]['city'] ?? '';
+        $loc_state = Attributes::$locations[$this->location_id]['state'] ?? '';
+        $loc_state_upper = strtoupper($loc_state);
+        $loc_city_state  = $loc_city . ' ' . $loc_state;
+        $loc_city_state_upper = strtoupper($loc_city_state);
+
+        // State term
+        if (isset($this->generated_attributes->attributes['location']['options'][$loc_state_upper])) {
+            $state_term_id = $this->generated_attributes->attributes['location']['options'][$loc_state_upper];
+        } else {
+            $new_state_term = wp_insert_term(
+                ucwords(strtolower($loc_state)),
+                'pa_location',
+                ['slug' => sanitize_title($loc_state)]
+            );
+            if (!is_wp_error($new_state_term)) {
+                $state_term_id = $new_state_term['term_id'];
+                $this->generated_attributes->attributes['location']['options'][$loc_state_upper] = $state_term_id;
+            } else {
+                $state_term_id = null;
+            }
+        }
+
+        // City + State term (under parent state)
+        if (isset($this->generated_attributes->attributes['location']['options'][$loc_city_state_upper])) {
+            $city_term_id = $this->generated_attributes->attributes['location']['options'][$loc_city_state_upper];
+        } else {
+            $city_args = ['slug' => sanitize_title($loc_city_state)];
+            if ($state_term_id) {
+                $city_args['parent'] = $state_term_id;
+            }
+            $new_city_term = wp_insert_term(
+                ucwords(strtolower($loc_city_state)),
+                'pa_location',
+                $city_args
+            );
+            if (!is_wp_error($new_city_term)) {
+                $city_term_id = $new_city_term['term_id'];
+                $this->generated_attributes->attributes['location']['options'][$loc_city_state_upper] = $city_term_id;
+            } else {
+                $city_term_id = null;
+            }
+        }
+
+        if ($city_term_id) {
+            array_push($this->taxonomy_terms, $city_term_id);
+        }
+        if ($state_term_id) {
+            array_push($this->taxonomy_terms, $state_term_id);
+        }
 
         // Make Colors / Seat Colors
         $make_attrs = [
