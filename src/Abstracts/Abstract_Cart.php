@@ -1074,12 +1074,25 @@ abstract class Abstract_Cart
             );
         }
 
-        // Drivetrain
+        // Drivetrain — based on payload cartAttributes.driveTrain
         $this->attributes['pa_drivetrain'] = $this->generated_attributes->attributes['drivetrain']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['drivetrain']['options']['2X4']
-        );
+        $drivetrain_value = strtoupper($this->cart['cartAttributes']['driveTrain'] ?? '2X4');
+        if (isset($this->generated_attributes->attributes['drivetrain']['options'][$drivetrain_value])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['drivetrain']['options'][$drivetrain_value]
+            );
+        } else {
+            $new_dt_term = wp_insert_term(
+                strtoupper($this->cart['cartAttributes']['driveTrain']),
+                'pa_drivetrain',
+                ['slug' => sanitize_title($this->cart['cartAttributes']['driveTrain'])]
+            );
+            if (!is_wp_error($new_dt_term)) {
+                $this->generated_attributes->attributes['drivetrain']['options'][$drivetrain_value] = $new_dt_term['term_id'];
+                array_push($this->taxonomy_terms, $new_dt_term['term_id']);
+            }
+        }
 
         // Electric Bedlift
         $this->attributes['pa_electric-bed-lift'] = $this->generated_attributes->attributes['electric-bed-lift']['object'];
