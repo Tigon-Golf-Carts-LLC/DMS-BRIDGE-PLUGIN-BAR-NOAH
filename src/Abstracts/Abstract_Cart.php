@@ -1848,15 +1848,34 @@ abstract class Abstract_Cart
             )
         );
 
-        // Passengers
-        $attr_seats = $this->cart['cartAttributes']['passengers'] ?
-            $this->number_seats . ' SEATER' :
-            '';
+        // Passengers (with auto-creation)
+        if ($this->cart['cartAttributes']['passengers']) {
+            if ($this->cart['cartAttributes']['passengers'] == 'Utility') {
+                $attr_seats = 'U SEATER';
+            } else {
+                $attr_seats = $this->number_seats . ' SEATER';
+            }
+        } else {
+            $attr_seats = '';
+        }
         $this->attributes['pa_passengers'] = $this->generated_attributes->attributes['passengers']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['passengers']['options'][$attr_seats]
-        );
+        $attr_seats_upper = strtoupper($attr_seats);
+        if (isset($this->generated_attributes->attributes['passengers']['options'][$attr_seats_upper])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['passengers']['options'][$attr_seats_upper]
+            );
+        } elseif (!empty($attr_seats)) {
+            $new_passengers_term = wp_insert_term(
+                ucwords(strtolower($attr_seats)),
+                'pa_passengers',
+                ['slug' => sanitize_title($attr_seats)]
+            );
+            if (!is_wp_error($new_passengers_term)) {
+                $this->generated_attributes->attributes['passengers']['options'][$attr_seats_upper] = $new_passengers_term['term_id'];
+                array_push($this->taxonomy_terms, $new_passengers_term['term_id']);
+            }
+        }
 
         // Reciever Hitch
         $this->attributes['pa_receiver-hitch'] = $this->generated_attributes->attributes['receiver-hitch']['object'];
