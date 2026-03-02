@@ -1310,7 +1310,7 @@ abstract class Abstract_Cart
                 }
             }
 
-            // Epic used products also get pa_epic-cart-colors (with auto-creation)
+            // Epic used products also get pa_epic-cart-colors and pa_epic-seat-colors (with auto-creation)
             if ($make_lower === 'epic') {
                 $this->attributes['pa_epic-cart-colors'] = $this->generated_attributes->attributes['epic-cart-colors']['object'];
                 $epic_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
@@ -1328,6 +1328,25 @@ abstract class Abstract_Cart
                     if (!is_wp_error($new_epic_term)) {
                         $this->generated_attributes->attributes['epic-cart-colors']['options'][$epic_color_upper] = $new_epic_term['term_id'];
                         array_push($this->taxonomy_terms, $new_epic_term['term_id']);
+                    }
+                }
+
+                $this->attributes['pa_epic-seat-colors'] = $this->generated_attributes->attributes['epic-seat-colors']['object'];
+                $epic_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['epic-seat-colors']['options'][$epic_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['epic-seat-colors']['options'][$epic_seat_upper]
+                    );
+                } else {
+                    $new_epic_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_epic-seat-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_epic_sc_term)) {
+                        $this->generated_attributes->attributes['epic-seat-colors']['options'][$epic_seat_upper] = $new_epic_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_epic_sc_term['term_id']);
                     }
                 }
             }
