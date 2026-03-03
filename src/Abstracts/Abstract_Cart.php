@@ -1881,6 +1881,47 @@ abstract class Abstract_Cart
                     }
                 }
             }
+
+            // Swift used products also get pa_swift-cart-colors and pa_swift-seat-colors (with auto-creation)
+            if ($make_lower === 'swift') {
+                $this->attributes['pa_swift-cart-colors'] = $this->generated_attributes->attributes['swift-cart-colors']['object'];
+                $swift_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+                if (isset($this->generated_attributes->attributes['swift-cart-colors']['options'][$swift_color_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['swift-cart-colors']['options'][$swift_color_upper]
+                    );
+                } else {
+                    $new_swift_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                        'pa_swift-cart-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                    );
+                    if (!is_wp_error($new_swift_term)) {
+                        $this->generated_attributes->attributes['swift-cart-colors']['options'][$swift_color_upper] = $new_swift_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_swift_term['term_id']);
+                    }
+                }
+
+                $this->attributes['pa_swift-seat-colors'] = $this->generated_attributes->attributes['swift-seat-colors']['object'];
+                $swift_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['swift-seat-colors']['options'][$swift_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['swift-seat-colors']['options'][$swift_seat_upper]
+                    );
+                } else {
+                    $new_swift_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_swift-seat-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_swift_sc_term)) {
+                        $this->generated_attributes->attributes['swift-seat-colors']['options'][$swift_seat_upper] = $new_swift_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_swift_sc_term['term_id']);
+                    }
+                }
+            }
         } elseif (array_search($make_lower, $make_attrs) !== false) {
             // Navitas uses singular "cart-color" / "seat-color" instead of plural
             if ($make_lower === 'navitas') {
@@ -1925,8 +1966,8 @@ abstract class Abstract_Cart
                 $this->attributes["pa_$make_lower-cart-colors"] = $this->generated_attributes->attributes[$make_lower . '-cart-colors']['object'];
                 $make_cart_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
 
-                // Club Car / Denago / Epic / Evolution / EZGO / ICON / Polaris / Royal EV / Star EV: auto-create missing cart color terms
-                if (in_array($make_lower, ['club-car', 'denago', 'epic', 'evolution', 'ezgo', 'icon', 'polaris', 'royal-ev', 'star-ev']) && !isset($this->generated_attributes->attributes[$make_lower . '-cart-colors']['options'][$make_cart_color_upper])) {
+                // Club Car / Denago / Epic / Evolution / EZGO / ICON / Polaris / Royal EV / Star EV / Swift: auto-create missing cart color terms
+                if (in_array($make_lower, ['club-car', 'denago', 'epic', 'evolution', 'ezgo', 'icon', 'polaris', 'royal-ev', 'star-ev', 'swift']) && !isset($this->generated_attributes->attributes[$make_lower . '-cart-colors']['options'][$make_cart_color_upper])) {
                     $new_color_term = wp_insert_term(
                         ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
                         "pa_$make_lower-cart-colors",
@@ -1945,8 +1986,8 @@ abstract class Abstract_Cart
                 $this->attributes["pa_$make_lower-seat-colors"] = $this->generated_attributes->attributes[$make_lower . '-seat-colors']['object'];
                 $make_seat_color_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
 
-                // Club Car / Denago / Epic / Evolution / EZGO / ICON / Polaris / Royal EV / Star EV: auto-create missing seat color terms
-                if (in_array($make_lower, ['club-car', 'denago', 'epic', 'evolution', 'ezgo', 'icon', 'polaris', 'royal-ev', 'star-ev']) && !isset($this->generated_attributes->attributes[$make_lower . '-seat-colors']['options'][$make_seat_color_upper])) {
+                // Club Car / Denago / Epic / Evolution / EZGO / ICON / Polaris / Royal EV / Star EV / Swift: auto-create missing seat color terms
+                if (in_array($make_lower, ['club-car', 'denago', 'epic', 'evolution', 'ezgo', 'icon', 'polaris', 'royal-ev', 'star-ev', 'swift']) && !isset($this->generated_attributes->attributes[$make_lower . '-seat-colors']['options'][$make_seat_color_upper])) {
                     $new_sc_term = wp_insert_term(
                         ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
                         "pa_$make_lower-seat-colors",
