@@ -32,12 +32,19 @@ class Core
         // Enqueue scripts
         add_action('load-toplevel_page_tigon-dms-connect', 'Tigon\DmsConnect\Core::diagnostic_script_enqueue');
         add_action('load-tigon-dms-connect_page_settings', 'Tigon\DmsConnect\Core::settings_script_enqueue');
+        add_action('load-tigon-dms-connect_page_field-mapping', 'Tigon\DmsConnect\Core::field_mapping_script_enqueue');
 
         // Register Ajax functions
         add_action('wp_ajax_tigon_dms_save_settings', 'Tigon\DmsConnect\Admin\Ajax_Settings_Controller::save_settings');
         add_action('wp_ajax_tigon_dms_get_dms_props', 'Tigon\DmsConnect\Admin\Ajax_Settings_Controller::get_dms_props');
         add_action('wp_ajax_tigon_dms_get_full_schema', 'Tigon\DmsConnect\Admin\Ajax_Settings_Controller::get_full_schema');
         add_action('wp_ajax_tigon_dms_sync_mapped', 'Tigon\DmsConnect\Core::ajax_sync_mapped_inventory');
+
+        // Field mapping AJAX handlers
+        add_action('wp_ajax_tigon_dms_get_field_mappings', 'Tigon\DmsConnect\Core::ajax_get_field_mappings');
+        add_action('wp_ajax_tigon_dms_save_field_mapping', 'Tigon\DmsConnect\Core::ajax_save_field_mapping');
+        add_action('wp_ajax_tigon_dms_delete_field_mapping', 'Tigon\DmsConnect\Core::ajax_delete_field_mapping');
+        add_action('wp_ajax_tigon_dms_get_mapping_meta', 'Tigon\DmsConnect\Core::ajax_get_mapping_meta');
 
         // Add admin page
         add_action('admin_menu', 'Tigon\DmsConnect\Admin\Admin_Page::add_menu_page');
@@ -134,6 +141,23 @@ class Core
         wp_enqueue_script('@tigon-dms/globals');
         wp_enqueue_script('jquery');
         wp_enqueue_script_module('@tigon-dms/settings');
+    }
+
+    /**
+     * Enqueue scripts for the Field Mapping admin page.
+     */
+    public static function field_mapping_script_enqueue()
+    {
+        $js_url = self::asset_url();
+        wp_register_script('@tigon-dms/globals', $js_url . 'globals.js');
+
+        wp_localize_script('@tigon-dms/globals', 'globals', [
+            'ajaxurl' => admin_url('admin-ajax.php'),
+            'siteurl' => get_site_url(),
+        ]);
+
+        wp_enqueue_script('@tigon-dms/globals');
+        wp_enqueue_script('jquery');
     }
 
     /**
@@ -280,6 +304,9 @@ class Core
 
         dbDelta($sql);
         ob_end_clean();
+
+        // Create field mappings table
+        \Tigon\DmsConnect\Admin\Field_Mapping::install();
 
         $github_token = $wpdb->get_var("SELECT option_name FROM $table_name WHERE option_name = 'github_token'");
         if($github_token === null) $wpdb->insert(
@@ -495,6 +522,108 @@ class Core
         }
 
         wp_send_json_success($stats);
+    }
+
+    // ------------------------------------------------------------------
+    //  Field Mapping AJAX handlers
+    // ------------------------------------------------------------------
+
+    /**
+     * AJAX: Return all field mappings + known field lists for the UI.
+     */
+    public static function ajax_get_field_mappings()
+    {
+        check_ajax_referer('tigon_dms_field_mapping_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
+        wp_send_json_success([
+            'mappings'    => \Tigon\DmsConnect\Admin\Field_Mapping::get_all(),
+            'dms_fields'  => \Tigon\DmsConnect\Admin\Field_Mapping::get_known_dms_fields(),
+            'woo_targets' => \Tigon\DmsConnect\Admin\Field_Mapping::get_known_woo_targets(),
+        ]);
+    }
+
+    /**
+     * AJAX: Insert or update a single field mapping.
+     */
+    public static function ajax_save_field_mapping()
+    {
+        check_ajax_referer('tigon_dms_field_mapping_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
+        $mapping_id = intval($_POST['mapping_id'] ?? 0);
+        $row = [
+            'dms_path'      => sanitize_text_field($_POST['dms_path'] ?? ''),
+            'woo_target'    => sanitize_text_field($_POST['woo_target'] ?? ''),
+            'target_type'   => sanitize_text_field($_POST['target_type'] ?? 'postmeta'),
+            'transform'     => sanitize_text_field($_POST['transform'] ?? 'direct'),
+            'transform_cfg' => wp_kses_post($_POST['transform_cfg'] ?? ''),
+            'is_enabled'    => intval($_POST['is_enabled'] ?? 1),
+            'sort_order'    => intval($_POST['sort_order'] ?? 0),
+        ];
+
+        if ($mapping_id > 0) {
+            $ok = \Tigon\DmsConnect\Admin\Field_Mapping::update($mapping_id, $row);
+            wp_send_json_success(['updated' => $ok, 'mapping_id' => $mapping_id]);
+        } else {
+            $new_id = \Tigon\DmsConnect\Admin\Field_Mapping::insert($row);
+            if ($new_id) {
+                wp_send_json_success(['mapping_id' => $new_id]);
+            } else {
+                wp_send_json_error('Failed to insert mapping');
+            }
+        }
+    }
+
+    /**
+     * AJAX: Delete a single field mapping.
+     */
+    public static function ajax_delete_field_mapping()
+    {
+        check_ajax_referer('tigon_dms_field_mapping_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
+        $mapping_id = intval($_POST['mapping_id'] ?? 0);
+        if ($mapping_id <= 0) {
+            wp_send_json_error('Invalid mapping ID');
+        }
+
+        $ok = \Tigon\DmsConnect\Admin\Field_Mapping::delete($mapping_id);
+        wp_send_json_success(['deleted' => $ok]);
+    }
+
+    /**
+     * AJAX: Return the known DMS fields and WooCommerce targets for dropdowns.
+     */
+    public static function ajax_get_mapping_meta()
+    {
+        check_ajax_referer('tigon_dms_field_mapping_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
+        wp_send_json_success([
+            'dms_fields'  => \Tigon\DmsConnect\Admin\Field_Mapping::get_known_dms_fields(),
+            'woo_targets' => \Tigon\DmsConnect\Admin\Field_Mapping::get_known_woo_targets(),
+            'transforms'  => [
+                'direct'        => 'Direct (pass-through)',
+                'uppercase'     => 'UPPERCASE',
+                'lowercase'     => 'lowercase',
+                'ucwords'       => 'Ucwords (Title Case)',
+                'boolean_yesno' => 'Boolean → Yes/No',
+                'boolean_label' => 'Boolean → Custom Labels',
+                'prefix'        => 'Prefix (prepend text)',
+                'suffix'        => 'Suffix (append text)',
+                'template'      => 'Template ({value} placeholder)',
+                'static'        => 'Static Value (ignore DMS field)',
+            ],
+        ]);
     }
 
     // Deactivation Hook

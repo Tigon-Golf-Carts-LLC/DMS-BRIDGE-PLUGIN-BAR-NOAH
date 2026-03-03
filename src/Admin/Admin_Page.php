@@ -2789,13 +2789,18 @@ class Admin_Page
         echo '
         <div class="body" style="display:flex; flex-direction:column;">
             <div class="tabbed-panel">
-                <div class="tigon-dms-nav" style="flex-direction:row;">
-                    <button class="tigon-dms-tab active" id="general-tab">General</button>
+                <div class="tigon-dms-nav">
+                    <button class="tigon-dms-tab" id="general-tab">General</button>
+                    <button class="tigon-dms-tab" id="urls-tab">DMS API &amp; S3</button>
+                    <button class="tigon-dms-tab" id="endpoints-tab">REST Endpoints</button>
                     <button class="tigon-dms-tab" id="schema-tab">Schema</button>
                 </div>
 
-                <div class="action-box" id="general">
-                    <h3>General Configuration</h3>
+                <div class="action-box settings-panel" id="general">
+                    <div class="settings-panel-header">
+                        <h3>General Configuration</h3>
+                        <p>Configure your DMS API connection and authentication credentials.</p>
+                    </div>
                     <div class="settings form">
                         <div>
                             <span>GitHub Access Token:</span>
@@ -2814,14 +2819,15 @@ class Admin_Page
                             <input type="text" style="float:right" id="txt-file-source" placeholder="' . $file_source . '"></textarea>
                         </div>
                     </div>
-                    <a id="save" class="tigon_dms_action tigon_dms_save" data-nonce="' . $nonce . '"><button>Save Settings</button></a>
+                    <a class="tigon_dms_action tigon_dms_save" data-nonce="' . $nonce . '"><button>Save Settings</button></a>
+                </div>
 
-                    <hr style="margin:2.5rem 0; border:none; border-top:1px solid #ddd;" />
-
-                    <h3 style="margin:0 0 0.5rem 0;">DMS API &amp; S3 URLs</h3>
-                    <p style="font-size:0.85rem; color:#666; margin:0 0 1rem 0;">Production API endpoints and S3 bucket prefixes used by this plugin to fetch inventory data and assets.</p>
-
-                    <div class="settings form" style="gap:0.6rem;">
+                <div class="action-box settings-panel" id="urls">
+                    <div class="settings-panel-header">
+                        <h3>DMS API &amp; S3 URLs</h3>
+                        <p>Production API endpoints and S3 bucket prefixes used by this plugin to fetch inventory data and assets.</p>
+                    </div>
+                    <div class="settings-panel-body">
                         <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
                             <span style="min-width:200px; font-weight:600; font-size:0.85rem;">API Base URL:</span>
                             <code id="url-api-base" style="background:#f0f4f8; padding:0.35rem 0.7rem; border-radius:4px; font-size:0.82rem; word-break:break-all; flex:1; border:1px solid #d0d5dd;">https://api.tigondms.com/wp-website</code>
@@ -2867,13 +2873,14 @@ class Admin_Page
                             S3 prefix for cart product images displayed on the website.
                         </div>
                     </div>
+                </div>
 
-                    <hr style="margin:2.5rem 0; border:none; border-top:1px solid #ddd;" />
-
-                    <h3 style="margin:0 0 0.5rem 0;">REST API Endpoints</h3>
-                    <p style="font-size:0.85rem; color:#666; margin:0 0 1rem 0;">These are the endpoint addresses the DMS uses to push data to this site. All endpoints require authentication (WordPress application password or logged-in admin session).</p>
-
-                    <div class="settings form" style="gap:0.6rem;">
+                <div class="action-box settings-panel" id="endpoints">
+                    <div class="settings-panel-header">
+                        <h3>REST API Endpoints</h3>
+                        <p>These are the endpoint addresses the DMS uses to push data to this site. All endpoints require authentication (WordPress application password or logged-in admin session).</p>
+                    </div>
+                    <div class="settings-panel-body">
                         <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
                             <span style="min-width:160px; font-weight:600; font-size:0.85rem;">Single Cart Push:</span>
                             <code id="endpoint-push" style="background:#f0f4f8; padding:0.35rem 0.7rem; border-radius:4px; font-size:0.82rem; word-break:break-all; flex:1; border:1px solid #d0d5dd;">' . esc_html(rest_url('tigon-dms-connect/v1/push')) . '</code>
@@ -2921,11 +2928,11 @@ class Admin_Page
                     </div>
                 </div>
 
-                <div class="action-box" id="schema">
-                    <h3>Full Payload Schema</h3>
-                    <p style="font-size:0.85rem; color:#666; margin:0 0 1rem 0;">
-                        Fetches active inventory from the DMS API (<code style="background:#f0f4f8; padding:0.15rem 0.4rem; border-radius:3px; font-size:0.8rem;">pageNumber: 0, pageSize: 20</code>) and merges all fields into one unified schema showing every key, its type, and all observed values.
-                    </p>
+                <div class="action-box settings-panel" id="schema">
+                    <div class="settings-panel-header">
+                        <h3>Full Payload Schema</h3>
+                        <p>Fetches active inventory from the DMS API (<code>pageNumber: 0, pageSize: 20</code>) and merges all fields into one unified schema showing every key, its type, and all observed values.</p>
+                    </div>
 
                     <div style="display:flex; align-items:center; gap:1rem; margin-bottom:1.5rem;">
                         <button type="button" id="fetch-schema-btn">Fetch Schema</button>

@@ -584,13 +584,13 @@ abstract class Abstract_Cart
      * @return void
      */
     protected function generate_location_data() {
-        $this->location_id = $this->cart['cartLocation']['locationId'];
-        if($this->location_id === "Other") {
+        $this->location_id = $this->cart['cartLocation']['locationId'] ?? null;
+        if($this->location_id === null || $this->location_id === "Other") {
             $this->location_id = $this->cart['cartLocation']['latestStoreId'] ?? 'T1';
         }
 
         // Use get_location() which checks hardcoded array first, then falls back to API
-        $loc = Attributes::get_location($this->location_id);
+        $loc = Attributes::get_location((string) $this->location_id);
 
         // Fallback to T1 only if API lookup also fails
         if (!$loc) {
@@ -3438,7 +3438,9 @@ abstract class Abstract_Cart
         $this->published = "publish"; //publish, pending, protected, draft
         $this->comment_status = 'open';
         $this->ping_status = 'closed';
-        $this->menu_order = '0';
+        // Push carts without real images to the back of the store (menu_order 30)
+        $has_real_images = !empty($this->cart['imageUrls']);
+        $this->menu_order = $has_real_images ? '0' : '30';
         $this->comment_count = '0';
         $this->post_author = '3';
 
