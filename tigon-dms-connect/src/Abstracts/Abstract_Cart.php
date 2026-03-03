@@ -1818,7 +1818,9 @@ abstract class Abstract_Cart
         $this->published = "publish"; //publish, pending, protected, draft
         $this->comment_status = 'open';
         $this->ping_status = 'closed';
-        $this->menu_order = '0';
+        // Push carts without real images to the back of the store (menu_order 30)
+        $has_real_images = !empty($this->cart['imageUrls']);
+        $this->menu_order = $has_real_images ? '0' : '30';
         $this->comment_count = '0';
         $this->post_author = '3';
 
