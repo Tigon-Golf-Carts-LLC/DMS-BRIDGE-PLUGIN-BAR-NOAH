@@ -2024,14 +2024,27 @@ abstract class Abstract_Cart
             }
         }
 
-        // Shipping
+        // Shipping (all products get all three options, with auto-creation)
         $this->attributes['pa_shipping'] = $this->generated_attributes->attributes['shipping']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['shipping']['options']['1 TO 3 DAYS LOCAL'],
-            $this->generated_attributes->attributes['shipping']['options']['3 TO 7 DAYS OTR'],
-            $this->generated_attributes->attributes['shipping']['options']['5 TO 9 DAYS NATIONAL']
-        );
+        $shipping_values = ['1 TO 3 DAYS LOCAL', '3 TO 7 DAYS OTR', '5 TO 9 DAYS NATIONAL'];
+        foreach ($shipping_values as $shipping_val) {
+            if (isset($this->generated_attributes->attributes['shipping']['options'][$shipping_val])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes['shipping']['options'][$shipping_val]
+                );
+            } else {
+                $new_shipping_term = wp_insert_term(
+                    $shipping_val,
+                    'pa_shipping',
+                    ['slug' => sanitize_title($shipping_val)]
+                );
+                if (!is_wp_error($new_shipping_term)) {
+                    $this->generated_attributes->attributes['shipping']['options'][$shipping_val] = $new_shipping_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_shipping_term['term_id']);
+                }
+            }
+        }
         // // TODO - Model Specific
         // // Side Step
         // if ($this->cart['cartAttributes']['sideStep']) {
