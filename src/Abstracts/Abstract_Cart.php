@@ -1841,7 +1841,7 @@ abstract class Abstract_Cart
                 }
             }
 
-            // Star EV used products also get pa_star-ev-cart-colors (with auto-creation)
+            // Star EV used products also get pa_star-ev-cart-colors and pa_star-ev-seat-colors (with auto-creation)
             if ($make_lower === 'star-ev') {
                 $this->attributes['pa_star-ev-cart-colors'] = $this->generated_attributes->attributes['star-ev-cart-colors']['object'];
                 $sev_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
@@ -1859,6 +1859,25 @@ abstract class Abstract_Cart
                     if (!is_wp_error($new_sev_term)) {
                         $this->generated_attributes->attributes['star-ev-cart-colors']['options'][$sev_color_upper] = $new_sev_term['term_id'];
                         array_push($this->taxonomy_terms, $new_sev_term['term_id']);
+                    }
+                }
+
+                $this->attributes['pa_star-ev-seat-colors'] = $this->generated_attributes->attributes['star-ev-seat-colors']['object'];
+                $sev_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['star-ev-seat-colors']['options'][$sev_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['star-ev-seat-colors']['options'][$sev_seat_upper]
+                    );
+                } else {
+                    $new_sev_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_star-ev-seat-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_sev_sc_term)) {
+                        $this->generated_attributes->attributes['star-ev-seat-colors']['options'][$sev_seat_upper] = $new_sev_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_sev_sc_term['term_id']);
                     }
                 }
             }
