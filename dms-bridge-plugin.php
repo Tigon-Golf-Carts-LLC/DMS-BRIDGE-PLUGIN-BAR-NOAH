@@ -1003,15 +1003,20 @@ function tigon_dms_create_woo_product($cart_id, $title, $price, $cart_data, $spe
         update_post_meta($product_id, '_sku', sanitize_text_field($sku));
     }
 
-    // Price fields for WooCommerce compatibility
-    update_post_meta($product_id, '_regular_price', floatval($price));
-    update_post_meta($product_id, '_price', floatval($price));
+    // Price fields for WooCommerce compatibility (only set if valid price)
+    if (!empty($price) && floatval($price) > 0) {
+        update_post_meta($product_id, '_regular_price', floatval($price));
+        update_post_meta($product_id, '_price', floatval($price));
 
-    // Sale price
-    $sale_price = $cart_data['salePrice'] ?? '';
-    if (!empty($sale_price) && floatval($sale_price) > 0 && floatval($sale_price) < floatval($price)) {
-        update_post_meta($product_id, '_sale_price', floatval($sale_price));
-        update_post_meta($product_id, '_price', floatval($sale_price));
+        // Sale price
+        $sale_price = $cart_data['salePrice'] ?? '';
+        if (!empty($sale_price) && floatval($sale_price) > 0 && floatval($sale_price) < floatval($price)) {
+            update_post_meta($product_id, '_sale_price', floatval($sale_price));
+            update_post_meta($product_id, '_price', floatval($sale_price));
+        }
+    } else {
+        // Log warning for products with no valid price
+        error_log('DMS Sync: Product ' . $product_id . ' (cart ' . $cart_id . ') has no valid retailPrice: ' . var_export($price, true));
     }
     
     // Enable shipping (not virtual)
@@ -1096,22 +1101,72 @@ function tigon_dms_update_woo_product($product_id, $title, $price, $cart_data, $
         'post_status' => 'publish',
     ));
     
-    // Update price
-    update_post_meta($product_id, '_regular_price', floatval($price));
-    update_post_meta($product_id, '_price', floatval($price));
+    // Extract data from cart
+    $make = $cart_data['cartType']['make'] ?? '';
+    $model = $cart_data['cartType']['model'] ?? '';
+    $store_id = $cart_data['cartLocation']['locationId'] ?? '';
 
-    // Sale price
-    $sale_price = $cart_data['salePrice'] ?? '';
-    if (!empty($sale_price) && floatval($sale_price) > 0 && floatval($sale_price) < floatval($price)) {
-        update_post_meta($product_id, '_sale_price', floatval($sale_price));
-        update_post_meta($product_id, '_price', floatval($sale_price));
-    } else {
-        delete_post_meta($product_id, '_sale_price');
+    // Update price (only if retailPrice is valid)
+    if (!empty($price) && floatval($price) > 0) {
+        update_post_meta($product_id, '_regular_price', floatval($price));
+        update_post_meta($product_id, '_price', floatval($price));
+
+        // Sale price
+        $sale_price = $cart_data['salePrice'] ?? '';
+        if (!empty($sale_price) && floatval($sale_price) > 0 && floatval($sale_price) < floatval($price)) {
+            update_post_meta($product_id, '_sale_price', floatval($sale_price));
+            update_post_meta($product_id, '_price', floatval($sale_price));
+        } else {
+            delete_post_meta($product_id, '_sale_price');
+        }
     }
+
+    // SKU (VIN > Serial > Generated fallback) — keep in sync on updates
+    $sku = '';
+    if (!empty($cart_data['vinNo'])) {
+        $sku = $cart_data['vinNo'];
+    } elseif (!empty($cart_data['serialNo'])) {
+        $sku = $cart_data['serialNo'];
+    } else {
+        $fallback_city = '';
+        if (!empty($store_id)) {
+            $fb_store_data = DMS_API::get_city_and_state_by_store_id($store_id);
+            $fallback_city = $fb_store_data['city'] ?? '';
+        }
+        $sku = strtoupper(
+            substr(preg_replace('/\s/', '', $make), 0, 3) .
+            substr(preg_replace('/\s/', '', $model), 0, 3) .
+            substr(preg_replace('/\s/', '', $cart_data['cartAttributes']['cartColor'] ?? ''), 0, 3) .
+            substr(preg_replace('/\s/', '', $cart_data['cartAttributes']['seatColor'] ?? ''), 0, 3) .
+            substr(preg_replace('/\s/', '', $fallback_city), 0, 3)
+        );
+    }
+    if (!empty($sku)) {
+        update_post_meta($product_id, '_sku', sanitize_text_field($sku));
+    }
+
+    // Global Unique ID (GUI) — algorithmic trade ID from SKU
+    $gui = tigon_dms_compute_gui($sku);
+    update_post_meta($product_id, '_global_unique_id', $gui);
+
+    // WooCommerce core product meta
+    update_post_meta($product_id, '_virtual', 'no');
+    update_post_meta($product_id, '_downloadable', 'no');
+    update_post_meta($product_id, '_weight', '500');
+    update_post_meta($product_id, '_length', '96');
+    update_post_meta($product_id, '_width', '48');
+    update_post_meta($product_id, '_height', '72');
+    update_post_meta($product_id, '_manage_stock', 'no');
+    update_post_meta($product_id, '_stock_status', 'instock');
+    update_post_meta($product_id, '_visibility', 'visible');
+    update_post_meta($product_id, '_sold_individually', 'yes');
+    update_post_meta($product_id, '_backorders', 'no');
+    update_post_meta($product_id, '_download_limit', '-1');
+    update_post_meta($product_id, '_download_expiry', '-1');
 
     // Update DMS payload
     update_post_meta($product_id, '_dms_payload', wp_json_encode($cart_data));
-    
+
     // Update parsed DMS cart data in structured meta
     update_post_meta($product_id, '_dms_cart_specs', $specs);
     update_post_meta($product_id, '_dms_cart_images', $images);
@@ -2332,6 +2387,7 @@ function tigon_dms_assign_custom_taxonomies($product_id, $cart_data) {
     $has_sound     = !empty($cart_data['cartAttributes']['hasSoundSystem']);
     $store_id      = $cart_data['cartLocation']['locationId'] ?? '';
     $is_rental     = !empty($cart_data['isRental']);
+    $rim_size      = $cart_data['cartAttributes']['tireRimSize'] ?? '';
 
     $make_symbol = tigon_dms_get_make_with_symbol($make);
 
@@ -2852,6 +2908,271 @@ function tigon_dms_set_product_fields_meta($product_id, $cart_data) {
     $options_meta = tigon_dms_build_custom_options($cart_data);
     if (!empty($options_meta)) {
         update_post_meta($product_id, '_wcpa_product_meta', $options_meta);
+    }
+
+    // ---------------------------------------------------------------
+    // 11. Custom product meta fields (from DMS payload)
+    //     Maps API fields to WooCommerce custom meta keys used by
+    //     the theme, SASWP schema, Google/Facebook feeds, and filters.
+    // ---------------------------------------------------------------
+    $year        = $cart_data['cartType']['year'] ?? '';
+    $seat_color  = $cart_data['cartAttributes']['seatColor'] ?? '';
+    $passengers  = $cart_data['cartAttributes']['passengers'] ?? '';
+    $drivetrain  = $cart_data['cartAttributes']['driveTrain'] ?? '2X4';
+    $is_electric = !empty($cart_data['isElectric']);
+    $is_lifted   = !empty($cart_data['cartAttributes']['isLifted']);
+    $vin_no      = $cart_data['vinNo'] ?? '';
+    $serial_no   = $cart_data['serialNo'] ?? '';
+    $mileage     = $cart_data['mileage'] ?? '';
+    $voltage     = $cart_data['battery']['packVoltage'] ?? '';
+
+    // Year — both prefixed and non-prefixed (used by different theme templates)
+    if (!empty($year)) {
+        update_post_meta($product_id, '_year', sanitize_text_field($year));
+        update_post_meta($product_id, 'year', sanitize_text_field($year));
+    }
+
+    // Model — both prefixed and non-prefixed
+    if (!empty($model)) {
+        update_post_meta($product_id, '_model', sanitize_text_field($model));
+        update_post_meta($product_id, 'model', sanitize_text_field($model));
+    }
+
+    // Brand / Make — both prefixed and non-prefixed
+    if (!empty($make_symbol)) {
+        update_post_meta($product_id, '_brand', sanitize_text_field($make_symbol));
+        update_post_meta($product_id, 'brand', sanitize_text_field($make_symbol));
+    }
+
+    // Cart Color — both prefixed and non-prefixed
+    if (!empty($color)) {
+        update_post_meta($product_id, '_color', sanitize_text_field($color));
+        update_post_meta($product_id, 'color', sanitize_text_field($color));
+    }
+
+    // Seat Color — both prefixed and non-prefixed
+    if (!empty($seat_color)) {
+        update_post_meta($product_id, '_seat_color', sanitize_text_field($seat_color));
+        update_post_meta($product_id, 'seat_color', sanitize_text_field($seat_color));
+    }
+
+    // Power Source — both prefixed and non-prefixed
+    $power_source = $is_electric ? 'Electric' : 'Gas';
+    update_post_meta($product_id, '_power_source', sanitize_text_field($power_source));
+    update_post_meta($product_id, 'power_source', sanitize_text_field($power_source));
+
+    // Voltage — both prefixed and non-prefixed (electric only)
+    if ($is_electric && !empty($voltage)) {
+        update_post_meta($product_id, '_voltage', sanitize_text_field($voltage));
+        update_post_meta($product_id, 'voltage', sanitize_text_field($voltage));
+    }
+
+    // Seats/Passengers — both prefixed and non-prefixed
+    if (!empty($passengers)) {
+        $num_seats = ($passengers === 'Utility') ? '2' : explode(' ', $passengers)[0];
+        update_post_meta($product_id, '_seats', sanitize_text_field($num_seats));
+        update_post_meta($product_id, 'seats', sanitize_text_field($num_seats));
+    }
+
+    // Mileage — both prefixed and non-prefixed (used vehicles)
+    if (!empty($mileage)) {
+        update_post_meta($product_id, '_mileage', sanitize_text_field($mileage));
+        update_post_meta($product_id, 'mileage', sanitize_text_field($mileage));
+    }
+
+    // Lifted — both prefixed and non-prefixed
+    $lifted_val = $is_lifted ? 'Yes' : 'No';
+    update_post_meta($product_id, '_lifted', sanitize_text_field($lifted_val));
+    update_post_meta($product_id, 'lifted', sanitize_text_field($lifted_val));
+
+    // Drivetrain — both prefixed and non-prefixed
+    if (!empty($drivetrain)) {
+        update_post_meta($product_id, '_drivetrain', sanitize_text_field(strtoupper($drivetrain)));
+        update_post_meta($product_id, 'drivetrain', sanitize_text_field(strtoupper($drivetrain)));
+    }
+
+    // VIN# — both prefixed and non-prefixed
+    if (!empty($vin_no)) {
+        update_post_meta($product_id, '_vin#', sanitize_text_field($vin_no));
+        update_post_meta($product_id, 'vin#', sanitize_text_field($vin_no));
+    }
+
+    // Extra product code (serial number as secondary identifier)
+    if (!empty($serial_no)) {
+        update_post_meta($product_id, '_extra-product-code', sanitize_text_field($serial_no));
+        update_post_meta($product_id, 'extra-product-code', sanitize_text_field($serial_no));
+    }
+
+    // ---------------------------------------------------------------
+    // 12. Facebook for WooCommerce — additional catalog attributes
+    // ---------------------------------------------------------------
+    update_post_meta($product_id, '_wc_facebook_enhanced_catalog_attributes_material', 'Composite');
+    if (!empty($make_symbol)) {
+        update_post_meta($product_id, '_wc_facebook_enhanced_catalog_attributes_mpn', sanitize_text_field($make_symbol . ' ' . $model));
+    }
+    if (!empty($passengers)) {
+        $num_seats = ($passengers === 'Utility') ? '2' : explode(' ', $passengers)[0];
+        update_post_meta($product_id, '_wc_facebook_enhanced_catalog_attributes_size', $num_seats . ' Seater');
+    }
+    update_post_meta($product_id, '_wc_facebook_google_product_category', 'Vehicles & Parts > Vehicles > Motor Vehicles > Golf Carts');
+    update_post_meta($product_id, '_wc_facebook_commerce_enabled', 'yes');
+
+    // ---------------------------------------------------------------
+    // 13. Google for WooCommerce — ensure all fields set
+    // ---------------------------------------------------------------
+    update_post_meta($product_id, '_wc_gla_gtin', '');
+    update_post_meta($product_id, '_wc_gla_visibility', 'sync-and-show');
+    update_post_meta($product_id, '_wc_gla_sync_status', '');
+
+    // ---------------------------------------------------------------
+    // 14. Facebook product feed — legacy fields
+    // ---------------------------------------------------------------
+    if (!empty($make_symbol)) {
+        update_post_meta($product_id, 'fb_brand', sanitize_text_field(strtoupper($make_symbol)));
+    }
+    if (!empty($color)) {
+        update_post_meta($product_id, 'fb_color', sanitize_text_field(strtoupper($color)));
+    }
+    update_post_meta($product_id, 'fb_product_condition', $is_used ? 'used' : 'new');
+    update_post_meta($product_id, 'fb_gender', 'unisex');
+    update_post_meta($product_id, 'fb_age_group', 'all ages');
+    if (!empty($model)) {
+        update_post_meta($product_id, 'fb_pattern', sanitize_text_field($model));
+    }
+    update_post_meta($product_id, 'fb_material', 'Composite');
+    update_post_meta($product_id, 'fb_sync_enabled', 'yes');
+    update_post_meta($product_id, 'fb_visibility', 'yes');
+
+    // ---------------------------------------------------------------
+    // 15. Yoast SEO — primary terms for all registered taxonomies
+    // ---------------------------------------------------------------
+    if ($yoast_active) {
+        $yoast_attrs = tigon_dms_get_attributes_instance();
+
+        // Primary drivetrain
+        if (!empty($drivetrain) && taxonomy_exists('drivetrain')) {
+            $dt_term_id = null;
+            if ($yoast_attrs && !empty($yoast_attrs->drivetrains_taxonomy)) {
+                $dt_term_id = $yoast_attrs->drivetrains_taxonomy[strtoupper($drivetrain)] ?? null;
+            }
+            if (!$dt_term_id) {
+                $dt_term = get_term_by('name', strtoupper($drivetrain), 'drivetrain');
+                if (!$dt_term) $dt_term = get_term_by('slug', sanitize_title($drivetrain), 'drivetrain');
+                if ($dt_term && !is_wp_error($dt_term)) $dt_term_id = $dt_term->term_id;
+            }
+            if ($dt_term_id) {
+                update_post_meta($product_id, '_yoast_wpseo_primary_drivetrain', $dt_term_id);
+            }
+        }
+
+        // Primary vehicle-class
+        if (taxonomy_exists('vehicle-class')) {
+            $vc_term_id = null;
+            if ($yoast_attrs && !empty($yoast_attrs->vehicle_classes_taxonomy)) {
+                $vc_term_id = $yoast_attrs->vehicle_classes_taxonomy['GOLF CART'] ?? null;
+            }
+            if (!$vc_term_id) {
+                $vc_term = get_term_by('name', 'GOLF CART', 'vehicle-class');
+                if (!$vc_term) $vc_term = get_term_by('slug', 'golf-cart', 'vehicle-class');
+                if ($vc_term && !is_wp_error($vc_term)) $vc_term_id = $vc_term->term_id;
+            }
+            if ($vc_term_id) {
+                update_post_meta($product_id, '_yoast_wpseo_primary_vehicle-class', $vc_term_id);
+            }
+        }
+
+        // Primary inventory-status
+        if (taxonomy_exists('inventory-status')) {
+            $is_rental = !empty($cart_data['isRental']);
+            if ($is_rental) {
+                $inv_name = $is_used ? 'LOCAL USED RENTAL INVENTORY' : 'LOCAL NEW RENTAL INVENTORY';
+            } else {
+                $inv_name = $is_used ? 'LOCAL USED ACTIVE INVENTORY' : 'LOCAL NEW ACTIVE INVENTORY';
+            }
+            $inv_term_id = null;
+            if ($yoast_attrs && !empty($yoast_attrs->inventory_status_taxonomy)) {
+                $inv_term_id = $yoast_attrs->inventory_status_taxonomy[strtoupper($inv_name)] ?? null;
+            }
+            if (!$inv_term_id) {
+                $inv_term = get_term_by('name', $inv_name, 'inventory-status');
+                if (!$inv_term) $inv_term = get_term_by('slug', sanitize_title($inv_name), 'inventory-status');
+                if ($inv_term && !is_wp_error($inv_term)) $inv_term_id = $inv_term->term_id;
+            }
+            if ($inv_term_id) {
+                update_post_meta($product_id, '_yoast_wpseo_primary_inventory-status', $inv_term_id);
+            }
+        }
+
+        // Primary manufacturers
+        if (!empty($make) && taxonomy_exists('manufacturers')) {
+            $mfg_name = strtoupper($make_symbol);
+            if ($mfg_name === 'SWIFT EV®') $mfg_name = 'SWIFT®';
+            elseif ($mfg_name === 'STAR®') $mfg_name = 'STAR EV®';
+            $mfg_term_id = null;
+            if ($yoast_attrs && !empty($yoast_attrs->manufacturers_taxonomy)) {
+                $mfg_term_id = $yoast_attrs->manufacturers_taxonomy[$mfg_name] ?? null;
+            }
+            if (!$mfg_term_id) {
+                $mfg_term = get_term_by('name', $mfg_name, 'manufacturers');
+                if ($mfg_term && !is_wp_error($mfg_term)) {
+                    $mfg_term_id = $mfg_term->term_id;
+                }
+            }
+            if ($mfg_term_id) {
+                update_post_meta($product_id, '_yoast_wpseo_primary_manufacturers', $mfg_term_id);
+            }
+        }
+
+        // Primary sound-systems
+        if (taxonomy_exists('sound-systems')) {
+            $has_sound = !empty($cart_data['cartAttributes']['hasSoundSystem']);
+            if ($has_sound) {
+                $sound_name = strtoupper($make_symbol) . ' SOUND SYSTEM';
+            } else {
+                $sound_name = 'NO SOUND SYSTEM';
+            }
+            $ss_term_id = null;
+            if ($yoast_attrs && !empty($yoast_attrs->sound_systems_taxonomy)) {
+                $ss_term_id = $yoast_attrs->sound_systems_taxonomy[$sound_name] ?? null;
+            }
+            if (!$ss_term_id) {
+                $ss_term = get_term_by('name', $sound_name, 'sound-systems');
+                if (!$ss_term) $ss_term = get_term_by('slug', sanitize_title($sound_name), 'sound-systems');
+                if ($ss_term && !is_wp_error($ss_term)) $ss_term_id = $ss_term->term_id;
+            }
+            if ($ss_term_id) {
+                update_post_meta($product_id, '_yoast_wpseo_primary_sound-systems', $ss_term_id);
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // 16. Product description meta (SASWP schema, rich text)
+    // ---------------------------------------------------------------
+    $product_desc = trim($make_symbol . ' ' . $model . ' ' . $color);
+    if (!empty($product_desc)) {
+        update_post_meta($product_id, 'Product-Description-3', sanitize_text_field($product_desc));
+        update_post_meta($product_id, '_Product-Description-3', 'field_product_description_3');
+    }
+
+    // ---------------------------------------------------------------
+    // 17. WooCommerce product version (set to current WC version)
+    // ---------------------------------------------------------------
+    if (defined('WC_VERSION')) {
+        update_post_meta($product_id, '_product_version', WC_VERSION);
+    }
+
+    // ---------------------------------------------------------------
+    // 18. total_sales and rating counters (initialize if not set)
+    // ---------------------------------------------------------------
+    if (get_post_meta($product_id, 'total_sales', true) === '') {
+        update_post_meta($product_id, 'total_sales', '0');
+    }
+    if (get_post_meta($product_id, '_wc_average_rating', true) === '') {
+        update_post_meta($product_id, '_wc_average_rating', '0');
+    }
+    if (get_post_meta($product_id, '_wc_review_count', true) === '') {
+        update_post_meta($product_id, '_wc_review_count', '0');
     }
 }
 

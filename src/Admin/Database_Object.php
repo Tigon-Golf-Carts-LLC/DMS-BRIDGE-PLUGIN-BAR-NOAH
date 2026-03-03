@@ -28,7 +28,12 @@ class Database_Object
             '_thumbnail_id' => ['meta_key' => '_thumbnail_id'],
             '_product_image_gallery' => ['meta_key' => '_product_image_gallery'],
             '_regular_price' => ['meta_key' => '_regular_price'],
+            '_sale_price' => ['meta_key' => '_sale_price'],
             '_price' => ['meta_key' => '_price'],
+            '_weight' => ['meta_key' => '_weight'],
+            '_length' => ['meta_key' => '_length'],
+            '_width' => ['meta_key' => '_width'],
+            '_height' => ['meta_key' => '_height'],
             // Yoast SEO
             '_yoast_wpseo_title' => ['meta_key' => '_yoast_wpseo_title'],
             '_yoast_wpseo_metadesc' => ['meta_key' => '_yoast_wpseo_metadesc'],
@@ -194,8 +199,19 @@ class Database_Object
         if (!empty($attributes)) $this->data['postmeta']['_product_attributes']['meta_value'] = $attributes;
         if (!empty($featured_image)) $this->data['postmeta']['_thumbnail_id']['meta_value'] = $featured_image;
         if (!empty($images_list)) $this->data['postmeta']['_product_image_gallery']['meta_value'] = $images_list;
-        if (!empty($price)) $this->data['postmeta']['_regular_price']['meta_value'] = $price;
-        if (!empty($sale_price)) $this->data['postmeta']['_price']['meta_value'] = $sale_price;
+        if (!empty($price)) {
+            $this->data['postmeta']['_regular_price']['meta_value'] = $price;
+            $this->data['postmeta']['_price']['meta_value'] = $price;
+        }
+        if (!empty($sale_price) && floatval($sale_price) > 0 && floatval($sale_price) < floatval($price)) {
+            $this->data['postmeta']['_sale_price']['meta_value'] = $sale_price;
+            $this->data['postmeta']['_price']['meta_value'] = $sale_price;
+        }
+        // Shipping dimensions (placeholder for golf carts)
+        $this->data['postmeta']['_weight']['meta_value'] = '500';
+        $this->data['postmeta']['_length']['meta_value'] = '96';
+        $this->data['postmeta']['_width']['meta_value'] = '48';
+        $this->data['postmeta']['_height']['meta_value'] = '72';
         // Yoast SEO
         if (!empty($yoast_seo_title)) $this->data['postmeta']['_yoast_wpseo_title']['meta_value'] = $yoast_seo_title;
         if (!empty($meta_description)) $this->data['postmeta']['_yoast_wpseo_metadesc']['meta_value'] = $meta_description;
