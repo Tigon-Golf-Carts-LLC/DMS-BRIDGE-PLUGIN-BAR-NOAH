@@ -2502,6 +2502,26 @@ abstract class Abstract_Cart
             }
         }
 
+        // Vehicle Power (with auto-creation) — based on payload isElectric
+        $power_value = $this->cart['isElectric'] ? 'ELECTRIC' : 'GAS';
+        $this->attributes['pa_vehicle-power'] = $this->generated_attributes->attributes['vehicle-power']['object'];
+        if (isset($this->generated_attributes->attributes['vehicle-power']['options'][$power_value])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['vehicle-power']['options'][$power_value]
+            );
+        } else {
+            $new_power_term = wp_insert_term(
+                $power_value,
+                'pa_vehicle-power',
+                ['slug' => sanitize_title($power_value)]
+            );
+            if (!is_wp_error($new_power_term)) {
+                $this->generated_attributes->attributes['vehicle-power']['options'][$power_value] = $new_power_term['term_id'];
+                array_push($this->taxonomy_terms, $new_power_term['term_id']);
+            }
+        }
+
         // Vehicle Warranty
         $this->attributes['pa_vehicle-warranty'] = $this->generated_attributes->attributes['vehicle-warranty']['object'];
         array_push(

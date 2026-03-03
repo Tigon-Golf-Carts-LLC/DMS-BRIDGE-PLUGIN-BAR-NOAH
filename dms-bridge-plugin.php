@@ -2176,6 +2176,10 @@ function tigon_dms_assign_product_attributes($product_id, $cart_data) {
         $set_attr('vehicle-msrp', array(strtoupper($msrp_label)));
     }
 
+    // Vehicle Power
+    $power_value = $is_electric ? 'ELECTRIC' : 'GAS';
+    $set_attr('vehicle-power', array($power_value));
+
     // Vehicle Warranty
     if (!empty($warranty)) {
         $set_attr('vehicle-warranty', array(strtoupper($warranty)));
