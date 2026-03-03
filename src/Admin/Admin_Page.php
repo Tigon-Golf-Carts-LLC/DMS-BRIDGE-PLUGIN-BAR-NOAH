@@ -2922,7 +2922,23 @@ class Admin_Page
                 </div>
 
                 <div class="action-box" id="schema">
-                    <h3>Schema Setup</h3>
+                    <h3>Full Payload Schema</h3>
+                    <p style="font-size:0.85rem; color:#666; margin:0 0 1rem 0;">
+                        Fetches active inventory from the DMS API (<code style="background:#f0f4f8; padding:0.15rem 0.4rem; border-radius:3px; font-size:0.8rem;">pageNumber: 0, pageSize: 20</code>) and merges all fields into one unified schema showing every key, its type, and all observed values.
+                    </p>
+
+                    <div style="display:flex; align-items:center; gap:1rem; margin-bottom:1.5rem;">
+                        <button type="button" id="fetch-schema-btn">Fetch Schema</button>
+                        <span id="schema-status" style="font-size:0.85rem; color:#666;"></span>
+                    </div>
+
+                    <div id="schema-output">
+                        <p style="color:#888; text-align:center; padding:2rem 0;">Click <strong>Fetch Schema</strong> to load the full payload schema from the DMS API.</p>
+                    </div>
+
+                    <hr style="margin:2.5rem 0; border:none; border-top:1px solid #ddd;" />
+
+                    <h3>Schema Templates</h3>
                     <div class="drag-n-drop">
                         <div class="settings form" id="attr-form">
                             <div>

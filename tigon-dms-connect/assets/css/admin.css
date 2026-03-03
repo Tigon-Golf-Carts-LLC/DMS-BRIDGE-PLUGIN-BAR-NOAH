@@ -685,6 +685,112 @@ input {
     margin: 0.25rem !important;
   }
 
+/* ============================================
+   Full Payload Schema tree
+   ============================================ */
+#schema-output {
+    width: 100%;
+    max-height: 70vh;
+    overflow: auto;
+    background-color: #fff;
+    border: 1px solid var(--nav-color);
+    border-radius: 4px;
+    padding: 1rem;
+}
+
+#schema-output .schema-tree {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+#schema-output .schema-tree .schema-tree {
+    padding-left: 1.5rem;
+}
+
+#schema-output .schema-node {
+    padding: 0.15rem 0;
+}
+
+#schema-output .schema-leaf {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    padding: 0.2rem 0;
+}
+
+#schema-output .schema-caret {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    padding: 0.2rem 0;
+}
+
+#schema-output .schema-caret::before {
+    content: "\25B6";
+    display: inline-block;
+    font-size: 0.65rem;
+    transition: transform 0.15s;
+    color: var(--accent-color);
+}
+
+#schema-output .schema-caret-open::before {
+    transform: rotate(90deg);
+}
+
+#schema-output .schema-nested {
+    display: none;
+}
+
+#schema-output .schema-nested-open {
+    display: block;
+}
+
+#schema-output .schema-key {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--font-dark);
+}
+
+#schema-output .schema-type {
+    font-size: 0.65rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+#schema-output .schema-type-string  { background: #e3f2fd; color: #1565c0; }
+#schema-output .schema-type-number  { background: #fff3e0; color: #e65100; }
+#schema-output .schema-type-boolean { background: #e8f5e9; color: #2e7d32; }
+#schema-output .schema-type-null    { background: #f5f5f5; color: #757575; }
+#schema-output .schema-type-mixed   { background: #fce4ec; color: #c62828; }
+#schema-output .schema-type-object  { background: #f3e5f5; color: #6a1b9a; }
+
+#schema-output .schema-count {
+    font-size: 0.75rem;
+    color: #888;
+}
+
+#schema-output .schema-samples {
+    font-size: 0.8rem;
+    color: #555;
+}
+
+#schema-output .schema-str  { color: #2e7d32; }
+#schema-output .schema-num  { color: #e65100; }
+#schema-output .schema-samples em { color: #999; font-style: italic; }
+
+#fetch-schema-btn {
+    height: 2.5rem !important;
+    min-width: 8rem !important;
+    font-size: 0.85rem;
+}
+
 @media (max-width: 640px) {
     #wpcontent {
         padding-left: 0 !important;
