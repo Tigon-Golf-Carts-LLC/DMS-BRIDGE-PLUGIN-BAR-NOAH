@@ -584,13 +584,13 @@ abstract class Abstract_Cart
      * @return void
      */
     protected function generate_location_data() {
-        $this->location_id = $this->cart['cartLocation']['locationId'];
-        if($this->location_id === "Other") {
+        $this->location_id = $this->cart['cartLocation']['locationId'] ?? null;
+        if($this->location_id === null || $this->location_id === "Other") {
             $this->location_id = $this->cart['cartLocation']['latestStoreId'] ?? 'T1';
         }
 
         // Use get_location() which checks hardcoded array first, then falls back to API
-        $loc = Attributes::get_location($this->location_id);
+        $loc = Attributes::get_location((string) $this->location_id);
 
         // Fallback to T1 only if API lookup also fails
         if (!$loc) {

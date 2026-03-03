@@ -432,8 +432,8 @@ abstract class Abstract_Cart
      * @return void
      */
     protected function generate_location_data() {
-        $this->location_id = $this->cart['cartLocation']['locationId'];
-        if($this->location_id === "Other") {
+        $this->location_id = $this->cart['cartLocation']['locationId'] ?? null;
+        if($this->location_id === null || $this->location_id === "Other") {
             $this->location_id = $this->cart['cartLocation']['latestStoreId'] ?? 'T1';
         }
 
