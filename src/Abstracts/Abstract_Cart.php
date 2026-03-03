@@ -2478,6 +2478,30 @@ abstract class Abstract_Cart
             }
         }
 
+        // Vehicle MSRP (with auto-creation) — based on payload retailPrice
+        if (!empty($this->cart['retailPrice'])) {
+            $msrp_raw = $this->cart['retailPrice'];
+            $msrp_label = '$' . number_format((float) $msrp_raw, 0, '.', ',');
+            $msrp_key = strtoupper($msrp_label);
+            $this->attributes['pa_vehicle-msrp'] = $this->generated_attributes->attributes['vehicle-msrp']['object'];
+            if (isset($this->generated_attributes->attributes['vehicle-msrp']['options'][$msrp_key])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes['vehicle-msrp']['options'][$msrp_key]
+                );
+            } else {
+                $new_msrp_term = wp_insert_term(
+                    $msrp_label,
+                    'pa_vehicle-msrp',
+                    ['slug' => sanitize_title((string) $msrp_raw)]
+                );
+                if (!is_wp_error($new_msrp_term)) {
+                    $this->generated_attributes->attributes['vehicle-msrp']['options'][$msrp_key] = $new_msrp_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_msrp_term['term_id']);
+                }
+            }
+        }
+
         // Vehicle Warranty
         $this->attributes['pa_vehicle-warranty'] = $this->generated_attributes->attributes['vehicle-warranty']['object'];
         array_push(

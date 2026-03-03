@@ -2169,6 +2169,13 @@ function tigon_dms_assign_product_attributes($product_id, $cart_data) {
     }
     $set_attr('vehicle-class', $vehicle_classes);
 
+    // Vehicle MSRP
+    $retail_price = $cart_data['retailPrice'] ?? 0;
+    if (!empty($retail_price)) {
+        $msrp_label = '$' . number_format((float) $retail_price, 0, '.', ',');
+        $set_attr('vehicle-msrp', array(strtoupper($msrp_label)));
+    }
+
     // Vehicle Warranty
     if (!empty($warranty)) {
         $set_attr('vehicle-warranty', array(strtoupper($warranty)));
