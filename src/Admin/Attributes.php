@@ -166,6 +166,7 @@ class Attributes
     public $vehicle_classes_taxonomy = [];
     public $added_features_taxonomy = [];
     public $drivetrains_taxonomy = [];
+    public $rims_taxonomy = [];
     public $inventory_status_taxonomy = [];
     public $custom_options = [];
 
@@ -181,6 +182,7 @@ class Attributes
         $this->vehicle_classes_taxonomy = Attributes::ai_get_classes();
         $this->added_features_taxonomy = Attributes::ai_get_features();
         $this->drivetrains_taxonomy = Attributes::ai_get_drivetrains();
+        $this->rims_taxonomy = Attributes::ai_get_rims();
         $this->inventory_status_taxonomy = Attributes::ai_get_inventory_statuses();
         $this->custom_options = Attributes::ai_get_custom_options();
     }
@@ -366,7 +368,24 @@ class Attributes
     }
 
     /**
-     * Gets all terms in the drivetrain taxonomy, and returns them as an associative array
+     * Gets all terms in the rims taxonomy, and returns them as an associative array
+     * @return array
+     */
+    private static function ai_get_rims()
+    {
+        $rims_taxonomy = array();
+        $rims = get_terms([
+            'taxonomy' => 'rims',
+            'hide_empty' => false
+        ]);
+        foreach($rims as $term) {
+            $rims_taxonomy[strtoupper($term->name)] = $term->term_id;
+        }
+        return $rims_taxonomy;
+    }
+
+    /**
+     * Gets all terms in the inventory-status taxonomy, and returns them as an associative array
      * @return array
      */
     private static function ai_get_inventory_statuses()

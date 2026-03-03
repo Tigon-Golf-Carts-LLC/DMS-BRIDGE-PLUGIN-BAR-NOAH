@@ -882,12 +882,17 @@ function tigon_dms_create_woo_product($cart_id, $title, $price, $cart_data, $spe
         }
     }
 
-    // 9. Lifted category
+    // 9. Lifted / Non-Lifted category
     $is_lifted = isset($cart_data['cartAttributes']['isLifted']) && $cart_data['cartAttributes']['isLifted'];
     if ($is_lifted) {
         $lifted_cat_id = tigon_dms_get_existing_category('Lifted', 0);
         if ($lifted_cat_id) {
             $categories[] = $lifted_cat_id;
+        }
+    } else {
+        $non_lifted_cat_id = tigon_dms_get_existing_category('NON-Lifted', 0);
+        if ($non_lifted_cat_id) {
+            $categories[] = $non_lifted_cat_id;
         }
     }
 
@@ -904,6 +909,14 @@ function tigon_dms_create_woo_product($cart_id, $title, $price, $cart_data, $spe
         }
     }
 
+    // 10b. Utility Task Vehicles (UTVs) — for Utility passengers
+    if (($cart_data['cartAttributes']['passengers'] ?? '') === 'Utility') {
+        $utv_cat_id = tigon_dms_get_existing_category('Utility Task Vehicles (UTVs)', 0);
+        if ($utv_cat_id) {
+            $categories[] = $utv_cat_id;
+        }
+    }
+
     // 11. New/Used category
     $new_used_cat_id = tigon_dms_get_existing_category($is_used ? 'Used' : 'New', 0);
     if ($new_used_cat_id) {
@@ -911,13 +924,43 @@ function tigon_dms_create_woo_product($cart_id, $title, $price, $cart_data, $spe
     }
 
     // 12. Inventory status category
-    if ($is_used) {
-        $inv_cat_id = tigon_dms_get_existing_category('Local Used Active Inventory', 0);
+    $is_rental = !empty($cart_data['isRental']);
+    if ($is_rental) {
+        if ($is_used) {
+            $inv_cat_id = tigon_dms_get_existing_category('Local Used Rental Inventory', 0);
+        } else {
+            $inv_cat_id = tigon_dms_get_existing_category('Local New Rental Inventory', 0);
+        }
+        // Also add Rental category
+        $rental_cat_id = tigon_dms_get_existing_category('Rental', 0);
+        if ($rental_cat_id) {
+            $categories[] = $rental_cat_id;
+        }
     } else {
-        $inv_cat_id = tigon_dms_get_existing_category('Local New Active Inventory', 0);
+        if ($is_used) {
+            $inv_cat_id = tigon_dms_get_existing_category('Local Used Active Inventory', 0);
+        } else {
+            $inv_cat_id = tigon_dms_get_existing_category('Local New Active Inventory', 0);
+        }
     }
     if (!empty($inv_cat_id)) {
         $categories[] = $inv_cat_id;
+    }
+
+    // 13. Parent hierarchy categories (Passengers, Drivetrain, Power Source, Batteries, Vehicle Class, Location)
+    foreach (array('Passengers', 'DriveTrain', 'Power Source', 'Vehicle Class', 'Location') as $parent_name) {
+        $parent_id = tigon_dms_get_existing_category($parent_name, 0);
+        if ($parent_id) {
+            $categories[] = $parent_id;
+        }
+    }
+
+    // Batteries parent (electric only)
+    if (isset($cart_data['isElectric']) && $cart_data['isElectric']) {
+        $batteries_cat_id = tigon_dms_get_existing_category('Batteries', 0);
+        if ($batteries_cat_id) {
+            $categories[] = $batteries_cat_id;
+        }
     }
 
     // Assign all categories to product
@@ -1243,12 +1286,17 @@ function tigon_dms_update_woo_product($product_id, $title, $price, $cart_data, $
         }
     }
 
-    // 9. Lifted category
+    // 9. Lifted / Non-Lifted category
     $is_lifted = isset($cart_data['cartAttributes']['isLifted']) && $cart_data['cartAttributes']['isLifted'];
     if ($is_lifted) {
         $lifted_cat_id = tigon_dms_get_existing_category('Lifted', 0);
         if ($lifted_cat_id) {
             $categories[] = $lifted_cat_id;
+        }
+    } else {
+        $non_lifted_cat_id = tigon_dms_get_existing_category('NON-Lifted', 0);
+        if ($non_lifted_cat_id) {
+            $categories[] = $non_lifted_cat_id;
         }
     }
 
@@ -1265,6 +1313,14 @@ function tigon_dms_update_woo_product($product_id, $title, $price, $cart_data, $
         }
     }
 
+    // 10b. Utility Task Vehicles (UTVs) — for Utility passengers
+    if (($cart_data['cartAttributes']['passengers'] ?? '') === 'Utility') {
+        $utv_cat_id = tigon_dms_get_existing_category('Utility Task Vehicles (UTVs)', 0);
+        if ($utv_cat_id) {
+            $categories[] = $utv_cat_id;
+        }
+    }
+
     // 11. New/Used category
     $new_used_cat_id = tigon_dms_get_existing_category($is_used ? 'Used' : 'New', 0);
     if ($new_used_cat_id) {
@@ -1272,13 +1328,43 @@ function tigon_dms_update_woo_product($product_id, $title, $price, $cart_data, $
     }
 
     // 12. Inventory status category
-    if ($is_used) {
-        $inv_cat_id = tigon_dms_get_existing_category('Local Used Active Inventory', 0);
+    $is_rental = !empty($cart_data['isRental']);
+    if ($is_rental) {
+        if ($is_used) {
+            $inv_cat_id = tigon_dms_get_existing_category('Local Used Rental Inventory', 0);
+        } else {
+            $inv_cat_id = tigon_dms_get_existing_category('Local New Rental Inventory', 0);
+        }
+        // Also add Rental category
+        $rental_cat_id = tigon_dms_get_existing_category('Rental', 0);
+        if ($rental_cat_id) {
+            $categories[] = $rental_cat_id;
+        }
     } else {
-        $inv_cat_id = tigon_dms_get_existing_category('Local New Active Inventory', 0);
+        if ($is_used) {
+            $inv_cat_id = tigon_dms_get_existing_category('Local Used Active Inventory', 0);
+        } else {
+            $inv_cat_id = tigon_dms_get_existing_category('Local New Active Inventory', 0);
+        }
     }
     if (!empty($inv_cat_id)) {
         $categories[] = $inv_cat_id;
+    }
+
+    // 13. Parent hierarchy categories (Passengers, Drivetrain, Power Source, Batteries, Vehicle Class, Location)
+    foreach (array('Passengers', 'DriveTrain', 'Power Source', 'Vehicle Class', 'Location') as $parent_name) {
+        $parent_id = tigon_dms_get_existing_category($parent_name, 0);
+        if ($parent_id) {
+            $categories[] = $parent_id;
+        }
+    }
+
+    // Batteries parent (electric only)
+    if (isset($cart_data['isElectric']) && $cart_data['isElectric']) {
+        $batteries_cat_id = tigon_dms_get_existing_category('Batteries', 0);
+        if ($batteries_cat_id) {
+            $categories[] = $batteries_cat_id;
+        }
     }
 
     // Assign all categories to product
@@ -1473,6 +1559,18 @@ function tigon_dms_get_make_with_symbol($make) {
     if ($upper === 'SWIFT' || $upper === 'SWIFT EV') {
         return 'Swift EV®';
     }
+    if ($upper === 'TARA' || $upper === 'TARA EV') {
+        return 'Tara®';
+    }
+    if ($upper === 'TEKO' || $upper === 'TEKO EV') {
+        return 'Teko®';
+    }
+    if ($upper === 'TOMBERLIN' || $upper === 'TOMBERLIN EV') {
+        return 'Tomberlin®';
+    }
+    if ($upper === 'YAMAHA' || $upper === 'YAMAHA EV') {
+        return 'Yamaha®';
+    }
     if ($upper === 'STAR' || $upper === 'STAR EV') {
         return 'Star EV®';
     }
@@ -1554,7 +1652,9 @@ function tigon_dms_assign_product_tags($product_id, $cart_data) {
     $make  = $cart_data['cartType']['make'] ?? '';
     $model = $cart_data['cartType']['model'] ?? '';
     $color = $cart_data['cartAttributes']['cartColor'] ?? '';
+    $year  = $cart_data['cartType']['year'] ?? '';
     $passengers    = $cart_data['cartAttributes']['passengers'] ?? '';
+    $drivetrain    = $cart_data['cartAttributes']['driveTrain'] ?? '2X4';
     $is_used       = !empty($cart_data['isUsed']);
     $is_electric   = !empty($cart_data['isElectric']);
     $is_street_legal = !empty($cart_data['title']['isStreetLegal']);
@@ -1633,6 +1733,25 @@ function tigon_dms_assign_product_tags($product_id, $cart_data) {
         $tags[] = 'GAS';
         $tags[] = 'PTV';
     }
+
+    // 0% FINANCING — all vehicles
+    $tags[] = '0% FINANCING';
+
+    // Year tag
+    if (!empty($year)) {
+        $tags[] = strtoupper($year);
+    }
+
+    // Passengers tag (e.g. "4 Passenger", "6 Passenger")
+    if (!empty($passengers) && $passengers !== 'Utility') {
+        $num = explode(' ', $passengers)[0];
+        if (is_numeric($num)) {
+            $tags[] = $num . ' Passenger';
+        }
+    }
+
+    // Drivetrain tag (2X4, 4X4, AWD)
+    $tags[] = strtoupper($drivetrain);
 
     // General tags
     $tags[] = 'GOLF CART';
@@ -1926,6 +2045,7 @@ function tigon_dms_assign_product_attributes($product_id, $cart_data) {
     $year          = $cart_data['cartType']['year'] ?? '';
     $drive_train   = $cart_data['cartAttributes']['driveTrain'] ?? '2X4';
     $has_hitch     = !empty($cart_data['cartAttributes']['hitch']);
+    $is_used       = !empty($cart_data['isUsed']);
     $battery_type  = $cart_data['battery']['type'] ?? '';
     $warranty      = $cart_data['warrantyLength'] ?? '';
     $battery_warranty = $cart_data['battery']['warrantyLength'] ?? '';
@@ -1958,13 +2078,25 @@ function tigon_dms_assign_product_attributes($product_id, $cart_data) {
                 continue;
             }
 
-            // Slow path: individual DB lookup
+            // Slow path: individual DB lookup, auto-create if missing
             $term = get_term_by('name', $term_name, $taxonomy);
             if (!$term) {
                 $term = get_term_by('slug', sanitize_title($term_name), $taxonomy);
             }
             if ($term && !is_wp_error($term)) {
                 $term_ids[] = (int) $term->term_id;
+            } else {
+                $new_term = wp_insert_term(
+                    $term_name,
+                    $taxonomy,
+                    array('slug' => sanitize_title($term_name))
+                );
+                if (!is_wp_error($new_term)) {
+                    $term_ids[] = (int) $new_term['term_id'];
+                    if ($attrs) {
+                        $attrs->attributes[$attr_slug]['options'][strtoupper($term_name)] = $new_term['term_id'];
+                    }
+                }
             }
         }
 
@@ -2034,7 +2166,7 @@ function tigon_dms_assign_product_attributes($product_id, $cart_data) {
     $make_color_attrs = array(
         'bintelli', 'club-car', 'denago', 'epic', 'evolution',
         'ezgo', 'icon', 'navitas', 'polaris', 'royal-ev',
-        'star-ev', 'swift', 'tomberlin', 'yamaha',
+        'star-ev', 'swift', 'tara', 'teko', 'tomberlin', 'yamaha',
     );
     if (in_array($make_lower, $make_color_attrs)) {
         if (!empty($color)) {
@@ -2052,9 +2184,9 @@ function tigon_dms_assign_product_attributes($product_id, $cart_data) {
         }
     }
 
-    // Sound System
-    if ($has_sound) {
-        $set_attr('sound-system', array(strtoupper($make_symbol) . ' SOUND SYSTEM', 'YES'));
+    // Sound System (New products with hasSoundSystem only)
+    if (!$is_used && $has_sound) {
+        $set_attr('sound-system', array(strtoupper($make_symbol) . ' SOUND SYSTEM'));
     }
 
     // Passengers
@@ -2066,8 +2198,8 @@ function tigon_dms_assign_product_attributes($product_id, $cart_data) {
     // Receiver Hitch
     $set_attr('receiver-hitch', array($has_hitch ? 'YES' : 'NO'));
 
-    // Return Policy
-    $set_attr('return-policy', array('90 DAY', 'YES'));
+    // Return Policy (New = Yes, Used = 90 Day)
+    $set_attr('return-policy', array($is_used ? '90 DAY' : 'YES'));
 
     // Rim Size
     if (!empty($rim_size)) {
@@ -2076,6 +2208,20 @@ function tigon_dms_assign_product_attributes($product_id, $cart_data) {
 
     // Shipping
     $set_attr('shipping', array('1 TO 3 DAYS LOCAL', '3 TO 7 DAYS OTR', '5 TO 9 DAYS NATIONAL'));
+
+    // Side Step
+    $side_step = $cart_data['cartAttributes']['sideStep'] ?? null;
+    if (!empty($side_step)) {
+        $side_step_terms = array();
+        foreach ((array) $side_step as $step_val) {
+            if (!empty($step_val)) {
+                $side_step_terms[] = strtoupper($step_val);
+            }
+        }
+        if (!empty($side_step_terms)) {
+            $set_attr('side-step', $side_step_terms);
+        }
+    }
 
     // Street Legal
     $set_attr('street-legal', array($is_street_legal ? 'YES' : 'NO'));
@@ -2086,27 +2232,74 @@ function tigon_dms_assign_product_attributes($product_id, $cart_data) {
         $set_attr('tire-profile', array($tire_profile));
     }
 
+    // Utility Bed
+    $has_bed = $cart_data['cartAttributes']['hasBed'] ?? '';
+    if (!empty($has_bed) && is_string($has_bed)) {
+        $set_attr('utility-bed', array(strtoupper($has_bed)));
+    }
+
+    // Store Code
+    if (!empty($store_id)) {
+        if (strtolower($store_id) === 'national') {
+            $store_code_val = 'UNITED STATES OF AMERICA';
+        } else {
+            $loc_data = \Tigon\DmsConnect\Admin\Attributes::get_location($store_id);
+            if ($loc_data) {
+                $city = $loc_data['city_short'] ?? $loc_data['city'];
+                $st = $loc_data['st'] ?? '';
+                $store_code_val = strtoupper(trim($city . ' ' . $st));
+            } else {
+                $store_code_val = '';
+            }
+        }
+        if (!empty($store_code_val)) {
+            $set_attr('store-code', array($store_code_val));
+        }
+    }
+
     // Vehicle Class
-    $vehicle_classes = array('GOLF CART');
+    $vehicle_classes = array('GOLF CART', 'PERSONAL TRANSPORTATION VEHICLES (PTVS)');
+    if ($is_street_legal) {
+        $vehicle_classes[] = 'LOW SPEED VEHICLE (LSVS)';
+        $vehicle_classes[] = 'MEDIUM SPEED VEHICLE (MSVS)';
+    }
     if ($is_electric) {
         $vehicle_classes[] = 'NEIGHBORHOOD ELECTRIC VEHICLES (NEVS)';
         $vehicle_classes[] = 'ZERO EMISSION VEHICLES (ZEVS)';
-        if ($is_street_legal) {
-            $vehicle_classes[] = 'LOW SPEED VEHICLE (LSVS)';
-            $vehicle_classes[] = 'MEDIUM SPEED VEHICLE (MSVS)';
-        }
     }
-    if ($is_street_legal) {
-        $vehicle_classes[] = 'PERSONAL TRANSPORTATION VEHICLES (PTVS)';
-    }
-    if ($has_utility) {
+    $has_bed = $cart_data['cartAttributes']['hasBed'] ?? false;
+    if (!empty($has_bed)) {
         $vehicle_classes[] = 'UTILITY TASK VEHICLE (UTVS)';
     }
+    if (empty($is_lifted)) {
+        $vehicle_classes[] = 'NON-LIFTED';
+    }
     $set_attr('vehicle-class', $vehicle_classes);
+
+    // Vehicle MSRP
+    $retail_price = $cart_data['retailPrice'] ?? 0;
+    if (!empty($retail_price)) {
+        $msrp_label = '$' . number_format((float) $retail_price, 0, '.', ',');
+        $set_attr('vehicle-msrp', array(strtoupper($msrp_label)));
+    }
+
+    // Vehicle Power
+    $power_value = $is_electric ? 'ELECTRIC' : 'GAS';
+    $set_attr('vehicle-power', array($power_value));
+
+    // Vehicle Status
+    $status_value = $is_used ? 'USED' : 'NEW';
+    $set_attr('vehicle-status', array($status_value));
 
     // Vehicle Warranty
     if (!empty($warranty)) {
         $set_attr('vehicle-warranty', array(strtoupper($warranty)));
+    }
+
+    // VIN
+    $vin_no = $cart_data['vinNo'] ?? '';
+    if (!empty($vin_no)) {
+        $set_attr('vin', array(strtoupper($vin_no)));
     }
 
     // Year of Vehicle
@@ -2154,6 +2347,7 @@ function tigon_dms_assign_custom_taxonomies($product_id, $cart_data) {
         'vehicle-class'    => 'vehicle_classes_taxonomy',
         'inventory-status' => 'inventory_status_taxonomy',
         'drivetrain'       => 'drivetrains_taxonomy',
+        'rims'             => 'rims_taxonomy',
     );
 
     // Helper: safely assign terms using Attributes cache or DB fallback
@@ -2216,13 +2410,59 @@ function tigon_dms_assign_custom_taxonomies($product_id, $cart_data) {
     }
     $assign('models', array($model_name));
 
-    // Sound Systems taxonomy
+    // Sound Systems taxonomy — based on hasSoundSystem + optional soundSystem override
     if ($has_sound) {
-        $sound_name = strtoupper($make_symbol) . ' SOUND SYSTEM';
-        if (strtoupper($make_symbol) === 'SWIFT®') {
+        $custom_sound = $cart_data['addons']['soundSystem'] ?? null;
+        if (!empty($custom_sound) && is_string($custom_sound)) {
+            $sound_name = strtoupper($custom_sound);
+        } elseif (strtoupper($make_symbol) === 'SWIFT®') {
             $sound_name = 'SWIFT EV® SOUND SYSTEM';
+        } else {
+            $sound_name = strtoupper($make_symbol) . ' SOUND SYSTEM';
         }
-        $assign('sound-systems', array($sound_name));
+        // Try cached lookup first, fall back to auto-create
+        $ss_prop = $attrs->sound_systems_taxonomy ?? array();
+        if (isset($ss_prop[$sound_name])) {
+            wp_set_object_terms($product_id, array((int) $ss_prop[$sound_name]), 'sound-systems', true);
+        } else {
+            $existing = get_term_by('name', $sound_name, 'sound-systems');
+            if (!$existing) {
+                $existing = get_term_by('slug', sanitize_title($sound_name), 'sound-systems');
+            }
+            if ($existing && !is_wp_error($existing)) {
+                wp_set_object_terms($product_id, array((int) $existing->term_id), 'sound-systems', true);
+            } else {
+                $new_ss = wp_insert_term($sound_name, 'sound-systems', array('slug' => sanitize_title($sound_name)));
+                if (!is_wp_error($new_ss)) {
+                    wp_set_object_terms($product_id, array((int) $new_ss['term_id']), 'sound-systems', true);
+                }
+            }
+        }
+    } else {
+        // No sound system
+        $assign('sound-systems', array('NO SOUND SYSTEM'));
+    }
+
+    // Rims taxonomy — based on tireRimSize (e.g. "14" becomes "14 INCH")
+    if (!empty($rim_size)) {
+        $rim_name = strtoupper($rim_size . ' INCH');
+        $rims_prop = $attrs->rims_taxonomy ?? array();
+        if (isset($rims_prop[$rim_name])) {
+            wp_set_object_terms($product_id, array((int) $rims_prop[$rim_name]), 'rims', true);
+        } else {
+            $existing_rim = get_term_by('name', $rim_name, 'rims');
+            if (!$existing_rim) {
+                $existing_rim = get_term_by('slug', sanitize_title($rim_name), 'rims');
+            }
+            if ($existing_rim && !is_wp_error($existing_rim)) {
+                wp_set_object_terms($product_id, array((int) $existing_rim->term_id), 'rims', true);
+            } else {
+                $new_rim = wp_insert_term($rim_name, 'rims', array('slug' => sanitize_title($rim_name)));
+                if (!is_wp_error($new_rim)) {
+                    wp_set_object_terms($product_id, array((int) $new_rim['term_id']), 'rims', true);
+                }
+            }
+        }
     }
 
     // Added Features taxonomy
@@ -2554,11 +2794,21 @@ function tigon_dms_set_product_fields_meta($product_id, $cart_data) {
     // 8. Shipping class term
     // ---------------------------------------------------------------
     if (taxonomy_exists('product_shipping_class')) {
-        $shipping_term = get_term_by('slug', 'golf-cart', 'product_shipping_class');
-        if (!$shipping_term) {
-            $shipping_term = get_term_by('slug', 'golf-carts', 'product_shipping_class');
+        // Rentals get "Golf Cart Rentals", everything else gets "Golf Cart Shipping"
+        if ($is_rental) {
+            $shipping_slug = 'golf-cart-rentals';
+            $shipping_name = 'Golf Cart Rentals';
+        } else {
+            $shipping_slug = 'golf-cart-shipping';
+            $shipping_name = 'Golf Cart Shipping';
         }
-        if ($shipping_term && !is_wp_error($shipping_term)) {
+        $shipping_term = get_term_by('slug', $shipping_slug, 'product_shipping_class');
+        if (!$shipping_term || is_wp_error($shipping_term)) {
+            $new_shipping = wp_insert_term($shipping_name, 'product_shipping_class', array('slug' => $shipping_slug));
+            if (!is_wp_error($new_shipping)) {
+                wp_set_object_terms($product_id, array($new_shipping['term_id']), 'product_shipping_class');
+            }
+        } else {
             wp_set_object_terms($product_id, array($shipping_term->term_id), 'product_shipping_class');
         }
     }

@@ -873,7 +873,7 @@ abstract class Abstract_Cart
             );
         }
 
-        // lifted
+        // lifted / non-lifted
         if ($this->cart['cartAttributes']['isLifted']) {
             array_push(
                 $this->taxonomy_terms,
@@ -881,6 +881,9 @@ abstract class Abstract_Cart
                 $this->generated_attributes->tags['LIFTED']
             );
         } else {
+            if (isset($this->generated_attributes->categories['NON-LIFTED'])) {
+                array_push($this->taxonomy_terms, $this->generated_attributes->categories['NON-LIFTED']);
+            }
             array_push(
                 $this->taxonomy_terms,
                 $this->generated_attributes->tags['NON LIFTED']
@@ -997,11 +1000,55 @@ abstract class Abstract_Cart
             }
         } 
 
-        // Drivetrain
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->categories['2X4']
-        );
+        // Drivetrain category — use actual payload value
+        $drivetrain_cat = strtoupper($this->cart['cartAttributes']['driveTrain'] ?? '2X4');
+        if (isset($this->generated_attributes->categories[$drivetrain_cat])) {
+            array_push($this->taxonomy_terms, $this->generated_attributes->categories[$drivetrain_cat]);
+        }
+        // DRIVETRAIN parent category
+        if (isset($this->generated_attributes->categories['DRIVETRAIN'])) {
+            array_push($this->taxonomy_terms, $this->generated_attributes->categories['DRIVETRAIN']);
+        }
+
+        // Passengers parent category
+        if (isset($this->generated_attributes->categories['PASSENGERS'])) {
+            array_push($this->taxonomy_terms, $this->generated_attributes->categories['PASSENGERS']);
+        }
+
+        // Power Source parent category
+        if (isset($this->generated_attributes->categories['POWER SOURCE'])) {
+            array_push($this->taxonomy_terms, $this->generated_attributes->categories['POWER SOURCE']);
+        }
+
+        // Batteries parent category
+        if ($this->cart['isElectric'] && isset($this->generated_attributes->categories['BATTERIES'])) {
+            array_push($this->taxonomy_terms, $this->generated_attributes->categories['BATTERIES']);
+        }
+
+        // Vehicle Class parent category
+        if (isset($this->generated_attributes->categories['VEHICLE CLASS'])) {
+            array_push($this->taxonomy_terms, $this->generated_attributes->categories['VEHICLE CLASS']);
+        }
+
+        // Utility Task Vehicles (UTVs) — for Utility passengers
+        if ($this->cart['cartAttributes']['passengers'] == 'Utility') {
+            if (isset($this->generated_attributes->categories['UTILITY TASK VEHICLES (UTVS)'])) {
+                array_push($this->taxonomy_terms, $this->generated_attributes->categories['UTILITY TASK VEHICLES (UTVS)']);
+            }
+        }
+
+        // Location hierarchy categories (Location > State > City)
+        $state_name = Attributes::$locations[$this->location_id]['state'] ?? '';
+        if (!empty($state_name) && isset($this->generated_attributes->categories[strtoupper($state_name)])) {
+            array_push($this->taxonomy_terms, $this->generated_attributes->categories[strtoupper($state_name)]);
+        }
+        if (isset($this->generated_attributes->categories['LOCATION'])) {
+            array_push($this->taxonomy_terms, $this->generated_attributes->categories['LOCATION']);
+        }
+        $city_name = $this->city_shortname ?? '';
+        if (!empty($city_name) && isset($this->generated_attributes->categories[strtoupper($city_name)])) {
+            array_push($this->taxonomy_terms, $this->generated_attributes->categories[strtoupper($city_name)]);
+        }
 
         // TIGON Dealership
         array_push(
@@ -1020,12 +1067,57 @@ abstract class Abstract_Cart
             $this->generated_attributes->tags['TIGON GOLF CARTS']
         );
 
+        // 0% FINANCING tag — all vehicles
+        $this->taxonomy_terms[] = $this->resolve_or_create_tag('0% FINANCING');
+
+        // Year tag
+        if (!empty($this->cart['cartType']['year'])) {
+            $this->taxonomy_terms[] = $this->resolve_or_create_tag($this->cart['cartType']['year']);
+        }
+
+        // Passengers tag (e.g. "4 Passenger", "6 Passenger")
+        if (!empty($this->cart['cartAttributes']['passengers']) && $this->cart['cartAttributes']['passengers'] !== 'Utility') {
+            $num = explode(' ', $this->cart['cartAttributes']['passengers'])[0];
+            if (is_numeric($num)) {
+                $this->taxonomy_terms[] = $this->resolve_or_create_tag($num . ' Passenger');
+            }
+        }
+
+        // Drivetrain tag (2X4, 4X4, AWD)
+        $drivetrain_tag = strtoupper($this->cart['cartAttributes']['driveTrain'] ?? '2X4');
+        $this->taxonomy_terms[] = $this->resolve_or_create_tag($drivetrain_tag);
+
         /*
          * Primary Category ID
          */
         $this->primary_category = $this->generated_attributes->categories[strtoupper($this->make_with_symbol)];
     }
 
+    /**
+     * Resolve a product_tag by name from the Attributes cache, or create it if missing.
+     *
+     * @param string $name Tag name.
+     * @return int|null     Term ID, or null on failure.
+     */
+    private function resolve_or_create_tag($name)
+    {
+        $key = strtoupper($name);
+        if (isset($this->generated_attributes->tags[$key])) {
+            return $this->generated_attributes->tags[$key];
+        }
+        $new_term = wp_insert_term($name, 'product_tag', ['slug' => sanitize_title($name)]);
+        if (!is_wp_error($new_term)) {
+            $this->generated_attributes->tags[$key] = $new_term['term_id'];
+            return $new_term['term_id'];
+        }
+        // Term may already exist with a different case — try fetching it
+        $existing = get_term_by('name', $name, 'product_tag');
+        if ($existing && !is_wp_error($existing)) {
+            $this->generated_attributes->tags[$key] = $existing->term_id;
+            return $existing->term_id;
+        }
+        return null;
+    }
 
     protected function attach_attributes()
     {
@@ -1049,87 +1141,355 @@ abstract class Abstract_Cart
             );
         }
 
-        // TODO - Model Specific
-        // Brush Guard
-        if (strtoupper($this->make_with_symbol) == 'DENAGO®' || strtoupper($this->make_with_symbol) == 'EVOLUTION®') {
-            $this->attributes['pa_brush-guard'] = $this->generated_attributes->attributes['brush-guard']['object'];
+        // Brush Guard — based on payload addedFeatures.brushGuard
+        $this->attributes['pa_brush-guard'] = $this->generated_attributes->attributes['brush-guard']['object'];
+        $brush_guard_value = (isset($this->cart['addedFeatures']['brushGuard']) && $this->cart['addedFeatures']['brushGuard']) ? 'YES' : 'NO';
+        array_push(
+            $this->taxonomy_terms,
+            $this->generated_attributes->attributes['brush-guard']['options'][$brush_guard_value]
+        );
+
+        // Cargo Rack — based on payload cartAttributes.cargoRack
+        $this->attributes['pa_cargo-rack'] = $this->generated_attributes->attributes['cargo-rack']['object'];
+        $cargo_rack_value = !empty($this->cart['cartAttributes']['cargoRack'])
+            ? strtoupper($this->cart['cartAttributes']['cargoRack'])
+            : 'NO';
+        if (isset($this->generated_attributes->attributes['cargo-rack']['options'][$cargo_rack_value])) {
             array_push(
                 $this->taxonomy_terms,
-                $this->generated_attributes->attributes['brush-guard']['options']['YES']
+                $this->generated_attributes->attributes['cargo-rack']['options'][$cargo_rack_value]
             );
         } else {
-            $this->attributes['pa_brush-guard'] = $this->generated_attributes->attributes['brush-guard']['object'];
             array_push(
                 $this->taxonomy_terms,
-                $this->generated_attributes->attributes['brush-guard']['options']['NO']
+                $this->generated_attributes->attributes['cargo-rack']['options']['NO']
             );
         }
 
-        // Cargo Rack
-        $this->attributes['pa_cargo-rack'] = $this->generated_attributes->attributes['cargo-rack']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['cargo-rack']['options']['NO']
-        );
-
-        // Drivetrain
+        // Drivetrain — based on payload cartAttributes.driveTrain
         $this->attributes['pa_drivetrain'] = $this->generated_attributes->attributes['drivetrain']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['drivetrain']['options']['2X4']
-        );
+        $drivetrain_value = strtoupper($this->cart['cartAttributes']['driveTrain'] ?? '2X4');
+        if (isset($this->generated_attributes->attributes['drivetrain']['options'][$drivetrain_value])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['drivetrain']['options'][$drivetrain_value]
+            );
+        } else {
+            $new_dt_term = wp_insert_term(
+                strtoupper($this->cart['cartAttributes']['driveTrain']),
+                'pa_drivetrain',
+                ['slug' => sanitize_title($this->cart['cartAttributes']['driveTrain'])]
+            );
+            if (!is_wp_error($new_dt_term)) {
+                $this->generated_attributes->attributes['drivetrain']['options'][$drivetrain_value] = $new_dt_term['term_id'];
+                array_push($this->taxonomy_terms, $new_dt_term['term_id']);
+            }
+        }
 
-        // Electric Bedlift
+        // Electric Bedlift — based on payload cartAttributes.hasBedLift
         $this->attributes['pa_electric-bed-lift'] = $this->generated_attributes->attributes['electric-bed-lift']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['electric-bed-lift']['options']['NO']
-        );
+        $has_bed_lift = !empty($this->cart['cartAttributes']['hasBedLift']);
+        $bed_lift_value = $has_bed_lift ? 'YES' : 'NO';
+        if (isset($this->generated_attributes->attributes['electric-bed-lift']['options'][$bed_lift_value])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['electric-bed-lift']['options'][$bed_lift_value]
+            );
+        } else {
+            $new_bl_term = wp_insert_term(
+                ucfirst(strtolower($bed_lift_value)),
+                'pa_electric-bed-lift',
+                ['slug' => sanitize_title($bed_lift_value)]
+            );
+            if (!is_wp_error($new_bl_term)) {
+                $this->generated_attributes->attributes['electric-bed-lift']['options'][$bed_lift_value] = $new_bl_term['term_id'];
+                array_push($this->taxonomy_terms, $new_bl_term['term_id']);
+            }
+        }
+
+        // Electric Range — all new inventory defaults to 40 Miles
+        $this->attributes['pa_electric-range'] = $this->generated_attributes->attributes['electric-range']['object'];
+        $electric_range_value = '40 MILES';
+        if (isset($this->generated_attributes->attributes['electric-range']['options'][$electric_range_value])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['electric-range']['options'][$electric_range_value]
+            );
+        } else {
+            $new_er_term = wp_insert_term(
+                '40 Miles',
+                'pa_electric-range',
+                ['slug' => '40-miles']
+            );
+            if (!is_wp_error($new_er_term)) {
+                $this->generated_attributes->attributes['electric-range']['options'][$electric_range_value] = $new_er_term['term_id'];
+                array_push($this->taxonomy_terms, $new_er_term['term_id']);
+            }
+        }
 
         // Extended top
         $this->attributes['pa_extended-top'] = $this->generated_attributes->attributes['extended-top']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['extended-top']['options'][$this->cart['cartAttributes']['hasExtendedTop'] ? 'YES' : 'NO']
-        );
+        $ext_top_raw = $this->cart['cartAttributes']['hasExtendedTop'];
+        if ($ext_top_raw && $ext_top_raw !== true && preg_match('/\d+/', $ext_top_raw, $ext_m)) {
+            // Value contains a number (e.g. "84 Inches") – use the specific size
+            $ext_top_label = $ext_m[0] . ' Inches';
+        } elseif ($ext_top_raw) {
+            // Boolean true with no size – default to 84 Inches
+            $ext_top_label = '84 Inches';
+        } else {
+            $ext_top_label = 'No';
+        }
+        $ext_top_upper = strtoupper($ext_top_label);
+        if (isset($this->generated_attributes->attributes['extended-top']['options'][$ext_top_upper])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['extended-top']['options'][$ext_top_upper]
+            );
+        } else {
+            $new_ext_term = wp_insert_term(
+                $ext_top_label,
+                'pa_extended-top',
+                ['slug' => sanitize_title($ext_top_label)]
+            );
+            if (!is_wp_error($new_ext_term)) {
+                $this->generated_attributes->attributes['extended-top']['options'][$ext_top_upper] = $new_ext_term['term_id'];
+                array_push($this->taxonomy_terms, $new_ext_term['term_id']);
+            }
+        }
 
         // Fender Flares
         $this->attributes['pa_fender-flares'] = $this->generated_attributes->attributes['fender-flares']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['fender-flares']['options']['YES']
-        );
-
-        // LED Accents
-        if (strtoupper($this->make_with_symbol) == 'DENAGO®') {
-            $this->attributes['pa_led-accents'] = $this->generated_attributes->attributes['led-accents']['object'];
+        $fender_raw = $this->cart['cartAttributes']['hasFenderFlares'] ?? false;
+        if ($fender_raw && $fender_raw !== true && is_string($fender_raw)) {
+            // String value from payload (e.g. "Fender Flare", "Fender Flare w/ Running Light")
+            $fender_label = ucwords(strtolower($fender_raw));
+        } elseif ($fender_raw) {
+            // Boolean true – default to "Yes"
+            $fender_label = 'Yes';
+        } else {
+            $fender_label = 'No';
+        }
+        $fender_upper = strtoupper($fender_label);
+        if (isset($this->generated_attributes->attributes['fender-flares']['options'][$fender_upper])) {
             array_push(
                 $this->taxonomy_terms,
-                $this->generated_attributes->attributes['led-accents']['options']['YES'],
-                $this->generated_attributes->attributes['led-accents']['options']['LIGHT BAR']
+                $this->generated_attributes->attributes['fender-flares']['options'][$fender_upper]
             );
         } else {
-            $this->attributes['pa_led-accents'] = $this->generated_attributes->attributes['led-accents']['object'];
-            array_push(
-                $this->taxonomy_terms,
-                $this->generated_attributes->attributes['led-accents']['options']['NO']
+            $new_fender_term = wp_insert_term(
+                $fender_label,
+                'pa_fender-flares',
+                ['slug' => sanitize_title($fender_label)]
             );
+            if (!is_wp_error($new_fender_term)) {
+                $this->generated_attributes->attributes['fender-flares']['options'][$fender_upper] = $new_fender_term['term_id'];
+                array_push($this->taxonomy_terms, $new_fender_term['term_id']);
+            }
+        }
+
+        // LED Accents
+        $this->attributes['pa_led-accents'] = $this->generated_attributes->attributes['led-accents']['object'];
+        $led_raw = $this->cart['cartAttributes']['LEDs'] ?? null;
+        if (is_array($led_raw) && !empty($led_raw)) {
+            // Array of LED types from payload (e.g. ["Antennas", "Under Glow", "Wheel Rings"])
+            // Also push "Yes" since the product has LEDs
+            if (isset($this->generated_attributes->attributes['led-accents']['options']['YES'])) {
+                array_push($this->taxonomy_terms, $this->generated_attributes->attributes['led-accents']['options']['YES']);
+            }
+            foreach ($led_raw as $led_item) {
+                $led_item_upper = strtoupper($led_item);
+                if (isset($this->generated_attributes->attributes['led-accents']['options'][$led_item_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['led-accents']['options'][$led_item_upper]
+                    );
+                } else {
+                    $new_led_term = wp_insert_term(
+                        ucwords(strtolower($led_item)),
+                        'pa_led-accents',
+                        ['slug' => sanitize_title($led_item)]
+                    );
+                    if (!is_wp_error($new_led_term)) {
+                        $this->generated_attributes->attributes['led-accents']['options'][$led_item_upper] = $new_led_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_led_term['term_id']);
+                    }
+                }
+            }
+        } elseif ($led_raw && $led_raw !== true && is_string($led_raw)) {
+            // Single string value
+            $led_upper = strtoupper($led_raw);
+            if (isset($this->generated_attributes->attributes['led-accents']['options'][$led_upper])) {
+                array_push($this->taxonomy_terms, $this->generated_attributes->attributes['led-accents']['options'][$led_upper]);
+            } else {
+                $new_led_term = wp_insert_term(
+                    ucwords(strtolower($led_raw)),
+                    'pa_led-accents',
+                    ['slug' => sanitize_title($led_raw)]
+                );
+                if (!is_wp_error($new_led_term)) {
+                    $this->generated_attributes->attributes['led-accents']['options'][$led_upper] = $new_led_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_led_term['term_id']);
+                }
+            }
+        } elseif ($led_raw === true) {
+            // Boolean true – default to "Yes"
+            array_push($this->taxonomy_terms, $this->generated_attributes->attributes['led-accents']['options']['YES']);
+        } else {
+            // No LEDs
+            array_push($this->taxonomy_terms, $this->generated_attributes->attributes['led-accents']['options']['NO']);
         }
 
         // Lift kit
         $this->attributes['pa_lift-kit'] = $this->generated_attributes->attributes['lift-kit']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['lift-kit']['options'][($this->cart['cartAttributes']['isLifted'] ? '3 INCH' : 'NO')]
-        );
+        $lift_raw = $this->cart['cartAttributes']['liftKit'] ?? null;
+        $is_lifted = $this->cart['cartAttributes']['isLifted'] ?? false;
+        if ($lift_raw && $lift_raw !== true && is_string($lift_raw)) {
+            // String value from payload (e.g. "3 Inch", "112 Inches", "2.5 Inch")
+            $lift_label = ucwords(strtolower($lift_raw));
+        } elseif ($lift_raw === true || $is_lifted) {
+            // Boolean true with no specific size – default to "Yes"
+            $lift_label = 'Yes';
+        } else {
+            $lift_label = 'No';
+        }
+        $lift_upper = strtoupper($lift_label);
+        if (isset($this->generated_attributes->attributes['lift-kit']['options'][$lift_upper])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['lift-kit']['options'][$lift_upper]
+            );
+        } else {
+            $new_lift_term = wp_insert_term(
+                $lift_label,
+                'pa_lift-kit',
+                ['slug' => sanitize_title($lift_label)]
+            );
+            if (!is_wp_error($new_lift_term)) {
+                $this->generated_attributes->attributes['lift-kit']['options'][$lift_upper] = $new_lift_term['term_id'];
+                array_push($this->taxonomy_terms, $new_lift_term['term_id']);
+            }
+        }
 
-        // Location
+        // Mileage (from odometer)
+        $this->attributes['pa_mileage'] = $this->generated_attributes->attributes['mileage']['object'];
+        $odometer_raw = $this->cart['odometer'] ?? null;
+        if ($odometer_raw !== null && $odometer_raw !== '') {
+            $mileage_label = intval($odometer_raw) . ' Mileage';
+        } else {
+            $mileage_label = '0 Mileage';
+        }
+        $mileage_upper = strtoupper($mileage_label);
+        if (isset($this->generated_attributes->attributes['mileage']['options'][$mileage_upper])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['mileage']['options'][$mileage_upper]
+            );
+        } else {
+            $new_mileage_term = wp_insert_term(
+                $mileage_label,
+                'pa_mileage',
+                ['slug' => sanitize_title($mileage_label)]
+            );
+            if (!is_wp_error($new_mileage_term)) {
+                $this->generated_attributes->attributes['mileage']['options'][$mileage_upper] = $new_mileage_term['term_id'];
+                array_push($this->taxonomy_terms, $new_mileage_term['term_id']);
+            }
+        }
+
+        // Model (from make + model in payload)
+        $this->attributes['pa_model'] = $this->generated_attributes->attributes['model']['object'];
+        $make_upper = strtoupper($this->make_with_symbol);
+        $model_raw  = $this->cart['cartType']['model'] ?? '';
+        // Build the label using the same special-case make names used elsewhere
+        if ($make_upper == 'STAR®') {
+            $model_label = 'STAR EV® ' . strtoupper($model_raw);
+        } elseif ($make_upper == 'EZGO®') {
+            $model_label = 'EZ-GO® ' . strtoupper($model_raw);
+        } else {
+            $model_label = $make_upper . ' ' . strtoupper($model_raw);
+        }
+        // Apply the same DS / Precedent / Crown / Drive2 overrides
+        if ($model_raw == 'DS') {
+            $model_label = $make_upper . ' DS ELECTRIC';
+        } elseif ($model_raw == 'Precedent') {
+            $model_label = $make_upper . ' PRECEDENT ELECTRIC';
+        } elseif ($model_raw == '4L') {
+            $model_label = $make_upper . ' CROWN 4 LIFTED';
+        } elseif ($model_raw == '6L') {
+            $model_label = $make_upper . ' CROWN 6 LIFTED';
+        } elseif ($model_raw == 'Drive 2') {
+            $model_label = $make_upper . ' DRIVE2';
+        }
+        $model_upper = strtoupper($model_label);
+        if (isset($this->generated_attributes->attributes['model']['options'][$model_upper])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['model']['options'][$model_upper]
+            );
+        } else {
+            $new_model_term = wp_insert_term(
+                $model_label,
+                'pa_model',
+                ['slug' => sanitize_title($model_label)]
+            );
+            if (!is_wp_error($new_model_term)) {
+                $this->generated_attributes->attributes['model']['options'][$model_upper] = $new_model_term['term_id'];
+                array_push($this->taxonomy_terms, $new_model_term['term_id']);
+            }
+        }
+
+        // Location – always assign both the state and city+state terms (with auto-creation)
         $this->attributes['pa_location'] = $this->generated_attributes->attributes['location']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['location']['options'][strtoupper(Attributes::$locations[$this->location_id]['city'] . ' ' . Attributes::$locations[$this->location_id]['state'])],
-            $this->generated_attributes->attributes['location']['options'][strtoupper(Attributes::$locations[$this->location_id]['state'])]
-        );
+        $loc_city  = Attributes::$locations[$this->location_id]['city'] ?? '';
+        $loc_state = Attributes::$locations[$this->location_id]['state'] ?? '';
+        $loc_state_upper = strtoupper($loc_state);
+        $loc_city_state  = $loc_city . ' ' . $loc_state;
+        $loc_city_state_upper = strtoupper($loc_city_state);
+
+        // State term
+        if (isset($this->generated_attributes->attributes['location']['options'][$loc_state_upper])) {
+            $state_term_id = $this->generated_attributes->attributes['location']['options'][$loc_state_upper];
+        } else {
+            $new_state_term = wp_insert_term(
+                ucwords(strtolower($loc_state)),
+                'pa_location',
+                ['slug' => sanitize_title($loc_state)]
+            );
+            if (!is_wp_error($new_state_term)) {
+                $state_term_id = $new_state_term['term_id'];
+                $this->generated_attributes->attributes['location']['options'][$loc_state_upper] = $state_term_id;
+            } else {
+                $state_term_id = null;
+            }
+        }
+
+        // City + State term (under parent state)
+        if (isset($this->generated_attributes->attributes['location']['options'][$loc_city_state_upper])) {
+            $city_term_id = $this->generated_attributes->attributes['location']['options'][$loc_city_state_upper];
+        } else {
+            $city_args = ['slug' => sanitize_title($loc_city_state)];
+            if ($state_term_id) {
+                $city_args['parent'] = $state_term_id;
+            }
+            $new_city_term = wp_insert_term(
+                ucwords(strtolower($loc_city_state)),
+                'pa_location',
+                $city_args
+            );
+            if (!is_wp_error($new_city_term)) {
+                $city_term_id = $new_city_term['term_id'];
+                $this->generated_attributes->attributes['location']['options'][$loc_city_state_upper] = $city_term_id;
+            } else {
+                $city_term_id = null;
+            }
+        }
+
+        if ($city_term_id) {
+            array_push($this->taxonomy_terms, $city_term_id);
+        }
+        if ($state_term_id) {
+            array_push($this->taxonomy_terms, $state_term_id);
+        }
 
         // Make Colors / Seat Colors
         $make_attrs = [
@@ -1145,22 +1505,776 @@ abstract class Abstract_Cart
             "royal-ev",
             "star-ev",
             "swift",
+            "tara",
+            "teko",
             "tomberlin",
             "yamaha"
         ];
         $make_lower = strtolower($this->brand_hyphenated);
-        if (array_search($make_lower, $make_attrs) !== false) {
-            $this->attributes["pa_$make_lower-cart-colors"] = $this->generated_attributes->attributes[$make_lower . '-cart-colors']['object'];
-            array_push(
-                $this->taxonomy_terms,
-                $this->generated_attributes->attributes[$make_lower . '-cart-colors']['options'][strtoupper($this->cart['cartAttributes']['cartColor'])]
-            );
 
-            $this->attributes["pa_$make_lower-seat-colors"] = $this->generated_attributes->attributes[$make_lower . '-seat-colors']['object'];
-            array_push(
-                $this->taxonomy_terms,
-                $this->generated_attributes->attributes[$make_lower . '-seat-colors']['options'][strtoupper($this->cart['cartAttributes']['seatColor'])]
-            );
+        // Normalize EV variants so both "X" and "X EV" use pa_x-cart-colors
+        if ($make_lower === 'tara-ev') {
+            $make_lower = 'tara';
+        }
+        if ($make_lower === 'teko-ev') {
+            $make_lower = 'teko';
+        }
+        if ($make_lower === 'tomberlin-ev') {
+            $make_lower = 'tomberlin';
+        }
+        if ($make_lower === 'yamaha-ev') {
+            $make_lower = 'yamaha';
+        }
+
+        // USED products always get pa_cart-color (with auto-creation of missing color terms)
+        if ($this->cart['isUsed']) {
+            $this->attributes['pa_cart-color'] = $this->generated_attributes->attributes['cart-color']['object'];
+            $cart_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+            if (isset($this->generated_attributes->attributes['cart-color']['options'][$cart_color_upper])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes['cart-color']['options'][$cart_color_upper]
+                );
+            } else {
+                // Color term doesn't exist — create it
+                $new_term = wp_insert_term(
+                    ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                    'pa_cart-color',
+                    ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                );
+                if (!is_wp_error($new_term)) {
+                    $this->generated_attributes->attributes['cart-color']['options'][$cart_color_upper] = $new_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_term['term_id']);
+                }
+            }
+
+            // Seat Color (with auto-creation)
+            if ($this->cart['cartAttributes']['seatColor']) {
+                $this->attributes['pa_seat-color'] = $this->generated_attributes->attributes['seat-color']['object'];
+                $seat_color_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['seat-color']['options'][$seat_color_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['seat-color']['options'][$seat_color_upper]
+                    );
+                } else {
+                    $new_seat_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_seat-color',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_seat_term)) {
+                        $this->generated_attributes->attributes['seat-color']['options'][$seat_color_upper] = $new_seat_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_seat_term['term_id']);
+                    }
+                }
+            }
+
+            // Club Car used products also get pa_club-car-cart-colors (with auto-creation)
+            if ($make_lower === 'club-car') {
+                $this->attributes['pa_club-car-cart-colors'] = $this->generated_attributes->attributes['club-car-cart-colors']['object'];
+                $cc_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+                if (isset($this->generated_attributes->attributes['club-car-cart-colors']['options'][$cc_color_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['club-car-cart-colors']['options'][$cc_color_upper]
+                    );
+                } else {
+                    $new_cc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                        'pa_club-car-cart-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                    );
+                    if (!is_wp_error($new_cc_term)) {
+                        $this->generated_attributes->attributes['club-car-cart-colors']['options'][$cc_color_upper] = $new_cc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_cc_term['term_id']);
+                    }
+                }
+
+                // Club Car used products also get pa_club-car-seat-colors (with auto-creation)
+                $this->attributes['pa_club-car-seat-colors'] = $this->generated_attributes->attributes['club-car-seat-colors']['object'];
+                $cc_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['club-car-seat-colors']['options'][$cc_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['club-car-seat-colors']['options'][$cc_seat_upper]
+                    );
+                } else {
+                    $new_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_club-car-seat-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_sc_term)) {
+                        $this->generated_attributes->attributes['club-car-seat-colors']['options'][$cc_seat_upper] = $new_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_sc_term['term_id']);
+                    }
+                }
+            }
+
+            // Denago used products also get pa_denago-cart-colors and pa_denago-seat-colors (with auto-creation)
+            if ($make_lower === 'denago') {
+                $this->attributes['pa_denago-cart-colors'] = $this->generated_attributes->attributes['denago-cart-colors']['object'];
+                $dn_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+                if (isset($this->generated_attributes->attributes['denago-cart-colors']['options'][$dn_color_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['denago-cart-colors']['options'][$dn_color_upper]
+                    );
+                } else {
+                    $new_dn_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                        'pa_denago-cart-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                    );
+                    if (!is_wp_error($new_dn_term)) {
+                        $this->generated_attributes->attributes['denago-cart-colors']['options'][$dn_color_upper] = $new_dn_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_dn_term['term_id']);
+                    }
+                }
+
+                $this->attributes['pa_denago-seat-colors'] = $this->generated_attributes->attributes['denago-seat-colors']['object'];
+                $dn_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['denago-seat-colors']['options'][$dn_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['denago-seat-colors']['options'][$dn_seat_upper]
+                    );
+                } else {
+                    $new_dn_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_denago-seat-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_dn_sc_term)) {
+                        $this->generated_attributes->attributes['denago-seat-colors']['options'][$dn_seat_upper] = $new_dn_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_dn_sc_term['term_id']);
+                    }
+                }
+            }
+
+            // Epic used products also get pa_epic-cart-colors and pa_epic-seat-colors (with auto-creation)
+            if ($make_lower === 'epic') {
+                $this->attributes['pa_epic-cart-colors'] = $this->generated_attributes->attributes['epic-cart-colors']['object'];
+                $epic_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+                if (isset($this->generated_attributes->attributes['epic-cart-colors']['options'][$epic_color_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['epic-cart-colors']['options'][$epic_color_upper]
+                    );
+                } else {
+                    $new_epic_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                        'pa_epic-cart-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                    );
+                    if (!is_wp_error($new_epic_term)) {
+                        $this->generated_attributes->attributes['epic-cart-colors']['options'][$epic_color_upper] = $new_epic_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_epic_term['term_id']);
+                    }
+                }
+
+                $this->attributes['pa_epic-seat-colors'] = $this->generated_attributes->attributes['epic-seat-colors']['object'];
+                $epic_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['epic-seat-colors']['options'][$epic_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['epic-seat-colors']['options'][$epic_seat_upper]
+                    );
+                } else {
+                    $new_epic_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_epic-seat-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_epic_sc_term)) {
+                        $this->generated_attributes->attributes['epic-seat-colors']['options'][$epic_seat_upper] = $new_epic_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_epic_sc_term['term_id']);
+                    }
+                }
+            }
+
+            // Evolution used products also get pa_evolution-cart-colors (with auto-creation)
+            if ($make_lower === 'evolution') {
+                $this->attributes['pa_evolution-cart-colors'] = $this->generated_attributes->attributes['evolution-cart-colors']['object'];
+                $evo_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+                if (isset($this->generated_attributes->attributes['evolution-cart-colors']['options'][$evo_color_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['evolution-cart-colors']['options'][$evo_color_upper]
+                    );
+                } else {
+                    $new_evo_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                        'pa_evolution-cart-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                    );
+                    if (!is_wp_error($new_evo_term)) {
+                        $this->generated_attributes->attributes['evolution-cart-colors']['options'][$evo_color_upper] = $new_evo_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_evo_term['term_id']);
+                    }
+                }
+            }
+
+            // Evolution used products also get pa_evolution-seat-colors (with auto-creation)
+            if ($make_lower === 'evolution') {
+                $this->attributes['pa_evolution-seat-colors'] = $this->generated_attributes->attributes['evolution-seat-colors']['object'];
+                $evo_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['evolution-seat-colors']['options'][$evo_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['evolution-seat-colors']['options'][$evo_seat_upper]
+                    );
+                } else {
+                    $new_evo_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_evolution-seat-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_evo_sc_term)) {
+                        $this->generated_attributes->attributes['evolution-seat-colors']['options'][$evo_seat_upper] = $new_evo_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_evo_sc_term['term_id']);
+                    }
+                }
+            }
+
+            // EZGO used products also get pa_ezgo-cart-colors (with auto-creation)
+            if ($make_lower === 'ezgo') {
+                $this->attributes['pa_ezgo-cart-colors'] = $this->generated_attributes->attributes['ezgo-cart-colors']['object'];
+                $ezgo_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+                if (isset($this->generated_attributes->attributes['ezgo-cart-colors']['options'][$ezgo_color_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['ezgo-cart-colors']['options'][$ezgo_color_upper]
+                    );
+                } else {
+                    $new_ezgo_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                        'pa_ezgo-cart-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                    );
+                    if (!is_wp_error($new_ezgo_term)) {
+                        $this->generated_attributes->attributes['ezgo-cart-colors']['options'][$ezgo_color_upper] = $new_ezgo_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_ezgo_term['term_id']);
+                    }
+                }
+            }
+
+            // EZGO used products also get pa_ezgo-seat-colors (with auto-creation)
+            if ($make_lower === 'ezgo') {
+                $this->attributes['pa_ezgo-seat-colors'] = $this->generated_attributes->attributes['ezgo-seat-colors']['object'];
+                $ezgo_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['ezgo-seat-colors']['options'][$ezgo_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['ezgo-seat-colors']['options'][$ezgo_seat_upper]
+                    );
+                } else {
+                    $new_ezgo_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_ezgo-seat-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_ezgo_sc_term)) {
+                        $this->generated_attributes->attributes['ezgo-seat-colors']['options'][$ezgo_seat_upper] = $new_ezgo_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_ezgo_sc_term['term_id']);
+                    }
+                }
+            }
+
+            // ICON used products also get pa_icon-cart-colors (with auto-creation)
+            if ($make_lower === 'icon') {
+                $this->attributes['pa_icon-cart-colors'] = $this->generated_attributes->attributes['icon-cart-colors']['object'];
+                $icon_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+                if (isset($this->generated_attributes->attributes['icon-cart-colors']['options'][$icon_color_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['icon-cart-colors']['options'][$icon_color_upper]
+                    );
+                } else {
+                    $new_icon_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                        'pa_icon-cart-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                    );
+                    if (!is_wp_error($new_icon_term)) {
+                        $this->generated_attributes->attributes['icon-cart-colors']['options'][$icon_color_upper] = $new_icon_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_icon_term['term_id']);
+                    }
+                }
+            }
+
+            // ICON used products also get pa_icon-seat-colors (with auto-creation)
+            if ($make_lower === 'icon') {
+                $this->attributes['pa_icon-seat-colors'] = $this->generated_attributes->attributes['icon-seat-colors']['object'];
+                $icon_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['icon-seat-colors']['options'][$icon_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['icon-seat-colors']['options'][$icon_seat_upper]
+                    );
+                } else {
+                    $new_icon_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_icon-seat-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_icon_sc_term)) {
+                        $this->generated_attributes->attributes['icon-seat-colors']['options'][$icon_seat_upper] = $new_icon_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_icon_sc_term['term_id']);
+                    }
+                }
+            }
+
+            // Navitas used products also get pa_navitas-cart-color and pa_navitas-seat-color (with auto-creation)
+            if ($make_lower === 'navitas') {
+                $this->attributes['pa_navitas-cart-color'] = $this->generated_attributes->attributes['navitas-cart-color']['object'];
+                $nav_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+                if (isset($this->generated_attributes->attributes['navitas-cart-color']['options'][$nav_color_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['navitas-cart-color']['options'][$nav_color_upper]
+                    );
+                } else {
+                    $new_nav_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                        'pa_navitas-cart-color',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                    );
+                    if (!is_wp_error($new_nav_term)) {
+                        $this->generated_attributes->attributes['navitas-cart-color']['options'][$nav_color_upper] = $new_nav_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_nav_term['term_id']);
+                    }
+                }
+
+                $this->attributes['pa_navitas-seat-color'] = $this->generated_attributes->attributes['navitas-seat-color']['object'];
+                $nav_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['navitas-seat-color']['options'][$nav_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['navitas-seat-color']['options'][$nav_seat_upper]
+                    );
+                } else {
+                    $new_nav_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_navitas-seat-color',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_nav_sc_term)) {
+                        $this->generated_attributes->attributes['navitas-seat-color']['options'][$nav_seat_upper] = $new_nav_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_nav_sc_term['term_id']);
+                    }
+                }
+            }
+
+            // Polaris used products also get pa_polaris-cart-colors and pa_polaris-seat-colors (with auto-creation)
+            if ($make_lower === 'polaris') {
+                $this->attributes['pa_polaris-cart-colors'] = $this->generated_attributes->attributes['polaris-cart-colors']['object'];
+                $pol_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+                if (isset($this->generated_attributes->attributes['polaris-cart-colors']['options'][$pol_color_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['polaris-cart-colors']['options'][$pol_color_upper]
+                    );
+                } else {
+                    $new_pol_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                        'pa_polaris-cart-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                    );
+                    if (!is_wp_error($new_pol_term)) {
+                        $this->generated_attributes->attributes['polaris-cart-colors']['options'][$pol_color_upper] = $new_pol_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_pol_term['term_id']);
+                    }
+                }
+
+                $this->attributes['pa_polaris-seat-colors'] = $this->generated_attributes->attributes['polaris-seat-colors']['object'];
+                $pol_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['polaris-seat-colors']['options'][$pol_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['polaris-seat-colors']['options'][$pol_seat_upper]
+                    );
+                } else {
+                    $new_pol_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_polaris-seat-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_pol_sc_term)) {
+                        $this->generated_attributes->attributes['polaris-seat-colors']['options'][$pol_seat_upper] = $new_pol_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_pol_sc_term['term_id']);
+                    }
+                }
+            }
+
+            // Royal EV used products also get pa_royal-ev-cart-colors and pa_royal-ev-seat-colors (with auto-creation)
+            if ($make_lower === 'royal-ev') {
+                $this->attributes['pa_royal-ev-cart-colors'] = $this->generated_attributes->attributes['royal-ev-cart-colors']['object'];
+                $rev_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+                if (isset($this->generated_attributes->attributes['royal-ev-cart-colors']['options'][$rev_color_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['royal-ev-cart-colors']['options'][$rev_color_upper]
+                    );
+                } else {
+                    $new_rev_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                        'pa_royal-ev-cart-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                    );
+                    if (!is_wp_error($new_rev_term)) {
+                        $this->generated_attributes->attributes['royal-ev-cart-colors']['options'][$rev_color_upper] = $new_rev_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_rev_term['term_id']);
+                    }
+                }
+
+                $this->attributes['pa_royal-ev-seat-colors'] = $this->generated_attributes->attributes['royal-ev-seat-colors']['object'];
+                $rev_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['royal-ev-seat-colors']['options'][$rev_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['royal-ev-seat-colors']['options'][$rev_seat_upper]
+                    );
+                } else {
+                    $new_rev_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_royal-ev-seat-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_rev_sc_term)) {
+                        $this->generated_attributes->attributes['royal-ev-seat-colors']['options'][$rev_seat_upper] = $new_rev_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_rev_sc_term['term_id']);
+                    }
+                }
+            }
+
+            // Star EV used products also get pa_star-ev-cart-colors and pa_star-ev-seat-colors (with auto-creation)
+            if ($make_lower === 'star-ev') {
+                $this->attributes['pa_star-ev-cart-colors'] = $this->generated_attributes->attributes['star-ev-cart-colors']['object'];
+                $sev_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+                if (isset($this->generated_attributes->attributes['star-ev-cart-colors']['options'][$sev_color_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['star-ev-cart-colors']['options'][$sev_color_upper]
+                    );
+                } else {
+                    $new_sev_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                        'pa_star-ev-cart-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                    );
+                    if (!is_wp_error($new_sev_term)) {
+                        $this->generated_attributes->attributes['star-ev-cart-colors']['options'][$sev_color_upper] = $new_sev_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_sev_term['term_id']);
+                    }
+                }
+
+                $this->attributes['pa_star-ev-seat-colors'] = $this->generated_attributes->attributes['star-ev-seat-colors']['object'];
+                $sev_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['star-ev-seat-colors']['options'][$sev_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['star-ev-seat-colors']['options'][$sev_seat_upper]
+                    );
+                } else {
+                    $new_sev_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_star-ev-seat-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_sev_sc_term)) {
+                        $this->generated_attributes->attributes['star-ev-seat-colors']['options'][$sev_seat_upper] = $new_sev_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_sev_sc_term['term_id']);
+                    }
+                }
+            }
+
+            // Swift used products also get pa_swift-cart-colors and pa_swift-seat-colors (with auto-creation)
+            if ($make_lower === 'swift') {
+                $this->attributes['pa_swift-cart-colors'] = $this->generated_attributes->attributes['swift-cart-colors']['object'];
+                $swift_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+                if (isset($this->generated_attributes->attributes['swift-cart-colors']['options'][$swift_color_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['swift-cart-colors']['options'][$swift_color_upper]
+                    );
+                } else {
+                    $new_swift_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                        'pa_swift-cart-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                    );
+                    if (!is_wp_error($new_swift_term)) {
+                        $this->generated_attributes->attributes['swift-cart-colors']['options'][$swift_color_upper] = $new_swift_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_swift_term['term_id']);
+                    }
+                }
+
+                $this->attributes['pa_swift-seat-colors'] = $this->generated_attributes->attributes['swift-seat-colors']['object'];
+                $swift_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['swift-seat-colors']['options'][$swift_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['swift-seat-colors']['options'][$swift_seat_upper]
+                    );
+                } else {
+                    $new_swift_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_swift-seat-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_swift_sc_term)) {
+                        $this->generated_attributes->attributes['swift-seat-colors']['options'][$swift_seat_upper] = $new_swift_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_swift_sc_term['term_id']);
+                    }
+                }
+            }
+
+            // Tara used products also get pa_tara-cart-colors and pa_tara-seat-colors (with auto-creation)
+            if ($make_lower === 'tara') {
+                $this->attributes['pa_tara-cart-colors'] = $this->generated_attributes->attributes['tara-cart-colors']['object'];
+                $tara_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+                if (isset($this->generated_attributes->attributes['tara-cart-colors']['options'][$tara_color_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['tara-cart-colors']['options'][$tara_color_upper]
+                    );
+                } else {
+                    $new_tara_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                        'pa_tara-cart-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                    );
+                    if (!is_wp_error($new_tara_term)) {
+                        $this->generated_attributes->attributes['tara-cart-colors']['options'][$tara_color_upper] = $new_tara_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_tara_term['term_id']);
+                    }
+                }
+
+                $this->attributes['pa_tara-seat-colors'] = $this->generated_attributes->attributes['tara-seat-colors']['object'];
+                $tara_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['tara-seat-colors']['options'][$tara_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['tara-seat-colors']['options'][$tara_seat_upper]
+                    );
+                } else {
+                    $new_tara_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_tara-seat-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_tara_sc_term)) {
+                        $this->generated_attributes->attributes['tara-seat-colors']['options'][$tara_seat_upper] = $new_tara_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_tara_sc_term['term_id']);
+                    }
+                }
+            }
+
+            // Teko used products also get pa_teko-cart-colors and pa_teko-seat-colors (with auto-creation)
+            if ($make_lower === 'teko') {
+                $this->attributes['pa_teko-cart-colors'] = $this->generated_attributes->attributes['teko-cart-colors']['object'];
+                $teko_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+                if (isset($this->generated_attributes->attributes['teko-cart-colors']['options'][$teko_color_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['teko-cart-colors']['options'][$teko_color_upper]
+                    );
+                } else {
+                    $new_teko_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                        'pa_teko-cart-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                    );
+                    if (!is_wp_error($new_teko_term)) {
+                        $this->generated_attributes->attributes['teko-cart-colors']['options'][$teko_color_upper] = $new_teko_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_teko_term['term_id']);
+                    }
+                }
+
+                $this->attributes['pa_teko-seat-colors'] = $this->generated_attributes->attributes['teko-seat-colors']['object'];
+                $teko_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['teko-seat-colors']['options'][$teko_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['teko-seat-colors']['options'][$teko_seat_upper]
+                    );
+                } else {
+                    $new_teko_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_teko-seat-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_teko_sc_term)) {
+                        $this->generated_attributes->attributes['teko-seat-colors']['options'][$teko_seat_upper] = $new_teko_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_teko_sc_term['term_id']);
+                    }
+                }
+            }
+
+            // Tomberlin used products also get pa_tomberlin-cart-colors (with auto-creation)
+            if ($make_lower === 'tomberlin') {
+                $this->attributes['pa_tomberlin-cart-colors'] = $this->generated_attributes->attributes['tomberlin-cart-colors']['object'];
+                $tomb_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+                if (isset($this->generated_attributes->attributes['tomberlin-cart-colors']['options'][$tomb_color_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['tomberlin-cart-colors']['options'][$tomb_color_upper]
+                    );
+                } else {
+                    $new_tomb_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                        'pa_tomberlin-cart-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                    );
+                    if (!is_wp_error($new_tomb_term)) {
+                        $this->generated_attributes->attributes['tomberlin-cart-colors']['options'][$tomb_color_upper] = $new_tomb_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_tomb_term['term_id']);
+                    }
+                }
+
+                $this->attributes['pa_tomberlin-seat-colors'] = $this->generated_attributes->attributes['tomberlin-seat-colors']['object'];
+                $tomb_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['tomberlin-seat-colors']['options'][$tomb_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['tomberlin-seat-colors']['options'][$tomb_seat_upper]
+                    );
+                } else {
+                    $new_tomb_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_tomberlin-seat-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_tomb_sc_term)) {
+                        $this->generated_attributes->attributes['tomberlin-seat-colors']['options'][$tomb_seat_upper] = $new_tomb_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_tomb_sc_term['term_id']);
+                    }
+                }
+            }
+
+            // Yamaha used products also get pa_yamaha-cart-colors (with auto-creation)
+            if ($make_lower === 'yamaha') {
+                $this->attributes['pa_yamaha-cart-colors'] = $this->generated_attributes->attributes['yamaha-cart-colors']['object'];
+                $yam_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+                if (isset($this->generated_attributes->attributes['yamaha-cart-colors']['options'][$yam_color_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['yamaha-cart-colors']['options'][$yam_color_upper]
+                    );
+                } else {
+                    $new_yam_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                        'pa_yamaha-cart-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                    );
+                    if (!is_wp_error($new_yam_term)) {
+                        $this->generated_attributes->attributes['yamaha-cart-colors']['options'][$yam_color_upper] = $new_yam_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_yam_term['term_id']);
+                    }
+                }
+
+                $this->attributes['pa_yamaha-seat-colors'] = $this->generated_attributes->attributes['yamaha-seat-colors']['object'];
+                $yam_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['yamaha-seat-colors']['options'][$yam_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['yamaha-seat-colors']['options'][$yam_seat_upper]
+                    );
+                } else {
+                    $new_yam_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_yamaha-seat-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_yam_sc_term)) {
+                        $this->generated_attributes->attributes['yamaha-seat-colors']['options'][$yam_seat_upper] = $new_yam_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_yam_sc_term['term_id']);
+                    }
+                }
+            }
+        } elseif (array_search($make_lower, $make_attrs) !== false) {
+            // Navitas uses singular "cart-color" / "seat-color" instead of plural
+            if ($make_lower === 'navitas') {
+                $this->attributes['pa_navitas-cart-color'] = $this->generated_attributes->attributes['navitas-cart-color']['object'];
+                $nav_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+                if (isset($this->generated_attributes->attributes['navitas-cart-color']['options'][$nav_color_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['navitas-cart-color']['options'][$nav_color_upper]
+                    );
+                } else {
+                    $new_nav_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                        'pa_navitas-cart-color',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                    );
+                    if (!is_wp_error($new_nav_term)) {
+                        $this->generated_attributes->attributes['navitas-cart-color']['options'][$nav_color_upper] = $new_nav_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_nav_term['term_id']);
+                    }
+                }
+
+                $this->attributes['pa_navitas-seat-color'] = $this->generated_attributes->attributes['navitas-seat-color']['object'];
+                $nav_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['navitas-seat-color']['options'][$nav_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['navitas-seat-color']['options'][$nav_seat_upper]
+                    );
+                } else {
+                    $new_nav_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_navitas-seat-color',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_nav_sc_term)) {
+                        $this->generated_attributes->attributes['navitas-seat-color']['options'][$nav_seat_upper] = $new_nav_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_nav_sc_term['term_id']);
+                    }
+                }
+            } else {
+                $this->attributes["pa_$make_lower-cart-colors"] = $this->generated_attributes->attributes[$make_lower . '-cart-colors']['object'];
+                $make_cart_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+
+                // Club Car / Denago / Epic / Evolution / EZGO / ICON / Polaris / Royal EV / Star EV / Swift / Tara / Teko / Tomberlin / Yamaha: auto-create missing cart color terms
+                if (in_array($make_lower, ['club-car', 'denago', 'epic', 'evolution', 'ezgo', 'icon', 'polaris', 'royal-ev', 'star-ev', 'swift', 'tara', 'teko', 'tomberlin', 'yamaha']) && !isset($this->generated_attributes->attributes[$make_lower . '-cart-colors']['options'][$make_cart_color_upper])) {
+                    $new_color_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                        "pa_$make_lower-cart-colors",
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                    );
+                    if (!is_wp_error($new_color_term)) {
+                        $this->generated_attributes->attributes[$make_lower . '-cart-colors']['options'][$make_cart_color_upper] = $new_color_term['term_id'];
+                    }
+                }
+
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes[$make_lower . '-cart-colors']['options'][$make_cart_color_upper]
+                );
+
+                $this->attributes["pa_$make_lower-seat-colors"] = $this->generated_attributes->attributes[$make_lower . '-seat-colors']['object'];
+                $make_seat_color_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+
+                // Club Car / Denago / Epic / Evolution / EZGO / ICON / Polaris / Royal EV / Star EV / Swift / Tara / Teko / Tomberlin / Yamaha: auto-create missing seat color terms
+                if (in_array($make_lower, ['club-car', 'denago', 'epic', 'evolution', 'ezgo', 'icon', 'polaris', 'royal-ev', 'star-ev', 'swift', 'tara', 'teko', 'tomberlin', 'yamaha']) && !isset($this->generated_attributes->attributes[$make_lower . '-seat-colors']['options'][$make_seat_color_upper])) {
+                    $new_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        "pa_$make_lower-seat-colors",
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_sc_term)) {
+                        $this->generated_attributes->attributes[$make_lower . '-seat-colors']['options'][$make_seat_color_upper] = $new_sc_term['term_id'];
+                    }
+                }
+
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes[$make_lower . '-seat-colors']['options'][$make_seat_color_upper]
+                );
+            }
         } else {
             $this->attributes['pa_cart-color'] = $this->generated_attributes->attributes['cart-color']['object'];
             array_push(
@@ -1175,26 +2289,56 @@ abstract class Abstract_Cart
             );
         }
 
-        // Sound system
-        $this->attributes['pa_sound-system'] = $this->generated_attributes->attributes['sound-system']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            (
-                $this->generated_attributes->attributes['sound-system']['options'][strtoupper($this->make_with_symbol) . ' SOUND SYSTEM']
-                ??
-                $this->generated_attributes->attributes['sound-system']['options']['YES']
-            )
-        );
+        // Sound system (New products with hasSoundSystem only, with auto-creation)
+        if (!$this->cart['isUsed'] && $this->cart['cartAttributes']['hasSoundSystem']) {
+            $this->attributes['pa_sound-system'] = $this->generated_attributes->attributes['sound-system']['object'];
+            $sound_system_value = strtoupper($this->make_with_symbol) . ' SOUND SYSTEM';
+            if (isset($this->generated_attributes->attributes['sound-system']['options'][$sound_system_value])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes['sound-system']['options'][$sound_system_value]
+                );
+            } else {
+                $new_sound_term = wp_insert_term(
+                    strtoupper($this->make_with_symbol) . ' Sound System',
+                    'pa_sound-system',
+                    ['slug' => sanitize_title($sound_system_value)]
+                );
+                if (!is_wp_error($new_sound_term)) {
+                    $this->generated_attributes->attributes['sound-system']['options'][$sound_system_value] = $new_sound_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_sound_term['term_id']);
+                }
+            }
+        }
 
-        // Passengers
-        $attr_seats = $this->cart['cartAttributes']['passengers'] ?
-            $this->number_seats . ' SEATER' :
-            '';
+        // Passengers (with auto-creation)
+        if ($this->cart['cartAttributes']['passengers']) {
+            if ($this->cart['cartAttributes']['passengers'] == 'Utility') {
+                $attr_seats = 'U SEATER';
+            } else {
+                $attr_seats = $this->number_seats . ' SEATER';
+            }
+        } else {
+            $attr_seats = '';
+        }
         $this->attributes['pa_passengers'] = $this->generated_attributes->attributes['passengers']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['passengers']['options'][$attr_seats]
-        );
+        $attr_seats_upper = strtoupper($attr_seats);
+        if (isset($this->generated_attributes->attributes['passengers']['options'][$attr_seats_upper])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['passengers']['options'][$attr_seats_upper]
+            );
+        } elseif (!empty($attr_seats)) {
+            $new_passengers_term = wp_insert_term(
+                ucwords(strtolower($attr_seats)),
+                'pa_passengers',
+                ['slug' => sanitize_title($attr_seats)]
+            );
+            if (!is_wp_error($new_passengers_term)) {
+                $this->generated_attributes->attributes['passengers']['options'][$attr_seats_upper] = $new_passengers_term['term_id'];
+                array_push($this->taxonomy_terms, $new_passengers_term['term_id']);
+            }
+        }
 
         // Reciever Hitch
         $this->attributes['pa_receiver-hitch'] = $this->generated_attributes->attributes['receiver-hitch']['object'];
@@ -1203,103 +2347,357 @@ abstract class Abstract_Cart
             $this->generated_attributes->attributes['receiver-hitch']['options']['NO']
         );
 
-        // Return Policy
+        // Return Policy (New = Yes, Used = 90 Day)
         $this->attributes['pa_return-policy'] = $this->generated_attributes->attributes['return-policy']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['return-policy']['options']['90 DAY'],
-            $this->generated_attributes->attributes['return-policy']['options']['YES']
-        );
-
-        // Rim Size
-        $this->attributes['pa_rim-size'] = $this->generated_attributes->attributes['rim-size']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['rim-size']['options'][$this->cart['cartAttributes']['tireRimSize'] . ' INCH']
-        );
-
-        // Shipping
-        $this->attributes['pa_shipping'] = $this->generated_attributes->attributes['shipping']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['shipping']['options']['1 TO 3 DAYS LOCAL'],
-            $this->generated_attributes->attributes['shipping']['options']['3 TO 7 DAYS OTR'],
-            $this->generated_attributes->attributes['shipping']['options']['5 TO 9 DAYS NATIONAL']
-        );
-        // // TODO - Model Specific
-        // // Side Step
-        // if ($this->cart['cartAttributes']['sideStep']) {
-        //     $this->attributes['pa_side-step'] = $this->generated_attributes->attributes['side-step']['object'];
-        //     array_push(
-        //         $this->taxonomy_terms,
-        //         $this->generated_attributes->attributes['side-step']['options'][$this->cart['cartAttributes']['sideStep']]
-        //     );
-        // }
-
-        // Street Legal
-        $this->attributes['pa_street-legal'] = $this->generated_attributes->attributes['street-legal']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['street-legal']['options'][$this->cart['title']['isStreetLegal'] ? 'YES' : 'NO']
-        );
-
-        // Tire profile
-        if ($this->cart['cartAttributes']['tireType']) {
-            $this->attributes['pa_tire-profile'] = $this->generated_attributes->attributes['tire-profile']['object'];
+        $return_policy_value = $this->cart['isUsed'] ? '90 DAY' : 'YES';
+        if (isset($this->generated_attributes->attributes['return-policy']['options'][$return_policy_value])) {
             array_push(
                 $this->taxonomy_terms,
-                $this->generated_attributes->attributes['tire-profile']['options'][strtoupper(preg_replace('/-/', ' ', $this->cart['cartAttributes']['tireType']))]
+                $this->generated_attributes->attributes['return-policy']['options'][$return_policy_value]
             );
+        } else {
+            $new_return_policy_term = wp_insert_term(
+                ucwords(strtolower($return_policy_value)),
+                'pa_return-policy',
+                ['slug' => sanitize_title($return_policy_value)]
+            );
+            if (!is_wp_error($new_return_policy_term)) {
+                $this->generated_attributes->attributes['return-policy']['options'][$return_policy_value] = $new_return_policy_term['term_id'];
+                array_push($this->taxonomy_terms, $new_return_policy_term['term_id']);
+            }
         }
 
-        // // TODO - Incomplete Data
-        // // Utility Bed 
-        // if ($this->cart['cartAttributes']['passengers'] === 'Utility') {
-        //     $this->attributes['pa_utility-bed'] = $this->generated_attributes->attributes['utility-bed']['object'];
-        //     array_push(
-        //         $this->taxonomy_terms,
-        //         $this->generated_attributes->attributes['utility-bed']['options']['']
-        //     );
-        // }
+        // Rim Size (with auto-creation)
+        if ($this->cart['cartAttributes']['tireRimSize']) {
+            $rim_size_value = strtoupper($this->cart['cartAttributes']['tireRimSize'] . ' INCH');
+            $this->attributes['pa_rim-size'] = $this->generated_attributes->attributes['rim-size']['object'];
+            if (isset($this->generated_attributes->attributes['rim-size']['options'][$rim_size_value])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes['rim-size']['options'][$rim_size_value]
+                );
+            } else {
+                $new_rim_size_term = wp_insert_term(
+                    $rim_size_value,
+                    'pa_rim-size',
+                    ['slug' => sanitize_title($rim_size_value)]
+                );
+                if (!is_wp_error($new_rim_size_term)) {
+                    $this->generated_attributes->attributes['rim-size']['options'][$rim_size_value] = $new_rim_size_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_rim_size_term['term_id']);
+                }
+            }
+        }
+
+        // Shipping (all products get all three options, with auto-creation)
+        $this->attributes['pa_shipping'] = $this->generated_attributes->attributes['shipping']['object'];
+        $shipping_values = ['1 TO 3 DAYS LOCAL', '3 TO 7 DAYS OTR', '5 TO 9 DAYS NATIONAL'];
+        foreach ($shipping_values as $shipping_val) {
+            if (isset($this->generated_attributes->attributes['shipping']['options'][$shipping_val])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes['shipping']['options'][$shipping_val]
+                );
+            } else {
+                $new_shipping_term = wp_insert_term(
+                    $shipping_val,
+                    'pa_shipping',
+                    ['slug' => sanitize_title($shipping_val)]
+                );
+                if (!is_wp_error($new_shipping_term)) {
+                    $this->generated_attributes->attributes['shipping']['options'][$shipping_val] = $new_shipping_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_shipping_term['term_id']);
+                }
+            }
+        }
+        // Side Step (with auto-creation)
+        if (!empty($this->cart['cartAttributes']['sideStep'])) {
+            $this->attributes['pa_side-step'] = $this->generated_attributes->attributes['side-step']['object'];
+            $side_step_values = (array) $this->cart['cartAttributes']['sideStep'];
+            foreach ($side_step_values as $step_val) {
+                if (empty($step_val)) continue;
+                $step_upper = strtoupper($step_val);
+                if (isset($this->generated_attributes->attributes['side-step']['options'][$step_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['side-step']['options'][$step_upper]
+                    );
+                } else {
+                    $new_step_term = wp_insert_term(
+                        ucwords(strtolower($step_val)),
+                        'pa_side-step',
+                        ['slug' => sanitize_title($step_val)]
+                    );
+                    if (!is_wp_error($new_step_term)) {
+                        $this->generated_attributes->attributes['side-step']['options'][$step_upper] = $new_step_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_step_term['term_id']);
+                    }
+                }
+            }
+        }
+
+        // Street Legal (with auto-creation)
+        $this->attributes['pa_street-legal'] = $this->generated_attributes->attributes['street-legal']['object'];
+        $street_legal_value = $this->cart['title']['isStreetLegal'] ? 'YES' : 'NO';
+        if (isset($this->generated_attributes->attributes['street-legal']['options'][$street_legal_value])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['street-legal']['options'][$street_legal_value]
+            );
+        } else {
+            $new_sl_term = wp_insert_term(
+                ucwords(strtolower($street_legal_value)),
+                'pa_street-legal',
+                ['slug' => sanitize_title($street_legal_value)]
+            );
+            if (!is_wp_error($new_sl_term)) {
+                $this->generated_attributes->attributes['street-legal']['options'][$street_legal_value] = $new_sl_term['term_id'];
+                array_push($this->taxonomy_terms, $new_sl_term['term_id']);
+            }
+        }
+
+        // Tire profile (with auto-creation)
+        if ($this->cart['cartAttributes']['tireType']) {
+            $this->attributes['pa_tire-profile'] = $this->generated_attributes->attributes['tire-profile']['object'];
+            $tire_upper = strtoupper(preg_replace('/-/', ' ', $this->cart['cartAttributes']['tireType']));
+            if (isset($this->generated_attributes->attributes['tire-profile']['options'][$tire_upper])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes['tire-profile']['options'][$tire_upper]
+                );
+            } else {
+                $new_tire_term = wp_insert_term(
+                    ucwords(strtolower($this->cart['cartAttributes']['tireType'])),
+                    'pa_tire-profile',
+                    ['slug' => sanitize_title($this->cart['cartAttributes']['tireType'])]
+                );
+                if (!is_wp_error($new_tire_term)) {
+                    $this->generated_attributes->attributes['tire-profile']['options'][$tire_upper] = $new_tire_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_tire_term['term_id']);
+                }
+            }
+        }
+
+        // Store Code (with auto-creation)
+        if (!empty($this->cart['cartLocation']['locationId'])) {
+            $store_id = $this->cart['cartLocation']['locationId'];
+            if (strtolower($store_id) === 'national') {
+                $store_code_value = 'UNITED STATES OF AMERICA';
+            } else {
+                $loc_data = Attributes::get_location($store_id);
+                if ($loc_data) {
+                    $city = $loc_data['city_short'] ?? $loc_data['city'];
+                    $st = $loc_data['st'] ?? '';
+                    $store_code_value = strtoupper(trim($city . ' ' . $st));
+                } else {
+                    $store_code_value = '';
+                }
+            }
+            if (!empty($store_code_value)) {
+                $this->attributes['pa_store-code'] = $this->generated_attributes->attributes['store-code']['object'];
+                if (isset($this->generated_attributes->attributes['store-code']['options'][$store_code_value])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['store-code']['options'][$store_code_value]
+                    );
+                } else {
+                    $new_store_term = wp_insert_term(
+                        $store_code_value,
+                        'pa_store-code',
+                        ['slug' => sanitize_title($store_code_value)]
+                    );
+                    if (!is_wp_error($new_store_term)) {
+                        $this->generated_attributes->attributes['store-code']['options'][$store_code_value] = $new_store_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_store_term['term_id']);
+                    }
+                }
+            }
+        }
+
+        // Utility Bed (with auto-creation) — based on payload cartAttributes.hasBed
+        if (!empty($this->cart['cartAttributes']['hasBed'])) {
+            $this->attributes['pa_utility-bed'] = $this->generated_attributes->attributes['utility-bed']['object'];
+            $bed_value = strtoupper($this->cart['cartAttributes']['hasBed']);
+            if (isset($this->generated_attributes->attributes['utility-bed']['options'][$bed_value])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes['utility-bed']['options'][$bed_value]
+                );
+            } else {
+                $new_bed_term = wp_insert_term(
+                    ucwords(strtolower($this->cart['cartAttributes']['hasBed'])),
+                    'pa_utility-bed',
+                    ['slug' => sanitize_title($this->cart['cartAttributes']['hasBed'])]
+                );
+                if (!is_wp_error($new_bed_term)) {
+                    $this->generated_attributes->attributes['utility-bed']['options'][$bed_value] = $new_bed_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_bed_term['term_id']);
+                }
+            }
+        }
 
         // Vehicle Class
-        $vehicle_class_attr = ['Golf Cart'];
+        $vehicle_class_attr = ['Golf Cart', 'Personal Transportation Vehicles (PTVs)'];
+        if ($this->cart['title']['isStreetLegal']) {
+            array_push($vehicle_class_attr, 'Low Speed Vehicle (LSVs)');
+            array_push($vehicle_class_attr, 'Medium Speed Vehicle (MSVs)');
+        }
         if ($this->cart['isElectric']) {
             array_push($vehicle_class_attr, 'Neighborhood Electric Vehicles (NEVs)');
             array_push($vehicle_class_attr, 'Zero Emission Vehicles (ZEVs)');
-            if ($this->cart['title']['isStreetLegal']) {
-                array_push($vehicle_class_attr, 'Low Speed Vehicle (LSVs)');
-                array_push($vehicle_class_attr, 'Medium Speed Vehicle (MSVs)');
-            }
         }
-        if ($this->cart['title']['isStreetLegal'])
-            array_push($vehicle_class_attr, 'Personal Transportation Vehicles (PTVs)');
-
-        if ($this->cart['cartAttributes']['utilityBed'])
+        if (!empty($this->cart['cartAttributes']['hasBed'])) {
             array_push($vehicle_class_attr, 'Utility Task Vehicle (UTVs)');
+        }
+        if (empty($this->cart['cartAttributes']['isLifted'])) {
+            array_push($vehicle_class_attr, 'NON-LIFTED');
+        }
 
         $this->attributes['pa_vehicle-class'] = $this->generated_attributes->attributes['vehicle-class']['object'];
         foreach ($vehicle_class_attr as $vehicle_class) {
-            array_push(
-                $this->taxonomy_terms,
-                $this->generated_attributes->attributes['vehicle-class']['options'][strtoupper($vehicle_class)]
-            );
+            $vc_key = strtoupper($vehicle_class);
+            if (isset($this->generated_attributes->attributes['vehicle-class']['options'][$vc_key])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes['vehicle-class']['options'][$vc_key]
+                );
+            } else {
+                $new_vc_term = wp_insert_term($vehicle_class, 'pa_vehicle-class', ['slug' => sanitize_title($vehicle_class)]);
+                if (!is_wp_error($new_vc_term)) {
+                    $this->generated_attributes->attributes['vehicle-class']['options'][$vc_key] = $new_vc_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_vc_term['term_id']);
+                }
+            }
         }
 
-        // Vehicle Warranty
-        $this->attributes['pa_vehicle-warranty'] = $this->generated_attributes->attributes['vehicle-warranty']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['vehicle-warranty']['options'][strtoupper($this->cart['warrantyLength'])]
-        );
+        // Vehicle MSRP (with auto-creation) — based on payload retailPrice
+        if (!empty($this->cart['retailPrice'])) {
+            $msrp_raw = $this->cart['retailPrice'];
+            $msrp_label = '$' . number_format((float) $msrp_raw, 0, '.', ',');
+            $msrp_key = strtoupper($msrp_label);
+            $this->attributes['pa_vehicle-msrp'] = $this->generated_attributes->attributes['vehicle-msrp']['object'];
+            if (isset($this->generated_attributes->attributes['vehicle-msrp']['options'][$msrp_key])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes['vehicle-msrp']['options'][$msrp_key]
+                );
+            } else {
+                $new_msrp_term = wp_insert_term(
+                    $msrp_label,
+                    'pa_vehicle-msrp',
+                    ['slug' => sanitize_title((string) $msrp_raw)]
+                );
+                if (!is_wp_error($new_msrp_term)) {
+                    $this->generated_attributes->attributes['vehicle-msrp']['options'][$msrp_key] = $new_msrp_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_msrp_term['term_id']);
+                }
+            }
+        }
 
-        // Year of Vehicle
-        if ($this->cart['cartType']['year']) {
-            $this->attributes['pa_year-of-vehicle'] = $this->generated_attributes->attributes['year-of-vehicle']['object'];
+        // Vehicle Power (with auto-creation) — based on payload isElectric
+        $power_value = $this->cart['isElectric'] ? 'ELECTRIC' : 'GAS';
+        $this->attributes['pa_vehicle-power'] = $this->generated_attributes->attributes['vehicle-power']['object'];
+        if (isset($this->generated_attributes->attributes['vehicle-power']['options'][$power_value])) {
             array_push(
                 $this->taxonomy_terms,
-                $this->generated_attributes->attributes['year-of-vehicle']['options'][strtoupper($this->cart['cartType']['year'])]
+                $this->generated_attributes->attributes['vehicle-power']['options'][$power_value]
             );
+        } else {
+            $new_power_term = wp_insert_term(
+                $power_value,
+                'pa_vehicle-power',
+                ['slug' => sanitize_title($power_value)]
+            );
+            if (!is_wp_error($new_power_term)) {
+                $this->generated_attributes->attributes['vehicle-power']['options'][$power_value] = $new_power_term['term_id'];
+                array_push($this->taxonomy_terms, $new_power_term['term_id']);
+            }
+        }
+
+        // Vehicle Status (with auto-creation) — based on payload isUsed
+        $status_value = $this->cart['isUsed'] ? 'USED' : 'NEW';
+        $this->attributes['pa_vehicle-status'] = $this->generated_attributes->attributes['vehicle-status']['object'];
+        if (isset($this->generated_attributes->attributes['vehicle-status']['options'][$status_value])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['vehicle-status']['options'][$status_value]
+            );
+        } else {
+            $new_status_term = wp_insert_term(
+                $status_value,
+                'pa_vehicle-status',
+                ['slug' => sanitize_title($status_value)]
+            );
+            if (!is_wp_error($new_status_term)) {
+                $this->generated_attributes->attributes['vehicle-status']['options'][$status_value] = $new_status_term['term_id'];
+                array_push($this->taxonomy_terms, $new_status_term['term_id']);
+            }
+        }
+
+        // Vehicle Warranty (with auto-creation) — based on payload warrantyLength
+        if (!empty($this->cart['warrantyLength'])) {
+            $warranty_value = strtoupper($this->cart['warrantyLength']);
+            $this->attributes['pa_vehicle-warranty'] = $this->generated_attributes->attributes['vehicle-warranty']['object'];
+            if (isset($this->generated_attributes->attributes['vehicle-warranty']['options'][$warranty_value])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes['vehicle-warranty']['options'][$warranty_value]
+                );
+            } else {
+                $new_warranty_term = wp_insert_term(
+                    ucwords(strtolower($this->cart['warrantyLength'])),
+                    'pa_vehicle-warranty',
+                    ['slug' => sanitize_title($this->cart['warrantyLength'])]
+                );
+                if (!is_wp_error($new_warranty_term)) {
+                    $this->generated_attributes->attributes['vehicle-warranty']['options'][$warranty_value] = $new_warranty_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_warranty_term['term_id']);
+                }
+            }
+        }
+
+        // VIN (with auto-creation) — based on payload vinNo
+        if (!empty($this->cart['vinNo'])) {
+            $vin_value = strtoupper($this->cart['vinNo']);
+            $this->attributes['pa_vin'] = $this->generated_attributes->attributes['vin']['object'];
+            if (isset($this->generated_attributes->attributes['vin']['options'][$vin_value])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes['vin']['options'][$vin_value]
+                );
+            } else {
+                $new_vin_term = wp_insert_term(
+                    $vin_value,
+                    'pa_vin',
+                    ['slug' => sanitize_title($this->cart['vinNo'])]
+                );
+                if (!is_wp_error($new_vin_term)) {
+                    $this->generated_attributes->attributes['vin']['options'][$vin_value] = $new_vin_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_vin_term['term_id']);
+                }
+            }
+        }
+
+        // Year of Vehicle (with auto-creation) — based on payload cartType.year
+        if (!empty($this->cart['cartType']['year'])) {
+            $year_value = strtoupper($this->cart['cartType']['year']);
+            $this->attributes['pa_year-of-vehicle'] = $this->generated_attributes->attributes['year-of-vehicle']['object'];
+            if (isset($this->generated_attributes->attributes['year-of-vehicle']['options'][$year_value])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes['year-of-vehicle']['options'][$year_value]
+                );
+            } else {
+                $new_year_term = wp_insert_term(
+                    $this->cart['cartType']['year'],
+                    'pa_year-of-vehicle',
+                    ['slug' => sanitize_title($this->cart['cartType']['year'])]
+                );
+                if (!is_wp_error($new_year_term)) {
+                    $this->generated_attributes->attributes['year-of-vehicle']['options'][$year_value] = $new_year_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_year_term['term_id']);
+                }
+            }
         }
 
         // Serialize for database storage
@@ -1375,17 +2773,68 @@ abstract class Abstract_Cart
             );
         }
 
-        // Sound Systems
-        if (strtoupper($this->make_with_symbol) == 'SWIFT®') {
-            array_push(
-                $this->taxonomy_terms,
-                $this->generated_attributes->sound_systems_taxonomy['SWIFT EV® SOUND SYSTEM']
-            );
+        // Sound Systems taxonomy — based on hasSoundSystem + optional soundSystem override
+        if (!empty($this->cart['cartAttributes']['hasSoundSystem'])) {
+            // Check if API payload specifies a custom sound system name
+            $custom_sound = $this->cart['addons']['soundSystem'] ?? null;
+            if (!empty($custom_sound) && is_string($custom_sound)) {
+                $sound_name = strtoupper($custom_sound);
+            } elseif (strtoupper($this->make_with_symbol) == 'SWIFT®') {
+                $sound_name = 'SWIFT EV® SOUND SYSTEM';
+            } else {
+                $sound_name = strtoupper($this->make_with_symbol) . ' SOUND SYSTEM';
+            }
+            if (isset($this->generated_attributes->sound_systems_taxonomy[$sound_name])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->sound_systems_taxonomy[$sound_name]
+                );
+            } else {
+                $new_ss_term = wp_insert_term(
+                    $sound_name,
+                    'sound-systems',
+                    ['slug' => sanitize_title($sound_name)]
+                );
+                if (!is_wp_error($new_ss_term)) {
+                    $this->generated_attributes->sound_systems_taxonomy[$sound_name] = $new_ss_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_ss_term['term_id']);
+                }
+            }
         } else {
-            array_push(
-                $this->taxonomy_terms,
-                $this->generated_attributes->sound_systems_taxonomy[strtoupper($this->make_with_symbol) . ' SOUND SYSTEM']
-            );
+            // No sound system
+            if (isset($this->generated_attributes->sound_systems_taxonomy['NO SOUND SYSTEM'])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->sound_systems_taxonomy['NO SOUND SYSTEM']
+                );
+            } else {
+                $new_no_ss = wp_insert_term('NO SOUND SYSTEM', 'sound-systems', ['slug' => 'no-sound-system']);
+                if (!is_wp_error($new_no_ss)) {
+                    $this->generated_attributes->sound_systems_taxonomy['NO SOUND SYSTEM'] = $new_no_ss['term_id'];
+                    array_push($this->taxonomy_terms, $new_no_ss['term_id']);
+                }
+            }
+        }
+
+        // Rims taxonomy — based on tireRimSize (e.g. "14" becomes "14 INCH")
+        if (!empty($this->cart['cartAttributes']['tireRimSize'])) {
+            $rim_name = strtoupper($this->cart['cartAttributes']['tireRimSize'] . ' INCH');
+            if (isset($this->generated_attributes->rims_taxonomy[$rim_name])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->rims_taxonomy[$rim_name]
+                );
+            } else {
+                $new_rim_term = wp_insert_term(
+                    $rim_name,
+                    'rims',
+                    ['slug' => sanitize_title($rim_name)]
+                );
+                if (!is_wp_error($new_rim_term)) {
+                    $this->generated_attributes->rims_taxonomy[$rim_name] = $new_rim_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_rim_term['term_id']);
+                }
+            }
         }
 
         // Added Features
@@ -1425,42 +2874,34 @@ abstract class Abstract_Cart
         }
 
         // Vehicle class taxonomy
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->vehicle_classes_taxonomy['GOLF CART']
-        );
-
-        if ($this->cart['isElectric']) {
-            array_push(
-                $this->taxonomy_terms,
-                $this->generated_attributes->vehicle_classes_taxonomy['ZERO EMISSION VEHICLES (ZEVS)']
-            );
-            if ($this->cart['title']['isStreetLegal']) {
-                array_push(
-                    $this->taxonomy_terms,
-                    $this->generated_attributes->vehicle_classes_taxonomy['LOW SPEED VEHICLE (LSVS)']
-                );
-                array_push(
-                    $this->taxonomy_terms,
-                    $this->generated_attributes->vehicle_classes_taxonomy['MEDIUM SPEED VEHICLE (MSVS)']
-                );
-                array_push(
-                    $this->taxonomy_terms,
-                    $this->generated_attributes->vehicle_classes_taxonomy['NEIGHBORHOOD ELECTRIC VEHICLES (NEVS)']
-                );
-            }
-        }
+        $vc_taxonomy_classes = ['GOLF CART', 'PERSONAL TRANSPORTATION VEHICLES (PTVS)'];
         if ($this->cart['title']['isStreetLegal']) {
-            array_push(
-                $this->taxonomy_terms,
-                $this->generated_attributes->vehicle_classes_taxonomy['PERSONAL TRANSPORTATION VEHICLES (PTVS)']
-            );
+            $vc_taxonomy_classes[] = 'LOW SPEED VEHICLE (LSVS)';
+            $vc_taxonomy_classes[] = 'MEDIUM SPEED VEHICLE (MSVS)';
         }
-        if ($this->cart['cartAttributes']['utilityBed']) {
-            array_push(
-                $this->taxonomy_terms,
-                $this->generated_attributes->vehicle_classes_taxonomy['UTILITY TASK VEHICLE (UTVS)']
-            );
+        if ($this->cart['isElectric']) {
+            $vc_taxonomy_classes[] = 'NEIGHBORHOOD ELECTRIC VEHICLES (NEVS)';
+            $vc_taxonomy_classes[] = 'ZERO EMISSION VEHICLES (ZEVS)';
+        }
+        if (!empty($this->cart['cartAttributes']['hasBed'])) {
+            $vc_taxonomy_classes[] = 'UTILITY TASK VEHICLE (UTVS)';
+        }
+        if (empty($this->cart['cartAttributes']['isLifted'])) {
+            $vc_taxonomy_classes[] = 'NON-LIFTED';
+        }
+        foreach ($vc_taxonomy_classes as $vc_tax) {
+            if (isset($this->generated_attributes->vehicle_classes_taxonomy[$vc_tax])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->vehicle_classes_taxonomy[$vc_tax]
+                );
+            } else {
+                $new_tax_term = wp_insert_term($vc_tax, 'product_vehicle_class', ['slug' => sanitize_title($vc_tax)]);
+                if (!is_wp_error($new_tax_term)) {
+                    $this->generated_attributes->vehicle_classes_taxonomy[$vc_tax] = $new_tax_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_tax_term['term_id']);
+                }
+            }
         }
 
         // Inventory status taxonomy
@@ -2010,7 +3451,23 @@ abstract class Abstract_Cart
         $this->downloadable = 'no';
         $this->download_limit = '-1';
         $this->download_expiry = '-1';
-        array_push($this->taxonomy_terms, 665);//shipping class
+        // Shipping class: Rentals get "Golf Cart Rentals" (6076), everything else gets "Golf Cart Shipping" (665)
+        if (isset($this->cart['isRental']) && $this->cart['isRental']) {
+            $shipping_slug = 'golf-cart-rentals';
+            $shipping_name = 'Golf Cart Rentals';
+        } else {
+            $shipping_slug = 'golf-cart-shipping';
+            $shipping_name = 'Golf Cart Shipping';
+        }
+        $shipping_term = get_term_by('slug', $shipping_slug, 'product_shipping_class');
+        if (!$shipping_term || is_wp_error($shipping_term)) {
+            $new_shipping = wp_insert_term($shipping_name, 'product_shipping_class', ['slug' => $shipping_slug]);
+            if (!is_wp_error($new_shipping)) {
+                array_push($this->taxonomy_terms, $new_shipping['term_id']);
+            }
+        } else {
+            array_push($this->taxonomy_terms, $shipping_term->term_id);
+        }
         $this->bit_is_cornerstone = '1';
         $this->attr_exclude_global_forms = '1';
         $this->stock = 10000;
