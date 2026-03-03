@@ -287,7 +287,7 @@
         if (cart.imageUrls && Array.isArray(cart.imageUrls) && cart.imageUrls.length > 0) {
             const s3BaseUrl = (window.DMSApiService && window.DMSApiService.s3Urls) 
                 ? window.DMSApiService.s3Urls.carts 
-                : 'https://s3.us-east-1.amazonaws.com/prod.docs.s3/carts/'; // Fallback
+                : 'https://s3.amazonaws.com/test.docs.s3/carts/'; // Fallback
             imageUrl = s3BaseUrl + cart.imageUrls[0];
         }
 

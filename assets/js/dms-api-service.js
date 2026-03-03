@@ -22,7 +22,7 @@
          * S3 Bucket URLs
          */
         s3Urls: {
-            carts: 'https://s3.amazonaws.com/prod.docs.s3/carts/',
+            carts: 'https://s3.amazonaws.com/test.docs.s3/carts/',
             windowStickers: 'https://s3.amazonaws.com/prod.docs.s3/cart-window-stickers/'
         },
 

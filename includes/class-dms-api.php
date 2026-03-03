@@ -26,7 +26,7 @@ class DMS_API
      *
      * @var string
      */
-    private static $s3_carts_url = 'https://s3.us-east-1.amazonaws.com/prod.docs.s3/carts/';
+    private static $s3_carts_url = 'https://s3.amazonaws.com/test.docs.s3/carts/';
     private static $s3_window_stickers_url = 'https://s3.us-east-1.amazonaws.com/prod.docs.s3/cart-window-stickers/';
     private static $s3_default_images_url = 'https://s3.amazonaws.com/test.docs.s3/default-cart-web-images/';
 
