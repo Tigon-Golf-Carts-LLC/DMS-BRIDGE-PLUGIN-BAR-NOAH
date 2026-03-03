@@ -2151,20 +2151,21 @@ function tigon_dms_assign_product_attributes($product_id, $cart_data) {
     }
 
     // Vehicle Class
-    $vehicle_classes = array('GOLF CART');
+    $vehicle_classes = array('GOLF CART', 'PERSONAL TRANSPORTATION VEHICLES (PTVS)');
+    if ($is_street_legal) {
+        $vehicle_classes[] = 'LOW SPEED VEHICLE (LSVS)';
+        $vehicle_classes[] = 'MEDIUM SPEED VEHICLE (MSVS)';
+    }
     if ($is_electric) {
         $vehicle_classes[] = 'NEIGHBORHOOD ELECTRIC VEHICLES (NEVS)';
         $vehicle_classes[] = 'ZERO EMISSION VEHICLES (ZEVS)';
-        if ($is_street_legal) {
-            $vehicle_classes[] = 'LOW SPEED VEHICLE (LSVS)';
-            $vehicle_classes[] = 'MEDIUM SPEED VEHICLE (MSVS)';
-        }
     }
-    if ($is_street_legal) {
-        $vehicle_classes[] = 'PERSONAL TRANSPORTATION VEHICLES (PTVS)';
-    }
-    if ($has_utility) {
+    $has_bed = $cart_data['cartAttributes']['hasBed'] ?? false;
+    if (!empty($has_bed)) {
         $vehicle_classes[] = 'UTILITY TASK VEHICLE (UTVS)';
+    }
+    if (empty($is_lifted)) {
+        $vehicle_classes[] = 'NON-LIFTED';
     }
     $set_attr('vehicle-class', $vehicle_classes);
 

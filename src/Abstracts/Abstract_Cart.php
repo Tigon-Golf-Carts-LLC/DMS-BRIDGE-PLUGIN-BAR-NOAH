@@ -2445,27 +2445,37 @@ abstract class Abstract_Cart
         }
 
         // Vehicle Class
-        $vehicle_class_attr = ['Golf Cart'];
+        $vehicle_class_attr = ['Golf Cart', 'Personal Transportation Vehicles (PTVs)'];
+        if ($this->cart['title']['isStreetLegal']) {
+            array_push($vehicle_class_attr, 'Low Speed Vehicle (LSVs)');
+            array_push($vehicle_class_attr, 'Medium Speed Vehicle (MSVs)');
+        }
         if ($this->cart['isElectric']) {
             array_push($vehicle_class_attr, 'Neighborhood Electric Vehicles (NEVs)');
             array_push($vehicle_class_attr, 'Zero Emission Vehicles (ZEVs)');
-            if ($this->cart['title']['isStreetLegal']) {
-                array_push($vehicle_class_attr, 'Low Speed Vehicle (LSVs)');
-                array_push($vehicle_class_attr, 'Medium Speed Vehicle (MSVs)');
-            }
         }
-        if ($this->cart['title']['isStreetLegal'])
-            array_push($vehicle_class_attr, 'Personal Transportation Vehicles (PTVs)');
-
-        if ($this->cart['cartAttributes']['utilityBed'])
+        if (!empty($this->cart['cartAttributes']['hasBed'])) {
             array_push($vehicle_class_attr, 'Utility Task Vehicle (UTVs)');
+        }
+        if (empty($this->cart['cartAttributes']['isLifted'])) {
+            array_push($vehicle_class_attr, 'NON-LIFTED');
+        }
 
         $this->attributes['pa_vehicle-class'] = $this->generated_attributes->attributes['vehicle-class']['object'];
         foreach ($vehicle_class_attr as $vehicle_class) {
-            array_push(
-                $this->taxonomy_terms,
-                $this->generated_attributes->attributes['vehicle-class']['options'][strtoupper($vehicle_class)]
-            );
+            $vc_key = strtoupper($vehicle_class);
+            if (isset($this->generated_attributes->attributes['vehicle-class']['options'][$vc_key])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes['vehicle-class']['options'][$vc_key]
+                );
+            } else {
+                $new_vc_term = wp_insert_term($vehicle_class, 'pa_vehicle-class', ['slug' => sanitize_title($vehicle_class)]);
+                if (!is_wp_error($new_vc_term)) {
+                    $this->generated_attributes->attributes['vehicle-class']['options'][$vc_key] = $new_vc_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_vc_term['term_id']);
+                }
+            }
         }
 
         // Vehicle Warranty
@@ -2607,42 +2617,34 @@ abstract class Abstract_Cart
         }
 
         // Vehicle class taxonomy
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->vehicle_classes_taxonomy['GOLF CART']
-        );
-
-        if ($this->cart['isElectric']) {
-            array_push(
-                $this->taxonomy_terms,
-                $this->generated_attributes->vehicle_classes_taxonomy['ZERO EMISSION VEHICLES (ZEVS)']
-            );
-            if ($this->cart['title']['isStreetLegal']) {
-                array_push(
-                    $this->taxonomy_terms,
-                    $this->generated_attributes->vehicle_classes_taxonomy['LOW SPEED VEHICLE (LSVS)']
-                );
-                array_push(
-                    $this->taxonomy_terms,
-                    $this->generated_attributes->vehicle_classes_taxonomy['MEDIUM SPEED VEHICLE (MSVS)']
-                );
-                array_push(
-                    $this->taxonomy_terms,
-                    $this->generated_attributes->vehicle_classes_taxonomy['NEIGHBORHOOD ELECTRIC VEHICLES (NEVS)']
-                );
-            }
-        }
+        $vc_taxonomy_classes = ['GOLF CART', 'PERSONAL TRANSPORTATION VEHICLES (PTVS)'];
         if ($this->cart['title']['isStreetLegal']) {
-            array_push(
-                $this->taxonomy_terms,
-                $this->generated_attributes->vehicle_classes_taxonomy['PERSONAL TRANSPORTATION VEHICLES (PTVS)']
-            );
+            $vc_taxonomy_classes[] = 'LOW SPEED VEHICLE (LSVS)';
+            $vc_taxonomy_classes[] = 'MEDIUM SPEED VEHICLE (MSVS)';
         }
-        if ($this->cart['cartAttributes']['utilityBed']) {
-            array_push(
-                $this->taxonomy_terms,
-                $this->generated_attributes->vehicle_classes_taxonomy['UTILITY TASK VEHICLE (UTVS)']
-            );
+        if ($this->cart['isElectric']) {
+            $vc_taxonomy_classes[] = 'NEIGHBORHOOD ELECTRIC VEHICLES (NEVS)';
+            $vc_taxonomy_classes[] = 'ZERO EMISSION VEHICLES (ZEVS)';
+        }
+        if (!empty($this->cart['cartAttributes']['hasBed'])) {
+            $vc_taxonomy_classes[] = 'UTILITY TASK VEHICLE (UTVS)';
+        }
+        if (empty($this->cart['cartAttributes']['isLifted'])) {
+            $vc_taxonomy_classes[] = 'NON-LIFTED';
+        }
+        foreach ($vc_taxonomy_classes as $vc_tax) {
+            if (isset($this->generated_attributes->vehicle_classes_taxonomy[$vc_tax])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->vehicle_classes_taxonomy[$vc_tax]
+                );
+            } else {
+                $new_tax_term = wp_insert_term($vc_tax, 'product_vehicle_class', ['slug' => sanitize_title($vc_tax)]);
+                if (!is_wp_error($new_tax_term)) {
+                    $this->generated_attributes->vehicle_classes_taxonomy[$vc_tax] = $new_tax_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_tax_term['term_id']);
+                }
+            }
         }
 
         // Inventory status taxonomy
