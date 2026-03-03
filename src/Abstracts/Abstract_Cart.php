@@ -2522,6 +2522,26 @@ abstract class Abstract_Cart
             }
         }
 
+        // Vehicle Status (with auto-creation) — based on payload isUsed
+        $status_value = $this->cart['isUsed'] ? 'USED' : 'NEW';
+        $this->attributes['pa_vehicle-status'] = $this->generated_attributes->attributes['vehicle-status']['object'];
+        if (isset($this->generated_attributes->attributes['vehicle-status']['options'][$status_value])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['vehicle-status']['options'][$status_value]
+            );
+        } else {
+            $new_status_term = wp_insert_term(
+                $status_value,
+                'pa_vehicle-status',
+                ['slug' => sanitize_title($status_value)]
+            );
+            if (!is_wp_error($new_status_term)) {
+                $this->generated_attributes->attributes['vehicle-status']['options'][$status_value] = $new_status_term['term_id'];
+                array_push($this->taxonomy_terms, $new_status_term['term_id']);
+            }
+        }
+
         // Vehicle Warranty
         $this->attributes['pa_vehicle-warranty'] = $this->generated_attributes->attributes['vehicle-warranty']['object'];
         array_push(
