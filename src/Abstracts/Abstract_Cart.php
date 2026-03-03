@@ -1840,6 +1840,28 @@ abstract class Abstract_Cart
                     }
                 }
             }
+
+            // Star EV used products also get pa_star-ev-cart-colors (with auto-creation)
+            if ($make_lower === 'star-ev') {
+                $this->attributes['pa_star-ev-cart-colors'] = $this->generated_attributes->attributes['star-ev-cart-colors']['object'];
+                $sev_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+                if (isset($this->generated_attributes->attributes['star-ev-cart-colors']['options'][$sev_color_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['star-ev-cart-colors']['options'][$sev_color_upper]
+                    );
+                } else {
+                    $new_sev_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                        'pa_star-ev-cart-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                    );
+                    if (!is_wp_error($new_sev_term)) {
+                        $this->generated_attributes->attributes['star-ev-cart-colors']['options'][$sev_color_upper] = $new_sev_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_sev_term['term_id']);
+                    }
+                }
+            }
         } elseif (array_search($make_lower, $make_attrs) !== false) {
             // Navitas uses singular "cart-color" / "seat-color" instead of plural
             if ($make_lower === 'navitas') {
@@ -1884,8 +1906,8 @@ abstract class Abstract_Cart
                 $this->attributes["pa_$make_lower-cart-colors"] = $this->generated_attributes->attributes[$make_lower . '-cart-colors']['object'];
                 $make_cart_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
 
-                // Club Car / Denago / Epic / Evolution / EZGO / ICON / Polaris / Royal EV: auto-create missing cart color terms
-                if (in_array($make_lower, ['club-car', 'denago', 'epic', 'evolution', 'ezgo', 'icon', 'polaris', 'royal-ev']) && !isset($this->generated_attributes->attributes[$make_lower . '-cart-colors']['options'][$make_cart_color_upper])) {
+                // Club Car / Denago / Epic / Evolution / EZGO / ICON / Polaris / Royal EV / Star EV: auto-create missing cart color terms
+                if (in_array($make_lower, ['club-car', 'denago', 'epic', 'evolution', 'ezgo', 'icon', 'polaris', 'royal-ev', 'star-ev']) && !isset($this->generated_attributes->attributes[$make_lower . '-cart-colors']['options'][$make_cart_color_upper])) {
                     $new_color_term = wp_insert_term(
                         ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
                         "pa_$make_lower-cart-colors",
@@ -1904,8 +1926,8 @@ abstract class Abstract_Cart
                 $this->attributes["pa_$make_lower-seat-colors"] = $this->generated_attributes->attributes[$make_lower . '-seat-colors']['object'];
                 $make_seat_color_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
 
-                // Club Car / Denago / Epic / Evolution / EZGO / ICON / Polaris / Royal EV: auto-create missing seat color terms
-                if (in_array($make_lower, ['club-car', 'denago', 'epic', 'evolution', 'ezgo', 'icon', 'polaris', 'royal-ev']) && !isset($this->generated_attributes->attributes[$make_lower . '-seat-colors']['options'][$make_seat_color_upper])) {
+                // Club Car / Denago / Epic / Evolution / EZGO / ICON / Polaris / Royal EV / Star EV: auto-create missing seat color terms
+                if (in_array($make_lower, ['club-car', 'denago', 'epic', 'evolution', 'ezgo', 'icon', 'polaris', 'royal-ev', 'star-ev']) && !isset($this->generated_attributes->attributes[$make_lower . '-seat-colors']['options'][$make_seat_color_upper])) {
                     $new_sc_term = wp_insert_term(
                         ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
                         "pa_$make_lower-seat-colors",
