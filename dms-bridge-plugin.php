@@ -1959,13 +1959,25 @@ function tigon_dms_assign_product_attributes($product_id, $cart_data) {
                 continue;
             }
 
-            // Slow path: individual DB lookup
+            // Slow path: individual DB lookup, auto-create if missing
             $term = get_term_by('name', $term_name, $taxonomy);
             if (!$term) {
                 $term = get_term_by('slug', sanitize_title($term_name), $taxonomy);
             }
             if ($term && !is_wp_error($term)) {
                 $term_ids[] = (int) $term->term_id;
+            } else {
+                $new_term = wp_insert_term(
+                    $term_name,
+                    $taxonomy,
+                    array('slug' => sanitize_title($term_name))
+                );
+                if (!is_wp_error($new_term)) {
+                    $term_ids[] = (int) $new_term['term_id'];
+                    if ($attrs) {
+                        $attrs->attributes[$attr_slug]['options'][strtoupper($term_name)] = $new_term['term_id'];
+                    }
+                }
             }
         }
 

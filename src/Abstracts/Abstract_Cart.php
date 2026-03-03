@@ -1945,12 +1945,27 @@ abstract class Abstract_Cart
             }
         }
 
-        // Rim Size
-        $this->attributes['pa_rim-size'] = $this->generated_attributes->attributes['rim-size']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['rim-size']['options'][$this->cart['cartAttributes']['tireRimSize'] . ' INCH']
-        );
+        // Rim Size (with auto-creation)
+        if ($this->cart['cartAttributes']['tireRimSize']) {
+            $rim_size_value = strtoupper($this->cart['cartAttributes']['tireRimSize'] . ' INCH');
+            $this->attributes['pa_rim-size'] = $this->generated_attributes->attributes['rim-size']['object'];
+            if (isset($this->generated_attributes->attributes['rim-size']['options'][$rim_size_value])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes['rim-size']['options'][$rim_size_value]
+                );
+            } else {
+                $new_rim_size_term = wp_insert_term(
+                    $rim_size_value,
+                    'pa_rim-size',
+                    ['slug' => sanitize_title($rim_size_value)]
+                );
+                if (!is_wp_error($new_rim_size_term)) {
+                    $this->generated_attributes->attributes['rim-size']['options'][$rim_size_value] = $new_rim_size_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_rim_size_term['term_id']);
+                }
+            }
+        }
 
         // Shipping
         $this->attributes['pa_shipping'] = $this->generated_attributes->attributes['shipping']['object'];
