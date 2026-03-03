@@ -1935,16 +1935,27 @@ abstract class Abstract_Cart
             );
         }
 
-        // Sound system
-        $this->attributes['pa_sound-system'] = $this->generated_attributes->attributes['sound-system']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            (
-                $this->generated_attributes->attributes['sound-system']['options'][strtoupper($this->make_with_symbol) . ' SOUND SYSTEM']
-                ??
-                $this->generated_attributes->attributes['sound-system']['options']['YES']
-            )
-        );
+        // Sound system (New products with hasSoundSystem only, with auto-creation)
+        if (!$this->cart['isUsed'] && $this->cart['cartAttributes']['hasSoundSystem']) {
+            $this->attributes['pa_sound-system'] = $this->generated_attributes->attributes['sound-system']['object'];
+            $sound_system_value = strtoupper($this->make_with_symbol) . ' SOUND SYSTEM';
+            if (isset($this->generated_attributes->attributes['sound-system']['options'][$sound_system_value])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes['sound-system']['options'][$sound_system_value]
+                );
+            } else {
+                $new_sound_term = wp_insert_term(
+                    strtoupper($this->make_with_symbol) . ' Sound System',
+                    'pa_sound-system',
+                    ['slug' => sanitize_title($sound_system_value)]
+                );
+                if (!is_wp_error($new_sound_term)) {
+                    $this->generated_attributes->attributes['sound-system']['options'][$sound_system_value] = $new_sound_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_sound_term['term_id']);
+                }
+            }
+        }
 
         // Passengers (with auto-creation)
         if ($this->cart['cartAttributes']['passengers']) {

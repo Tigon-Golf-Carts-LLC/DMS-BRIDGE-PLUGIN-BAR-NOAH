@@ -2065,9 +2065,9 @@ function tigon_dms_assign_product_attributes($product_id, $cart_data) {
         }
     }
 
-    // Sound System
-    if ($has_sound) {
-        $set_attr('sound-system', array(strtoupper($make_symbol) . ' SOUND SYSTEM', 'YES'));
+    // Sound System (New products with hasSoundSystem only)
+    if (!$is_used && $has_sound) {
+        $set_attr('sound-system', array(strtoupper($make_symbol) . ' SOUND SYSTEM'));
     }
 
     // Passengers
