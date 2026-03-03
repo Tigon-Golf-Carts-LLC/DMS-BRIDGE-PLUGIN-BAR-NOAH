@@ -2038,6 +2038,25 @@ abstract class Abstract_Cart
                         array_push($this->taxonomy_terms, $new_tomb_term['term_id']);
                     }
                 }
+
+                $this->attributes['pa_tomberlin-seat-colors'] = $this->generated_attributes->attributes['tomberlin-seat-colors']['object'];
+                $tomb_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['tomberlin-seat-colors']['options'][$tomb_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['tomberlin-seat-colors']['options'][$tomb_seat_upper]
+                    );
+                } else {
+                    $new_tomb_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_tomberlin-seat-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_tomb_sc_term)) {
+                        $this->generated_attributes->attributes['tomberlin-seat-colors']['options'][$tomb_seat_upper] = $new_tomb_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_tomb_sc_term['term_id']);
+                    }
+                }
             }
         } elseif (array_search($make_lower, $make_attrs) !== false) {
             // Navitas uses singular "cart-color" / "seat-color" instead of plural
@@ -2103,8 +2122,8 @@ abstract class Abstract_Cart
                 $this->attributes["pa_$make_lower-seat-colors"] = $this->generated_attributes->attributes[$make_lower . '-seat-colors']['object'];
                 $make_seat_color_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
 
-                // Club Car / Denago / Epic / Evolution / EZGO / ICON / Polaris / Royal EV / Star EV / Swift / Tara / Teko: auto-create missing seat color terms
-                if (in_array($make_lower, ['club-car', 'denago', 'epic', 'evolution', 'ezgo', 'icon', 'polaris', 'royal-ev', 'star-ev', 'swift', 'tara', 'teko']) && !isset($this->generated_attributes->attributes[$make_lower . '-seat-colors']['options'][$make_seat_color_upper])) {
+                // Club Car / Denago / Epic / Evolution / EZGO / ICON / Polaris / Royal EV / Star EV / Swift / Tara / Teko / Tomberlin: auto-create missing seat color terms
+                if (in_array($make_lower, ['club-car', 'denago', 'epic', 'evolution', 'ezgo', 'icon', 'polaris', 'royal-ev', 'star-ev', 'swift', 'tara', 'teko', 'tomberlin']) && !isset($this->generated_attributes->attributes[$make_lower . '-seat-colors']['options'][$make_seat_color_upper])) {
                     $new_sc_term = wp_insert_term(
                         ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
                         "pa_$make_lower-seat-colors",
