@@ -2542,12 +2542,27 @@ abstract class Abstract_Cart
             }
         }
 
-        // Vehicle Warranty
-        $this->attributes['pa_vehicle-warranty'] = $this->generated_attributes->attributes['vehicle-warranty']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['vehicle-warranty']['options'][strtoupper($this->cart['warrantyLength'])]
-        );
+        // Vehicle Warranty (with auto-creation) — based on payload warrantyLength
+        if (!empty($this->cart['warrantyLength'])) {
+            $warranty_value = strtoupper($this->cart['warrantyLength']);
+            $this->attributes['pa_vehicle-warranty'] = $this->generated_attributes->attributes['vehicle-warranty']['object'];
+            if (isset($this->generated_attributes->attributes['vehicle-warranty']['options'][$warranty_value])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes['vehicle-warranty']['options'][$warranty_value]
+                );
+            } else {
+                $new_warranty_term = wp_insert_term(
+                    ucwords(strtolower($this->cart['warrantyLength'])),
+                    'pa_vehicle-warranty',
+                    ['slug' => sanitize_title($this->cart['warrantyLength'])]
+                );
+                if (!is_wp_error($new_warranty_term)) {
+                    $this->generated_attributes->attributes['vehicle-warranty']['options'][$warranty_value] = $new_warranty_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_warranty_term['term_id']);
+                }
+            }
+        }
 
         // Year of Vehicle
         if ($this->cart['cartType']['year']) {
