@@ -1925,13 +1925,25 @@ abstract class Abstract_Cart
             $this->generated_attributes->attributes['receiver-hitch']['options']['NO']
         );
 
-        // Return Policy
+        // Return Policy (New = Yes, Used = 90 Day)
         $this->attributes['pa_return-policy'] = $this->generated_attributes->attributes['return-policy']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['return-policy']['options']['90 DAY'],
-            $this->generated_attributes->attributes['return-policy']['options']['YES']
-        );
+        $return_policy_value = $this->cart['isUsed'] ? '90 DAY' : 'YES';
+        if (isset($this->generated_attributes->attributes['return-policy']['options'][$return_policy_value])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['return-policy']['options'][$return_policy_value]
+            );
+        } else {
+            $new_return_policy_term = wp_insert_term(
+                ucwords(strtolower($return_policy_value)),
+                'pa_return-policy',
+                ['slug' => sanitize_title($return_policy_value)]
+            );
+            if (!is_wp_error($new_return_policy_term)) {
+                $this->generated_attributes->attributes['return-policy']['options'][$return_policy_value] = $new_return_policy_term['term_id'];
+                array_push($this->taxonomy_terms, $new_return_policy_term['term_id']);
+            }
+        }
 
         // Rim Size
         $this->attributes['pa_rim-size'] = $this->generated_attributes->attributes['rim-size']['object'];

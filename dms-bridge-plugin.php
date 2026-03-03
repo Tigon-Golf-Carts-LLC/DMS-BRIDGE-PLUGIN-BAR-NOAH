@@ -1926,6 +1926,7 @@ function tigon_dms_assign_product_attributes($product_id, $cart_data) {
     $year          = $cart_data['cartType']['year'] ?? '';
     $drive_train   = $cart_data['cartAttributes']['driveTrain'] ?? '2X4';
     $has_hitch     = !empty($cart_data['cartAttributes']['hitch']);
+    $is_used       = !empty($cart_data['isUsed']);
     $battery_type  = $cart_data['battery']['type'] ?? '';
     $warranty      = $cart_data['warrantyLength'] ?? '';
     $battery_warranty = $cart_data['battery']['warrantyLength'] ?? '';
@@ -2066,8 +2067,8 @@ function tigon_dms_assign_product_attributes($product_id, $cart_data) {
     // Receiver Hitch
     $set_attr('receiver-hitch', array($has_hitch ? 'YES' : 'NO'));
 
-    // Return Policy
-    $set_attr('return-policy', array('90 DAY', 'YES'));
+    // Return Policy (New = Yes, Used = 90 Day)
+    $set_attr('return-policy', array($is_used ? '90 DAY' : 'YES'));
 
     // Rim Size
     if (!empty($rim_size)) {
