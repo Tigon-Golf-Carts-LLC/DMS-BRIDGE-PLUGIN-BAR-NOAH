@@ -536,6 +536,7 @@ abstract class Abstract_Cart
                 $this->facebook_visibility :
                 null,
 
+            dms_cart_id: $this->cart['_id'] ?? null,
             monroney_sticker: $fields & MONRONEY_STICKER ?
                 $this->monroney_sticker :
                 null,
@@ -573,6 +574,14 @@ abstract class Abstract_Cart
         if (wc_get_product($this->cart['pid']) != false) $this->product_id = $this->cart['pid'];
         if (!$this->product_id)
             $this->product_id = wc_get_product_id_by_sku($this->sku);
+
+        // Fallback: look up by _dms_cart_id meta (matches selective sync path)
+        if (!$this->product_id && !empty($this->cart['_id']) && function_exists('tigon_dms_get_product_by_cart_id')) {
+            $found = tigon_dms_get_product_by_cart_id($this->cart['_id']);
+            if ($found) {
+                $this->product_id = $found;
+            }
+        }
 
         $this->already_exists = false;
     }
