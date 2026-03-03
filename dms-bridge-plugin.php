@@ -1473,6 +1473,9 @@ function tigon_dms_get_make_with_symbol($make) {
     if ($upper === 'SWIFT' || $upper === 'SWIFT EV') {
         return 'Swift EV®';
     }
+    if ($upper === 'TARA' || $upper === 'TARA EV') {
+        return 'Tara®';
+    }
     if ($upper === 'STAR' || $upper === 'STAR EV') {
         return 'Star EV®';
     }
@@ -2047,7 +2050,7 @@ function tigon_dms_assign_product_attributes($product_id, $cart_data) {
     $make_color_attrs = array(
         'bintelli', 'club-car', 'denago', 'epic', 'evolution',
         'ezgo', 'icon', 'navitas', 'polaris', 'royal-ev',
-        'star-ev', 'swift', 'tomberlin', 'yamaha',
+        'star-ev', 'swift', 'tara', 'tomberlin', 'yamaha',
     );
     if (in_array($make_lower, $make_color_attrs)) {
         if (!empty($color)) {
