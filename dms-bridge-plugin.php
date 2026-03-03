@@ -1479,6 +1479,9 @@ function tigon_dms_get_make_with_symbol($make) {
     if ($upper === 'TEKO' || $upper === 'TEKO EV') {
         return 'Teko®';
     }
+    if ($upper === 'TOMBERLIN' || $upper === 'TOMBERLIN EV') {
+        return 'Tomberlin®';
+    }
     if ($upper === 'STAR' || $upper === 'STAR EV') {
         return 'Star EV®';
     }
