@@ -2323,13 +2323,37 @@ function tigon_dms_assign_custom_taxonomies($product_id, $cart_data) {
     }
     $assign('models', array($model_name));
 
-    // Sound Systems taxonomy
+    // Sound Systems taxonomy — based on hasSoundSystem + optional soundSystem override
     if ($has_sound) {
-        $sound_name = strtoupper($make_symbol) . ' SOUND SYSTEM';
-        if (strtoupper($make_symbol) === 'SWIFT®') {
+        $custom_sound = $cart_data['addons']['soundSystem'] ?? null;
+        if (!empty($custom_sound) && is_string($custom_sound)) {
+            $sound_name = strtoupper($custom_sound);
+        } elseif (strtoupper($make_symbol) === 'SWIFT®') {
             $sound_name = 'SWIFT EV® SOUND SYSTEM';
+        } else {
+            $sound_name = strtoupper($make_symbol) . ' SOUND SYSTEM';
         }
-        $assign('sound-systems', array($sound_name));
+        // Try cached lookup first, fall back to auto-create
+        $ss_prop = $attrs->sound_systems_taxonomy ?? array();
+        if (isset($ss_prop[$sound_name])) {
+            wp_set_object_terms($product_id, array((int) $ss_prop[$sound_name]), 'sound-systems', true);
+        } else {
+            $existing = get_term_by('name', $sound_name, 'sound-systems');
+            if (!$existing) {
+                $existing = get_term_by('slug', sanitize_title($sound_name), 'sound-systems');
+            }
+            if ($existing && !is_wp_error($existing)) {
+                wp_set_object_terms($product_id, array((int) $existing->term_id), 'sound-systems', true);
+            } else {
+                $new_ss = wp_insert_term($sound_name, 'sound-systems', array('slug' => sanitize_title($sound_name)));
+                if (!is_wp_error($new_ss)) {
+                    wp_set_object_terms($product_id, array((int) $new_ss['term_id']), 'sound-systems', true);
+                }
+            }
+        }
+    } else {
+        // No sound system
+        $assign('sound-systems', array('NO SOUND SYSTEM'));
     }
 
     // Added Features taxonomy

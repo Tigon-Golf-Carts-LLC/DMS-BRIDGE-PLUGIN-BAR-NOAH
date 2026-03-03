@@ -2726,17 +2726,47 @@ abstract class Abstract_Cart
             );
         }
 
-        // Sound Systems
-        if (strtoupper($this->make_with_symbol) == 'SWIFT®') {
-            array_push(
-                $this->taxonomy_terms,
-                $this->generated_attributes->sound_systems_taxonomy['SWIFT EV® SOUND SYSTEM']
-            );
+        // Sound Systems taxonomy — based on hasSoundSystem + optional soundSystem override
+        if (!empty($this->cart['cartAttributes']['hasSoundSystem'])) {
+            // Check if API payload specifies a custom sound system name
+            $custom_sound = $this->cart['addons']['soundSystem'] ?? null;
+            if (!empty($custom_sound) && is_string($custom_sound)) {
+                $sound_name = strtoupper($custom_sound);
+            } elseif (strtoupper($this->make_with_symbol) == 'SWIFT®') {
+                $sound_name = 'SWIFT EV® SOUND SYSTEM';
+            } else {
+                $sound_name = strtoupper($this->make_with_symbol) . ' SOUND SYSTEM';
+            }
+            if (isset($this->generated_attributes->sound_systems_taxonomy[$sound_name])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->sound_systems_taxonomy[$sound_name]
+                );
+            } else {
+                $new_ss_term = wp_insert_term(
+                    $sound_name,
+                    'sound-systems',
+                    ['slug' => sanitize_title($sound_name)]
+                );
+                if (!is_wp_error($new_ss_term)) {
+                    $this->generated_attributes->sound_systems_taxonomy[$sound_name] = $new_ss_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_ss_term['term_id']);
+                }
+            }
         } else {
-            array_push(
-                $this->taxonomy_terms,
-                $this->generated_attributes->sound_systems_taxonomy[strtoupper($this->make_with_symbol) . ' SOUND SYSTEM']
-            );
+            // No sound system
+            if (isset($this->generated_attributes->sound_systems_taxonomy['NO SOUND SYSTEM'])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->sound_systems_taxonomy['NO SOUND SYSTEM']
+                );
+            } else {
+                $new_no_ss = wp_insert_term('NO SOUND SYSTEM', 'sound-systems', ['slug' => 'no-sound-system']);
+                if (!is_wp_error($new_no_ss)) {
+                    $this->generated_attributes->sound_systems_taxonomy['NO SOUND SYSTEM'] = $new_no_ss['term_id'];
+                    array_push($this->taxonomy_terms, $new_no_ss['term_id']);
+                }
+            }
         }
 
         // Added Features
