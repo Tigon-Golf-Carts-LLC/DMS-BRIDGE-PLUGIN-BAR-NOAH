@@ -2090,6 +2090,20 @@ function tigon_dms_assign_product_attributes($product_id, $cart_data) {
     // Shipping
     $set_attr('shipping', array('1 TO 3 DAYS LOCAL', '3 TO 7 DAYS OTR', '5 TO 9 DAYS NATIONAL'));
 
+    // Side Step
+    $side_step = $cart_data['cartAttributes']['sideStep'] ?? null;
+    if (!empty($side_step)) {
+        $side_step_terms = array();
+        foreach ((array) $side_step as $step_val) {
+            if (!empty($step_val)) {
+                $side_step_terms[] = strtoupper($step_val);
+            }
+        }
+        if (!empty($side_step_terms)) {
+            $set_attr('side-step', $side_step_terms);
+        }
+    }
+
     // Street Legal
     $set_attr('street-legal', array($is_street_legal ? 'YES' : 'NO'));
 

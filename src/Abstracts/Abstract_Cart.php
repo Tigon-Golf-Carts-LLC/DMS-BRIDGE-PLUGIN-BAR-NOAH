@@ -2045,15 +2045,31 @@ abstract class Abstract_Cart
                 }
             }
         }
-        // // TODO - Model Specific
-        // // Side Step
-        // if ($this->cart['cartAttributes']['sideStep']) {
-        //     $this->attributes['pa_side-step'] = $this->generated_attributes->attributes['side-step']['object'];
-        //     array_push(
-        //         $this->taxonomy_terms,
-        //         $this->generated_attributes->attributes['side-step']['options'][$this->cart['cartAttributes']['sideStep']]
-        //     );
-        // }
+        // Side Step (with auto-creation)
+        if (!empty($this->cart['cartAttributes']['sideStep'])) {
+            $this->attributes['pa_side-step'] = $this->generated_attributes->attributes['side-step']['object'];
+            $side_step_values = (array) $this->cart['cartAttributes']['sideStep'];
+            foreach ($side_step_values as $step_val) {
+                if (empty($step_val)) continue;
+                $step_upper = strtoupper($step_val);
+                if (isset($this->generated_attributes->attributes['side-step']['options'][$step_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['side-step']['options'][$step_upper]
+                    );
+                } else {
+                    $new_step_term = wp_insert_term(
+                        ucwords(strtolower($step_val)),
+                        'pa_side-step',
+                        ['slug' => sanitize_title($step_val)]
+                    );
+                    if (!is_wp_error($new_step_term)) {
+                        $this->generated_attributes->attributes['side-step']['options'][$step_upper] = $new_step_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_step_term['term_id']);
+                    }
+                }
+            }
+        }
 
         // Street Legal
         $this->attributes['pa_street-legal'] = $this->generated_attributes->attributes['street-legal']['object'];
