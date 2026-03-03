@@ -1784,7 +1784,7 @@ abstract class Abstract_Cart
                 }
             }
 
-            // Royal EV used products also get pa_royal-ev-cart-colors (with auto-creation)
+            // Royal EV used products also get pa_royal-ev-cart-colors and pa_royal-ev-seat-colors (with auto-creation)
             if ($make_lower === 'royal-ev') {
                 $this->attributes['pa_royal-ev-cart-colors'] = $this->generated_attributes->attributes['royal-ev-cart-colors']['object'];
                 $rev_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
@@ -1802,6 +1802,25 @@ abstract class Abstract_Cart
                     if (!is_wp_error($new_rev_term)) {
                         $this->generated_attributes->attributes['royal-ev-cart-colors']['options'][$rev_color_upper] = $new_rev_term['term_id'];
                         array_push($this->taxonomy_terms, $new_rev_term['term_id']);
+                    }
+                }
+
+                $this->attributes['pa_royal-ev-seat-colors'] = $this->generated_attributes->attributes['royal-ev-seat-colors']['object'];
+                $rev_seat_upper = strtoupper($this->cart['cartAttributes']['seatColor']);
+                if (isset($this->generated_attributes->attributes['royal-ev-seat-colors']['options'][$rev_seat_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['royal-ev-seat-colors']['options'][$rev_seat_upper]
+                    );
+                } else {
+                    $new_rev_sc_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['seatColor'])),
+                        'pa_royal-ev-seat-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['seatColor'])]
+                    );
+                    if (!is_wp_error($new_rev_sc_term)) {
+                        $this->generated_attributes->attributes['royal-ev-seat-colors']['options'][$rev_seat_upper] = $new_rev_sc_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_rev_sc_term['term_id']);
                     }
                 }
             }
