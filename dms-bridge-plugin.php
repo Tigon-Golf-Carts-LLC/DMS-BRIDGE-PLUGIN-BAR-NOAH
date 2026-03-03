@@ -2630,6 +2630,11 @@ function tigon_dms_set_product_fields_meta($product_id, $cart_data) {
     $store_id  = $cart_data['cartLocation']['locationId'] ?? '';
     $is_used   = !empty($cart_data['isUsed']);
 
+    // Handle "Other" locationId — use latestStoreId as fallback
+    if ($store_id === 'Other') {
+        $store_id = $cart_data['cartLocation']['latestStoreId'] ?? 'T1';
+    }
+
     $make_symbol = tigon_dms_get_make_with_symbol($make);
 
     // ---------------------------------------------------------------
@@ -2755,23 +2760,43 @@ function tigon_dms_set_product_fields_meta($product_id, $cart_data) {
     }
 
     // ---------------------------------------------------------------
-    // 5. TIGON watermark text
+    // 5. TIGON watermark text — maps to locationId from payload
+    //    Format: "City ST" (e.g., "Hatfield PA", "Dover DE")
+    //    Rentals: "TIGON® RENTALS"
     // ---------------------------------------------------------------
     $tigonwm = 'TIGON®';
     if (!empty($store_id)) {
+        // Use Attributes::get_location() which checks hardcoded array first, then API fallback
         if (class_exists('\Tigon\DmsConnect\Admin\Attributes')) {
-            $loc = \Tigon\DmsConnect\Admin\Attributes::$locations[$store_id] ?? null;
+            $loc = \Tigon\DmsConnect\Admin\Attributes::get_location($store_id);
             if ($loc) {
-                $tigonwm = 'TIGON® Golf Carts ' . ($loc['city'] ?? '') . ', ' . ($loc['state'] ?? '');
+                $city_short = $loc['city_short'] ?? $loc['city'] ?? '';
+                $st = $loc['st'] ?? '';
+                if (!empty($city_short) && !empty($st)) {
+                    $tigonwm = $city_short . ' ' . $st;
+                }
             }
         } else {
             $store_data = DMS_API::get_city_and_state_by_store_id($store_id);
             $city  = $store_data['city'] ?? '';
             $state = $store_data['state'] ?? '';
             if (!empty($city) && !empty($state)) {
-                $tigonwm = 'TIGON® Golf Carts ' . $city . ', ' . $state;
+                // Abbreviate state name for consistency
+                $state_map = array(
+                    'Pennsylvania' => 'PA', 'New Jersey' => 'NJ', 'Delaware' => 'DE',
+                    'North Carolina' => 'NC', 'Indiana' => 'IN', 'Virginia' => 'VA',
+                    'Florida' => 'FL', 'Ohio' => 'OH', 'South Carolina' => 'SC',
+                    'Maryland' => 'MD', 'New York' => 'NY', 'Connecticut' => 'CT',
+                    'Massachusetts' => 'MA', 'Georgia' => 'GA', 'Texas' => 'TX',
+                );
+                $st = $state_map[$state] ?? strtoupper(substr($state, 0, 2));
+                $tigonwm = $city . ' ' . $st;
             }
         }
+    }
+    // Rentals override
+    if (!empty($cart_data['isRental'])) {
+        $tigonwm = 'TIGON® RENTALS';
     }
     update_post_meta($product_id, '_tigonwm', sanitize_text_field($tigonwm));
 

@@ -90,6 +90,7 @@ class Attributes
         "T8" => [
             "address" => "2810 George Washington Memorial Hwy",
             "city" => "Gloucester Point",
+            "city_short" => "Gloucester",
             "state" => "Virginia",
             "st" => "VA",
             "zip" => "23072",

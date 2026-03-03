@@ -589,12 +589,15 @@ abstract class Abstract_Cart
             $this->location_id = $this->cart['cartLocation']['latestStoreId'] ?? 'T1';
         }
 
-        // Fallback to T1 if location is not recognized
-        if (!isset(Attributes::$locations[$this->location_id])) {
+        // Use get_location() which checks hardcoded array first, then falls back to API
+        $loc = Attributes::get_location($this->location_id);
+
+        // Fallback to T1 only if API lookup also fails
+        if (!$loc) {
             $this->location_id = 'T1';
+            $loc = Attributes::$locations[$this->location_id];
         }
 
-        $loc = Attributes::$locations[$this->location_id];
         $this->city_shortname = $loc['city_short'] ?? $loc['city'];
 
         $this->tigonwm_text = 'TIGON®';
@@ -605,7 +608,7 @@ abstract class Abstract_Cart
                 ' ' . $loc['st'];
         }
         if (isset($this->cart['isRental']) && $this->cart['isRental']){
-            $this->tigonwm_text = 'TIGON® RENTALS';  
+            $this->tigonwm_text = 'TIGON® RENTALS';
         }
     }
 
