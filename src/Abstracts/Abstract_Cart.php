@@ -2364,13 +2364,26 @@ abstract class Abstract_Cart
             }
         }
 
-        // Tire profile
+        // Tire profile (with auto-creation)
         if ($this->cart['cartAttributes']['tireType']) {
             $this->attributes['pa_tire-profile'] = $this->generated_attributes->attributes['tire-profile']['object'];
-            array_push(
-                $this->taxonomy_terms,
-                $this->generated_attributes->attributes['tire-profile']['options'][strtoupper(preg_replace('/-/', ' ', $this->cart['cartAttributes']['tireType']))]
-            );
+            $tire_upper = strtoupper(preg_replace('/-/', ' ', $this->cart['cartAttributes']['tireType']));
+            if (isset($this->generated_attributes->attributes['tire-profile']['options'][$tire_upper])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes['tire-profile']['options'][$tire_upper]
+                );
+            } else {
+                $new_tire_term = wp_insert_term(
+                    ucwords(strtolower($this->cart['cartAttributes']['tireType'])),
+                    'pa_tire-profile',
+                    ['slug' => sanitize_title($this->cart['cartAttributes']['tireType'])]
+                );
+                if (!is_wp_error($new_tire_term)) {
+                    $this->generated_attributes->attributes['tire-profile']['options'][$tire_upper] = $new_tire_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_tire_term['term_id']);
+                }
+            }
         }
 
         // Store Code (with auto-creation)
