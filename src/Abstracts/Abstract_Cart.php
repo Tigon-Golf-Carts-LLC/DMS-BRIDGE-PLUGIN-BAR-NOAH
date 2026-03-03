@@ -2123,12 +2123,25 @@ abstract class Abstract_Cart
             }
         }
 
-        // Street Legal
+        // Street Legal (with auto-creation)
         $this->attributes['pa_street-legal'] = $this->generated_attributes->attributes['street-legal']['object'];
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->attributes['street-legal']['options'][$this->cart['title']['isStreetLegal'] ? 'YES' : 'NO']
-        );
+        $street_legal_value = $this->cart['title']['isStreetLegal'] ? 'YES' : 'NO';
+        if (isset($this->generated_attributes->attributes['street-legal']['options'][$street_legal_value])) {
+            array_push(
+                $this->taxonomy_terms,
+                $this->generated_attributes->attributes['street-legal']['options'][$street_legal_value]
+            );
+        } else {
+            $new_sl_term = wp_insert_term(
+                ucwords(strtolower($street_legal_value)),
+                'pa_street-legal',
+                ['slug' => sanitize_title($street_legal_value)]
+            );
+            if (!is_wp_error($new_sl_term)) {
+                $this->generated_attributes->attributes['street-legal']['options'][$street_legal_value] = $new_sl_term['term_id'];
+                array_push($this->taxonomy_terms, $new_sl_term['term_id']);
+            }
+        }
 
         // Tire profile
         if ($this->cart['cartAttributes']['tireType']) {
