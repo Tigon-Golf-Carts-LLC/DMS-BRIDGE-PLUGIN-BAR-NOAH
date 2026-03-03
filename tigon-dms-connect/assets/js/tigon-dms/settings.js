@@ -68,39 +68,23 @@ jQuery(document).ready(() => {
         });
     });
 
-    if(window.location.hash) {
-        var hash = window.location.hash.substring(1);
-        if(hash == "general") {
-            jQuery("#general-tab").addClass("active");
-            jQuery("#general").attr('style', 'display:flex;');
-        }
-        if(hash == "schema") {
-            jQuery("#schema-tab").addClass("active");
-            jQuery("#schema").attr('style', 'display:flex;');
-        }
-    } else {
-        jQuery("#general-tab").addClass("active");
-        jQuery("#general").attr('style', 'display:flex;');
+    // ── Tab switching ────────────────────────────────────────────────
+    var tabIds = ["general", "urls", "endpoints", "schema"];
+
+    function activateTab(id) {
+        jQuery(".tigon-dms-tab").removeClass("active");
+        jQuery("#" + id + "-tab").addClass("active");
+        jQuery(".tabbed-panel .action-box").attr("style", "display:none;");
+        jQuery("#" + id).attr("style", "display:flex;");
+        history.replaceState(undefined, "", "#" + id);
     }
 
+    var hash = window.location.hash ? window.location.hash.substring(1) : "general";
+    if (tabIds.indexOf(hash) === -1) hash = "general";
+    activateTab(hash);
 
-    jQuery("#general-tab").click(e => {
-        jQuery(".tigon-dms-tab").removeClass("active");
-        jQuery("#general-tab").addClass("active");
-        jQuery(".tabbed-panel .action-box").attr('style', 'display:none;');
-        jQuery("#general").attr('style', 'display:flex;');
-
-        history.replaceState(undefined, '', "#general")
-    });
-
-
-    jQuery("#schema-tab").click(e => {
-        jQuery(".tigon-dms-tab").removeClass("active");
-        jQuery("#schema-tab").addClass("active");
-        jQuery(".tabbed-panel .action-box").attr('style', 'display:none;');
-        jQuery("#schema").attr('style', 'display:flex;');
-
-        history.replaceState(undefined, '', "#schema")
+    tabIds.forEach(function (id) {
+        jQuery("#" + id + "-tab").click(function () { activateTab(id); });
     });
 
     // ── Full Payload Schema ──────────────────────────────────────────

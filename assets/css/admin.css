@@ -452,14 +452,46 @@ input {
     display: none;
 }
 
-/* Settings tabs — General shown by default, JS handles switching */
-#general {
-    display: flex;
-    flex-direction: column;
-}
-
+/* Settings tabs — all hidden by default, JS activates the correct one */
+#general,
+#urls,
+#endpoints,
 #schema {
     display: none;
+}
+
+/* ── Uniform settings-panel layout ───────────────────────────────── */
+.settings-panel {
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+}
+
+.settings-panel-header {
+    margin-bottom: 1.5rem;
+    width: 100%;
+}
+
+.settings-panel-header h3 {
+    margin: 0 0 0.35rem 0;
+    font-size: 1.15rem;
+}
+
+.settings-panel-header p {
+    font-size: 0.85rem;
+    color: #666;
+    margin: 0;
+    line-height: 1.5;
+}
+
+.settings-panel-header p code {
+    background: #f0f4f8;
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    font-size: 0.8rem;
+}
+
+.settings-panel-body {
+    width: 100%;
 }
 
 .drag-n-drop {
