@@ -287,21 +287,16 @@
         if (cart.imageUrls && Array.isArray(cart.imageUrls) && cart.imageUrls.length > 0) {
             const s3BaseUrl = (window.DMSApiService && window.DMSApiService.s3Urls) 
                 ? window.DMSApiService.s3Urls.carts 
-                : 'https://s3.amazonaws.com/prod.docs.s3/carts/'; // Fallback
+                : 'https://s3.amazonaws.com/test.docs.s3/carts/'; // Fallback
             imageUrl = s3BaseUrl + cart.imageUrls[0];
         }
 
         // Build inventory URL
         const inventoryUrl = config.baseUrl + '/dms/cart/' + cartId + '/';
 
-        // Get city from API data for ribbon
-        const cityName = getCityFromStoreId(storeId);
-        const ribbonText = cityName || '';
-
-        // Create card HTML with ribbon - show city from /tigon-stores API
+        // Create card HTML
         const $card = $(`
             <article class="dms-inventory-cart">
-                ${ribbonText ? `<div class="dms-ribbon">${escapeHtml(ribbonText)}</div>` : ''}
                 <img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(cartTitle)}" loading="lazy">
                 <div class="dms-cart-content">
                     <h3>${escapeHtml(cartTitle)}</h3>
@@ -358,20 +353,19 @@
      */
     function getStateAbbreviation(stateName) {
         const stateMap = {
-            'Pennsylvania': 'PA',
-            'New Jersey': 'NJ',
-            'Delaware': 'DE',
-            'North Carolina': 'NC',
-            'Indiana': 'IN',
-            'Virginia': 'VA',
-            'Maryland': 'MD',
-            'New York': 'NY',
-            'Connecticut': 'CT',
-            'Massachusetts': 'MA',
-            'Rhode Island': 'RI',
-            'Vermont': 'VT',
-            'New Hampshire': 'NH',
-            'Maine': 'ME'
+            'Alabama': 'AL', 'Alaska': 'AK', 'Arizona': 'AZ', 'Arkansas': 'AR',
+            'California': 'CA', 'Colorado': 'CO', 'Connecticut': 'CT', 'Delaware': 'DE',
+            'Florida': 'FL', 'Georgia': 'GA', 'Hawaii': 'HI', 'Idaho': 'ID',
+            'Illinois': 'IL', 'Indiana': 'IN', 'Iowa': 'IA', 'Kansas': 'KS',
+            'Kentucky': 'KY', 'Louisiana': 'LA', 'Maine': 'ME', 'Maryland': 'MD',
+            'Massachusetts': 'MA', 'Michigan': 'MI', 'Minnesota': 'MN', 'Mississippi': 'MS',
+            'Missouri': 'MO', 'Montana': 'MT', 'Nebraska': 'NE', 'Nevada': 'NV',
+            'New Hampshire': 'NH', 'New Jersey': 'NJ', 'New Mexico': 'NM', 'New York': 'NY',
+            'North Carolina': 'NC', 'North Dakota': 'ND', 'Ohio': 'OH', 'Oklahoma': 'OK',
+            'Oregon': 'OR', 'Pennsylvania': 'PA', 'Rhode Island': 'RI', 'South Carolina': 'SC',
+            'South Dakota': 'SD', 'Tennessee': 'TN', 'Texas': 'TX', 'Utah': 'UT',
+            'Vermont': 'VT', 'Virginia': 'VA', 'Washington': 'WA', 'West Virginia': 'WV',
+            'Wisconsin': 'WI', 'Wyoming': 'WY'
         };
 
         // Return abbreviation if found, otherwise return original (in case it's already abbreviated)

@@ -109,4 +109,120 @@ jQuery(document).ready(() => {
 
         history.replaceState(undefined, '', "#schema")
     });
+
+    // ── Full Payload Schema ──────────────────────────────────────────
+    jQuery("#fetch-schema-btn").click(function () {
+        var btn = jQuery(this);
+        var status = jQuery("#schema-status");
+        var output = jQuery("#schema-output");
+
+        btn.prop("disabled", true);
+        status.text("Fetching carts from DMS API…");
+        output.html('<p style="color:#888;text-align:center;padding:2rem 0;">Loading…</p>');
+
+        jQuery.ajax({
+            url: global.ajaxurl,
+            method: "POST",
+            dataType: "json",
+            data: { action: "tigon_dms_get_full_schema" }
+        }).done(function (res) {
+            if (res.success) {
+                status.text("Merged schema from " + res.data.cartCount + " carts.");
+                output.empty();
+                renderSchemaTree(res.data.schema, output[0]);
+                // Attach caret toggle handlers
+                output.find(".schema-caret").click(function () {
+                    jQuery(this).toggleClass("schema-caret-open");
+                    jQuery(this).next(".schema-nested").toggleClass("schema-nested-open");
+                });
+            } else {
+                status.text("");
+                output.html('<p style="color:#cf1010;text-align:center;padding:2rem 0;">' + (res.data && res.data.message ? res.data.message : 'Unknown error') + '</p>');
+            }
+        }).fail(function (xhr) {
+            status.text("");
+            output.html('<p style="color:#cf1010;text-align:center;padding:2rem 0;">Request failed (' + xhr.status + '). Check console for details.</p>');
+        }).always(function () {
+            btn.prop("disabled", false);
+        });
+    });
+
+    function renderSchemaTree(schema, container) {
+        var ul = document.createElement("ul");
+        ul.className = "schema-tree";
+
+        Object.keys(schema).forEach(function (key) {
+            var value = schema[key];
+            var li = document.createElement("li");
+            li.className = "schema-node";
+
+            if (value && value._v !== undefined) {
+                // Leaf node
+                var type = detectType(value._v);
+                var samples = formatSamples(value._v, 6);
+                li.className += " schema-leaf";
+                li.innerHTML =
+                    '<span class="schema-key">' + esc(key) + '</span> ' +
+                    '<span class="schema-type schema-type-' + type.replace("?","") + '">' + type + '</span> ' +
+                    '<span class="schema-samples">' + samples + '</span>';
+            } else {
+                // Object node — collapsible
+                var count = Object.keys(value).length;
+                var caret = document.createElement("span");
+                caret.className = "schema-caret schema-caret-open";
+                caret.innerHTML =
+                    '<span class="schema-key">' + esc(key) + '</span> ' +
+                    '<span class="schema-type schema-type-object">object</span> ' +
+                    '<span class="schema-count">' + count + ' fields</span>';
+                li.appendChild(caret);
+
+                var nested = document.createElement("div");
+                nested.className = "schema-nested schema-nested-open";
+                renderSchemaTree(value, nested);
+                li.appendChild(nested);
+            }
+
+            ul.appendChild(li);
+        });
+
+        container.appendChild(ul);
+    }
+
+    function detectType(values) {
+        var types = {};
+        values.forEach(function (v) {
+            if (v === null || v === undefined) types["null"] = true;
+            else if (typeof v === "boolean") types["boolean"] = true;
+            else if (typeof v === "number") types["number"] = true;
+            else types["string"] = true;
+        });
+        var keys = Object.keys(types);
+        if (keys.length === 0) return "null";
+        if (keys.length === 1) return keys[0];
+        if (keys.length === 2 && types["null"]) {
+            return keys.filter(function (k) { return k !== "null"; })[0] + "?";
+        }
+        return "mixed";
+    }
+
+    function formatSamples(values, max) {
+        if (!values.length) return "<em>empty</em>";
+        var shown = values.slice(0, max);
+        var parts = shown.map(function (v) {
+            if (v === null) return "<em>null</em>";
+            if (v === true) return "<em>true</em>";
+            if (v === false) return "<em>false</em>";
+            if (typeof v === "number") return '<span class="schema-num">' + v + "</span>";
+            var s = String(v);
+            if (s.length > 40) s = s.substring(0, 37) + "…";
+            return '<span class="schema-str">&quot;' + esc(s) + '&quot;</span>';
+        });
+        var html = parts.join(", ");
+        if (values.length > max) html += " <em>…+" + (values.length - max) + " more</em>";
+        return html;
+    }
+
+    function esc(str) {
+        return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
 });

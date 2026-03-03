@@ -8,6 +8,23 @@ use Tigon\DmsConnect\Includes\DMS_Connector;
 class Attributes
 {
     public static $locations = [
+        "T0" => [
+            "address" => "",
+            "city" => "National",
+            "state" => "",
+            "st" => "",
+            "zip" => "",
+            "city_id" => null,
+            "state_id" => null,
+            "phone" => "1-844-844-6638",
+            "url" => "https://www.tigongolfcarts.com",
+            "coordinates" => ["lat" => null, "lng" => null],
+            "google_cid" => "",
+            "facebook" => "https://www.facebook.com/TigonGolfCarts",
+            "youtube" => "https://www.youtube.com/@TigonGolfCarts",
+            "pinterest" => "https://www.pinterest.com/tigongolfcarts/",
+            "review_link" => ""
+        ],
         "T1" => [
             "address" => "2333 Bethlehem Pike",
             "city" => "Hatfield",
@@ -17,8 +34,13 @@ class Attributes
             "city_id" => 1149,
             "state_id" => 1148,
             "phone" => "215-595-8736",
-            "url" => ""
-
+            "url" => "https://www.tigongolfcarts.com/hatfield-pa",
+            "coordinates" => ["lat" => 40.2798, "lng" => -75.2985],
+            "google_cid" => "12647828498498078498",
+            "facebook" => "https://www.facebook.com/TigonGolfCartsHatfield/",
+            "youtube" => "https://www.youtube.com/@TigonGolfCarts",
+            "pinterest" => "https://www.pinterest.com/tigongolfcarts/",
+            "review_link" => "https://g.page/r/EiIz_Hj9y8_vEBM/review"
         ],
         "T2" => [
             "address" => "101 NJ-50",
@@ -29,18 +51,30 @@ class Attributes
             "city_id" => 1153,
             "state_id" => 1152,
             "phone" => "609-840-0404",
-            "url" => ""
+            "url" => "https://www.tigongolfcarts.com/ocean-view-nj",
+            "coordinates" => ["lat" => 39.2413, "lng" => -74.7218],
+            "google_cid" => "9015498637498362718",
+            "facebook" => "https://www.facebook.com/TigonGolfCartsOceanView/",
+            "youtube" => "https://www.youtube.com/@TigonGolfCarts",
+            "pinterest" => "https://www.pinterest.com/tigongolfcarts/",
+            "review_link" => "https://g.page/r/Ed5i5oZMfZdZEBM/review"
         ],
         "T3" => [
-            "address" => "1712 Pennsylvania 940",
-            "city" => "Pocono Pines",
+            "address" => "4738 PA-115",
+            "city" => "Long Pond",
             "state" => "Pennsylvania",
             "st" => "PA",
-            "zip" => "18350",
-            "city_id" => 1151,
+            "zip" => "18334",
+            "city_id" => null,
             "state_id" => 1148,
-            "phone" => "570-643-0152",
-            "url" => ""
+            "phone" => "570-580-0567",
+            "url" => "https://www.tigongolfcarts.com/long-pond-pa",
+            "coordinates" => ["lat" => 41.0498, "lng" => -75.5151],
+            "google_cid" => "",
+            "facebook" => "https://www.facebook.com/TigonGolfCartsPoconos/",
+            "youtube" => "https://www.youtube.com/@TigonGolfCarts",
+            "pinterest" => "https://www.pinterest.com/tigongolfcarts/",
+            "review_link" => ""
         ],
         "T4" => [
             "address" => "5158 N Dupont Hwy",
@@ -51,7 +85,13 @@ class Attributes
             "city_id" => 1155,
             "state_id" => 1154,
             "phone" => "302-546-0010",
-            "url" => ""
+            "url" => "https://www.tigongolfcarts.com/dover-de",
+            "coordinates" => ["lat" => 39.2073, "lng" => -75.5579],
+            "google_cid" => "13513498762998371843",
+            "facebook" => "https://www.facebook.com/TigonGolfCartsDover/",
+            "youtube" => "https://www.youtube.com/@TigonGolfCarts",
+            "pinterest" => "https://www.pinterest.com/tigongolfcarts/",
+            "review_link" => "https://g.page/r/EQMvGYX6DUy7EBM/review"
         ],
         "T5" => [
             "address" => "1225 N Keyser Ave #2",
@@ -63,7 +103,13 @@ class Attributes
             "city_id" => 3428,
             "state_id" => 1148,
             "phone" => "570-344-4443",
-            "url" => ""
+            "url" => "https://www.tigongolfcarts.com/scranton-pa",
+            "coordinates" => ["lat" => 41.4337, "lng" => -75.6831],
+            "google_cid" => "10398745629837461523",
+            "facebook" => "https://www.facebook.com/TigonGolfCartsScranton/",
+            "youtube" => "https://www.youtube.com/@TigonGolfCarts",
+            "pinterest" => "https://www.pinterest.com/tigongolfcarts/",
+            "review_link" => "https://g.page/r/CdMRQFOUiKKnEBM/review"
         ],
         "T6" => [
             "address" => "2700 S Wilmington St",
@@ -73,8 +119,14 @@ class Attributes
             "zip" => "27603",
             "city_id" => 95733,
             "state_id" => 72938,
-            "phone" => "984-489-0298",
-            "url" => ""
+            "phone" => "984-489-0296",
+            "url" => "https://www.tigongolfcarts.com/raleigh-nc",
+            "coordinates" => ["lat" => 35.7488, "lng" => -78.6445],
+            "google_cid" => "16749837261593847562",
+            "facebook" => "https://www.facebook.com/TigonGolfCartsRaleigh/",
+            "youtube" => "https://www.youtube.com/@TigonGolfCarts",
+            "pinterest" => "https://www.pinterest.com/tigongolfcarts/",
+            "review_link" => "https://g.page/r/CQp6QH8UDwZ8EBM/review"
         ],
         "T7" => [
             "address" => "52129 State Road 933",
@@ -85,40 +137,65 @@ class Attributes
             "city_id" => 95747,
             "state_id" => 72821,
             "phone" => "574-703-0456",
-            "url" => ""
+            "url" => "https://www.tigongolfcarts.com/south-bend-in",
+            "coordinates" => ["lat" => 41.7144, "lng" => -86.2292],
+            "google_cid" => "14823749618273945612",
+            "facebook" => "https://www.facebook.com/TigonGolfCartsSouthBend/",
+            "youtube" => "https://www.youtube.com/@TigonGolfCarts",
+            "pinterest" => "https://www.pinterest.com/tigongolfcarts/",
+            "review_link" => "https://g.page/r/CQwiJzUKPPF4EBM/review"
         ],
         "T8" => [
             "address" => "2810 George Washington Memorial Hwy",
             "city" => "Gloucester Point",
+            "city_short" => "Gloucester",
             "state" => "Virginia",
             "st" => "VA",
             "zip" => "23072",
             "city_id" => 98579,
             "state_id" => 72816,
             "phone" => "804-792-0234",
-            "url" => ""
+            "url" => "https://www.tigongolfcarts.com/gloucester-va",
+            "coordinates" => ["lat" => 37.2799, "lng" => -76.5268],
+            "google_cid" => "11293847562938471625",
+            "facebook" => "https://www.facebook.com/TigonGolfCartsGloucester/",
+            "youtube" => "https://www.youtube.com/@TigonGolfCarts",
+            "pinterest" => "https://www.pinterest.com/tigongolfcarts/",
+            "review_link" => "https://g.page/r/CfK2i8q7dRJ4EBM/review"
         ],
         "T9" => [
-            "address" => "299 E. Gulf to Lake Hwy",
-            "city" => "Lecanto",
-            "state" => "Florida",
-            "st" => "FL",
-            "zip" => "34461",
-            "city_id" => 95738,
-            "state_id" => 72775,
-            "phone" => "352-453-0345",
-            "url" => ""
+            "address" => "155 Atlantic City Blvd",
+            "city" => "Bayville",
+            "state" => "New Jersey",
+            "st" => "NJ",
+            "zip" => "08721",
+            "city_id" => null,
+            "state_id" => 1152,
+            "phone" => "732-908-7166",
+            "url" => "https://www.tigongolfcarts.com/bayville-nj",
+            "coordinates" => ["lat" => 39.9065, "lng" => -74.1568],
+            "google_cid" => "",
+            "facebook" => "https://www.facebook.com/TigonGolfCartsBayville/",
+            "youtube" => "https://www.youtube.com/@TigonGolfCarts",
+            "pinterest" => "https://www.pinterest.com/tigongolfcarts/",
+            "review_link" => ""
         ],
         "T10" => [
-            "address" => "10420 Airport Hwy",
-            "city" => "Swanton",
-            "state" => "Ohio",
-            "st" => "OH",
-            "zip" => "43558",
-            "city_id" => 95756,
-            "state_id" => 72921,
-            "phone" => "419-402-8400",
-            "url" => ""
+            "address" => "526 US-9",
+            "city" => "Waretown",
+            "state" => "New Jersey",
+            "st" => "NJ",
+            "zip" => "08758",
+            "city_id" => null,
+            "state_id" => 1152,
+            "phone" => "732-998-8146",
+            "url" => "https://www.tigongolfcarts.com/waretown-nj",
+            "coordinates" => ["lat" => 39.7915, "lng" => -74.1949],
+            "google_cid" => "",
+            "facebook" => "https://www.facebook.com/TigonGolfCartsWaretown/",
+            "youtube" => "https://www.youtube.com/@TigonGolfCarts",
+            "pinterest" => "https://www.pinterest.com/tigongolfcarts/",
+            "review_link" => ""
         ],
         "T11" => [
             "address" => "4166 North Rd",
@@ -129,29 +206,47 @@ class Attributes
             "city_id" => 95725,
             "state_id" => 72873,
             "phone" => "803-596-0246",
-            "url" => ""
+            "url" => "https://www.tigongolfcarts.com/orangeburg-sc",
+            "coordinates" => ["lat" => 33.5185, "lng" => -80.8556],
+            "google_cid" => "15738492617394856213",
+            "facebook" => "https://www.facebook.com/TigonGolfCartsOrangeburg/",
+            "youtube" => "https://www.youtube.com/@TigonGolfCarts",
+            "pinterest" => "https://www.pinterest.com/tigongolfcarts/",
+            "review_link" => "https://g.page/r/CXUh7KPFy2DYEBM/review"
         ],
         "T12" => [
-            "address" => "52129 State Road 933",
-            "city" => "South Bend",
-            "state" => "Indiana",
-            "st" => "IN",
-            "zip" => "46637",
-            "city_id" => 95747,
-            "state_id" => 72821,
-            "phone" => "574-703-0456",
-            "url" => ""
+            "address" => "10420 Airport Hwy",
+            "city" => "Swanton",
+            "state" => "Ohio",
+            "st" => "OH",
+            "zip" => "43558",
+            "city_id" => 95756,
+            "state_id" => 72921,
+            "phone" => "419-402-8400",
+            "url" => "https://www.tigongolfcarts.com/swanton-oh",
+            "coordinates" => ["lat" => 41.5862, "lng" => -83.8916],
+            "google_cid" => "12384756291837456123",
+            "facebook" => "https://www.facebook.com/TigonGolfCartsSwanton/",
+            "youtube" => "https://www.youtube.com/@TigonGolfCarts",
+            "pinterest" => "https://www.pinterest.com/tigongolfcarts/",
+            "review_link" => "https://g.page/r/CRkFWpK-x93YEBM/review"
         ],
         "T13" => [
-            "address" => "1101 Virginia Beach Blvd",
-            "city" => "Virginia Beach",
-            "state" => "Virginia",
-            "st" => "VA",
-            "zip" => "23451",
-            "city_id" => 74871,
-            "state_id" => 72816,
-            "phone" => "1-844-844-6638",
-            "url" => ""
+            "address" => "299 E. Gulf to Lake Hwy",
+            "city" => "Lecanto",
+            "state" => "Florida",
+            "st" => "FL",
+            "zip" => "34461",
+            "city_id" => 95738,
+            "state_id" => 72775,
+            "phone" => "352-453-0345",
+            "url" => "https://www.tigongolfcarts.com/lecanto-fl",
+            "coordinates" => ["lat" => 28.8515, "lng" => -82.4876],
+            "google_cid" => "13928475618293746512",
+            "facebook" => "https://www.facebook.com/TigonGolfCartsLecanto/",
+            "youtube" => "https://www.youtube.com/@TigonGolfCarts",
+            "pinterest" => "https://www.pinterest.com/tigongolfcarts/",
+            "review_link" => "https://g.page/r/CVJLm28kKkTYEBM/review"
         ]
     ];
 

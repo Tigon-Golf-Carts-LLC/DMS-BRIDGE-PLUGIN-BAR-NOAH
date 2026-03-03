@@ -27,7 +27,7 @@
     // Get S3 URLs from API service (with fallback)
     const s3CartBase = (window.DMSApiService && window.DMSApiService.s3Urls) 
         ? window.DMSApiService.s3Urls.carts 
-        : 'https://s3.amazonaws.com/prod.docs.s3/carts/'; // Fallback
+        : 'https://s3.amazonaws.com/test.docs.s3/carts/'; // Fallback
     const s3StickerBase = (window.DMSApiService && window.DMSApiService.s3Urls) 
         ? window.DMSApiService.s3Urls.windowStickers 
         : 'https://s3.amazonaws.com/prod.docs.s3/cart-window-stickers/'; // Fallback

@@ -207,8 +207,83 @@ class Ajax_Settings_Controller
                 </ul>
             </li>
             <li class="dms-value" code="{pid}">'.$number_svg.'PID</li>
-        </ul> 
+        </ul>
         ';
         exit;
+    }
+
+    /**
+     * Fetch carts from the DMS API and merge into a unified schema.
+     */
+    public static function get_full_schema()
+    {
+        $response = wp_remote_post('https://api.tigondms.com/wp-website/get-carts', [
+            'headers' => ['Content-Type' => 'application/json'],
+            'body'    => wp_json_encode(['pageNumber' => 0, 'pageSize' => 20]),
+            'timeout' => 30,
+        ]);
+
+        if (is_wp_error($response)) {
+            wp_send_json_error(['message' => $response->get_error_message()]);
+        }
+
+        $carts = json_decode(wp_remote_retrieve_body($response), true);
+
+        if (!is_array($carts) || empty($carts)) {
+            wp_send_json_error(['message' => 'No carts returned from the API.']);
+        }
+
+        $merged = [];
+        foreach ($carts as $cart) {
+            if (is_object($cart)) {
+                $cart = (array) $cart;
+            }
+            if (is_array($cart)) {
+                self::merge_into($merged, $cart);
+            }
+        }
+
+        wp_send_json_success([
+            'cartCount' => count($carts),
+            'schema'    => $merged,
+        ]);
+    }
+
+    private static function merge_into(array &$target, array $source): void
+    {
+        foreach ($source as $key => $value) {
+            if (is_object($value)) {
+                $value = (array) $value;
+            }
+
+            if (is_array($value) && !empty($value) && self::is_assoc($value)) {
+                if (!isset($target[$key]) || !is_array($target[$key]) || isset($target[$key]['_v'])) {
+                    $target[$key] = [];
+                }
+                self::merge_into($target[$key], $value);
+                continue;
+            }
+
+            if (!isset($target[$key]) || !is_array($target[$key]) || !isset($target[$key]['_v'])) {
+                $target[$key] = ['_v' => []];
+            }
+
+            if (is_array($value)) {
+                foreach ($value as $v) {
+                    if (!in_array($v, $target[$key]['_v'], true)) {
+                        $target[$key]['_v'][] = $v;
+                    }
+                }
+            } else {
+                if (!in_array($value, $target[$key]['_v'], true)) {
+                    $target[$key]['_v'][] = $value;
+                }
+            }
+        }
+    }
+
+    private static function is_assoc(array $arr): bool
+    {
+        return array_keys($arr) !== range(0, count($arr) - 1);
     }
 }
