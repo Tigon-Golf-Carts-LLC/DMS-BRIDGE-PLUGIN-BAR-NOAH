@@ -2125,6 +2125,12 @@ function tigon_dms_assign_product_attributes($product_id, $cart_data) {
         $set_attr('tire-profile', array($tire_profile));
     }
 
+    // Utility Bed
+    $has_bed = $cart_data['cartAttributes']['hasBed'] ?? '';
+    if (!empty($has_bed) && is_string($has_bed)) {
+        $set_attr('utility-bed', array(strtoupper($has_bed)));
+    }
+
     // Store Code
     if (!empty($store_id)) {
         if (strtolower($store_id) === 'national') {

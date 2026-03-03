@@ -2422,15 +2422,27 @@ abstract class Abstract_Cart
             }
         }
 
-        // // TODO - Incomplete Data
-        // // Utility Bed
-        // if ($this->cart['cartAttributes']['passengers'] === 'Utility') {
-        //     $this->attributes['pa_utility-bed'] = $this->generated_attributes->attributes['utility-bed']['object'];
-        //     array_push(
-        //         $this->taxonomy_terms,
-        //         $this->generated_attributes->attributes['utility-bed']['options']['']
-        //     );
-        // }
+        // Utility Bed (with auto-creation) — based on payload cartAttributes.hasBed
+        if (!empty($this->cart['cartAttributes']['hasBed'])) {
+            $this->attributes['pa_utility-bed'] = $this->generated_attributes->attributes['utility-bed']['object'];
+            $bed_value = strtoupper($this->cart['cartAttributes']['hasBed']);
+            if (isset($this->generated_attributes->attributes['utility-bed']['options'][$bed_value])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes['utility-bed']['options'][$bed_value]
+                );
+            } else {
+                $new_bed_term = wp_insert_term(
+                    ucwords(strtolower($this->cart['cartAttributes']['hasBed'])),
+                    'pa_utility-bed',
+                    ['slug' => sanitize_title($this->cart['cartAttributes']['hasBed'])]
+                );
+                if (!is_wp_error($new_bed_term)) {
+                    $this->generated_attributes->attributes['utility-bed']['options'][$bed_value] = $new_bed_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_bed_term['term_id']);
+                }
+            }
+        }
 
         // Vehicle Class
         $vehicle_class_attr = ['Golf Cart'];
