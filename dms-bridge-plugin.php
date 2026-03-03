@@ -2189,6 +2189,12 @@ function tigon_dms_assign_product_attributes($product_id, $cart_data) {
         $set_attr('vehicle-warranty', array(strtoupper($warranty)));
     }
 
+    // VIN
+    $vin_no = $cart_data['vinNo'] ?? '';
+    if (!empty($vin_no)) {
+        $set_attr('vin', array(strtoupper($vin_no)));
+    }
+
     // Year of Vehicle
     if (!empty($year)) {
         $set_attr('year-of-vehicle', array(strtoupper($year)));

@@ -2564,6 +2564,28 @@ abstract class Abstract_Cart
             }
         }
 
+        // VIN (with auto-creation) — based on payload vinNo
+        if (!empty($this->cart['vinNo'])) {
+            $vin_value = strtoupper($this->cart['vinNo']);
+            $this->attributes['pa_vin'] = $this->generated_attributes->attributes['vin']['object'];
+            if (isset($this->generated_attributes->attributes['vin']['options'][$vin_value])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes['vin']['options'][$vin_value]
+                );
+            } else {
+                $new_vin_term = wp_insert_term(
+                    $vin_value,
+                    'pa_vin',
+                    ['slug' => sanitize_title($this->cart['vinNo'])]
+                );
+                if (!is_wp_error($new_vin_term)) {
+                    $this->generated_attributes->attributes['vin']['options'][$vin_value] = $new_vin_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_vin_term['term_id']);
+                }
+            }
+        }
+
         // Year of Vehicle
         if ($this->cart['cartType']['year']) {
             $this->attributes['pa_year-of-vehicle'] = $this->generated_attributes->attributes['year-of-vehicle']['object'];
