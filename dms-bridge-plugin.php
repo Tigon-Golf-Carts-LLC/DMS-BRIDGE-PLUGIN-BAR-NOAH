@@ -2261,6 +2261,7 @@ function tigon_dms_assign_custom_taxonomies($product_id, $cart_data) {
         'vehicle-class'    => 'vehicle_classes_taxonomy',
         'inventory-status' => 'inventory_status_taxonomy',
         'drivetrain'       => 'drivetrains_taxonomy',
+        'rims'             => 'rims_taxonomy',
     );
 
     // Helper: safely assign terms using Attributes cache or DB fallback
@@ -2354,6 +2355,28 @@ function tigon_dms_assign_custom_taxonomies($product_id, $cart_data) {
     } else {
         // No sound system
         $assign('sound-systems', array('NO SOUND SYSTEM'));
+    }
+
+    // Rims taxonomy — based on tireRimSize (e.g. "14" becomes "14 INCH")
+    if (!empty($rim_size)) {
+        $rim_name = strtoupper($rim_size . ' INCH');
+        $rims_prop = $attrs->rims_taxonomy ?? array();
+        if (isset($rims_prop[$rim_name])) {
+            wp_set_object_terms($product_id, array((int) $rims_prop[$rim_name]), 'rims', true);
+        } else {
+            $existing_rim = get_term_by('name', $rim_name, 'rims');
+            if (!$existing_rim) {
+                $existing_rim = get_term_by('slug', sanitize_title($rim_name), 'rims');
+            }
+            if ($existing_rim && !is_wp_error($existing_rim)) {
+                wp_set_object_terms($product_id, array((int) $existing_rim->term_id), 'rims', true);
+            } else {
+                $new_rim = wp_insert_term($rim_name, 'rims', array('slug' => sanitize_title($rim_name)));
+                if (!is_wp_error($new_rim)) {
+                    wp_set_object_terms($product_id, array((int) $new_rim['term_id']), 'rims', true);
+                }
+            }
+        }
     }
 
     // Added Features taxonomy

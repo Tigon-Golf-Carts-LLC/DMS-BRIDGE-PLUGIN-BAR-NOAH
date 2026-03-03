@@ -2769,6 +2769,27 @@ abstract class Abstract_Cart
             }
         }
 
+        // Rims taxonomy — based on tireRimSize (e.g. "14" becomes "14 INCH")
+        if (!empty($this->cart['cartAttributes']['tireRimSize'])) {
+            $rim_name = strtoupper($this->cart['cartAttributes']['tireRimSize'] . ' INCH');
+            if (isset($this->generated_attributes->rims_taxonomy[$rim_name])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->rims_taxonomy[$rim_name]
+                );
+            } else {
+                $new_rim_term = wp_insert_term(
+                    $rim_name,
+                    'rims',
+                    ['slug' => sanitize_title($rim_name)]
+                );
+                if (!is_wp_error($new_rim_term)) {
+                    $this->generated_attributes->rims_taxonomy[$rim_name] = $new_rim_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_rim_term['term_id']);
+                }
+            }
+        }
+
         // Added Features
         if (isset($this->cart['addedFeatures'])) {
             if ($this->cart['addedFeatures']['staticStock'])
