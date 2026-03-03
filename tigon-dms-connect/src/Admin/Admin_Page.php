@@ -365,7 +365,7 @@ class Admin_Page
                     </div>
                     <a id="save" class="tigon_dms_action tigon_dms_save" data-nonce="' . $nonce . '"><button>Save Settings</button></a>
 
-                    <hr style="margin:1.5rem 0; border:none; border-top:1px solid #ddd;" />
+                    <hr style="margin:2.5rem 0; border:none; border-top:1px solid #ddd;" />
 
                     <h3 style="margin:0 0 0.5rem 0;">DMS API &amp; S3 URLs</h3>
                     <p style="font-size:0.85rem; color:#666; margin:0 0 1rem 0;">Production API endpoints and S3 bucket prefixes used by this plugin to fetch inventory data and assets.</p>
@@ -374,7 +374,7 @@ class Admin_Page
                         <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
                             <span style="min-width:200px; font-weight:600; font-size:0.85rem;">API Base URL:</span>
                             <code id="url-api-base" style="background:#f0f4f8; padding:0.35rem 0.7rem; border-radius:4px; font-size:0.82rem; word-break:break-all; flex:1; border:1px solid #d0d5dd;">https://api.tigondms.com/wp-website</code>
-                            <button type="button" class="tigon-copy-btn" data-target="url-api-base" style="padding:0.3rem 0.7rem; font-size:0.78rem; cursor:pointer; border:1px solid #ccc; border-radius:4px; background:#fff;">Copy</button>
+                            <button type="button" class="tigon-copy-btn" data-target="url-api-base" style="padding:0.3rem 0.7rem; font-size:0.78rem; cursor:pointer; border:none; border-radius:4px; background-color:#557486; color:#F4F4F4;">Copy</button>
                         </div>
                         <div style="font-size:0.78rem; color:#888; margin-left:200px; margin-top:-0.2rem;">
                             Base URL for all outbound DMS API requests.
@@ -383,7 +383,7 @@ class Admin_Page
                         <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-top:0.7rem;">
                             <span style="min-width:200px; font-weight:600; font-size:0.85rem;">Active Inventory Carts:</span>
                             <code id="url-get-carts" style="background:#f0f4f8; padding:0.35rem 0.7rem; border-radius:4px; font-size:0.82rem; word-break:break-all; flex:1; border:1px solid #d0d5dd;">https://api.tigondms.com/wp-website/get-carts</code>
-                            <button type="button" class="tigon-copy-btn" data-target="url-get-carts" style="padding:0.3rem 0.7rem; font-size:0.78rem; cursor:pointer; border:1px solid #ccc; border-radius:4px; background:#fff;">Copy</button>
+                            <button type="button" class="tigon-copy-btn" data-target="url-get-carts" style="padding:0.3rem 0.7rem; font-size:0.78rem; cursor:pointer; border:none; border-radius:4px; background-color:#557486; color:#F4F4F4;">Copy</button>
                         </div>
                         <div style="font-size:0.78rem; color:#888; margin-left:200px; margin-top:-0.2rem;">
                             <strong>POST</strong> &mdash; Fetch paginated active inventory carts from the DMS.
@@ -392,7 +392,7 @@ class Admin_Page
                         <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-top:0.7rem;">
                             <span style="min-width:200px; font-weight:600; font-size:0.85rem;">Tigon Stores:</span>
                             <code id="url-tigon-stores" style="background:#f0f4f8; padding:0.35rem 0.7rem; border-radius:4px; font-size:0.82rem; word-break:break-all; flex:1; border:1px solid #d0d5dd;">https://api.tigondms.com/wp-website/tigon-stores</code>
-                            <button type="button" class="tigon-copy-btn" data-target="url-tigon-stores" style="padding:0.3rem 0.7rem; font-size:0.78rem; cursor:pointer; border:1px solid #ccc; border-radius:4px; background:#fff;">Copy</button>
+                            <button type="button" class="tigon-copy-btn" data-target="url-tigon-stores" style="padding:0.3rem 0.7rem; font-size:0.78rem; cursor:pointer; border:none; border-radius:4px; background-color:#557486; color:#F4F4F4;">Copy</button>
                         </div>
                         <div style="font-size:0.78rem; color:#888; margin-left:200px; margin-top:-0.2rem;">
                             <strong>GET</strong> &mdash; Retrieve list of Tigon store locations for inventory filtering.
@@ -401,7 +401,7 @@ class Admin_Page
                         <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-top:0.7rem;">
                             <span style="min-width:200px; font-weight:600; font-size:0.85rem;">Monroney Sticker Images:</span>
                             <code id="url-monroney" style="background:#f0f4f8; padding:0.35rem 0.7rem; border-radius:4px; font-size:0.82rem; word-break:break-all; flex:1; border:1px solid #d0d5dd;">https://s3.amazonaws.com/prod.docs.s3/cart-window-stickers/</code>
-                            <button type="button" class="tigon-copy-btn" data-target="url-monroney" style="padding:0.3rem 0.7rem; font-size:0.78rem; cursor:pointer; border:1px solid #ccc; border-radius:4px; background:#fff;">Copy</button>
+                            <button type="button" class="tigon-copy-btn" data-target="url-monroney" style="padding:0.3rem 0.7rem; font-size:0.78rem; cursor:pointer; border:none; border-radius:4px; background-color:#557486; color:#F4F4F4;">Copy</button>
                         </div>
                         <div style="font-size:0.78rem; color:#888; margin-left:200px; margin-top:-0.2rem;">
                             S3 prefix for window sticker (Monroney) PDF/image files.
@@ -410,7 +410,7 @@ class Admin_Page
                         <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-top:0.7rem;">
                             <span style="min-width:200px; font-weight:600; font-size:0.85rem;">Website Cart Images:</span>
                             <code id="url-cart-images" style="background:#f0f4f8; padding:0.35rem 0.7rem; border-radius:4px; font-size:0.82rem; word-break:break-all; flex:1; border:1px solid #d0d5dd;">https://s3.amazonaws.com/test.docs.s3/carts/</code>
-                            <button type="button" class="tigon-copy-btn" data-target="url-cart-images" style="padding:0.3rem 0.7rem; font-size:0.78rem; cursor:pointer; border:1px solid #ccc; border-radius:4px; background:#fff;">Copy</button>
+                            <button type="button" class="tigon-copy-btn" data-target="url-cart-images" style="padding:0.3rem 0.7rem; font-size:0.78rem; cursor:pointer; border:none; border-radius:4px; background-color:#557486; color:#F4F4F4;">Copy</button>
                         </div>
                         <div style="font-size:0.78rem; color:#888; margin-left:200px; margin-top:-0.2rem;">
                             S3 prefix for cart product images displayed on the website.
