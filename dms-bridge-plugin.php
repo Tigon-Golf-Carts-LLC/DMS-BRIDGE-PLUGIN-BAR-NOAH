@@ -882,12 +882,17 @@ function tigon_dms_create_woo_product($cart_id, $title, $price, $cart_data, $spe
         }
     }
 
-    // 9. Lifted category
+    // 9. Lifted / Non-Lifted category
     $is_lifted = isset($cart_data['cartAttributes']['isLifted']) && $cart_data['cartAttributes']['isLifted'];
     if ($is_lifted) {
         $lifted_cat_id = tigon_dms_get_existing_category('Lifted', 0);
         if ($lifted_cat_id) {
             $categories[] = $lifted_cat_id;
+        }
+    } else {
+        $non_lifted_cat_id = tigon_dms_get_existing_category('NON-Lifted', 0);
+        if ($non_lifted_cat_id) {
+            $categories[] = $non_lifted_cat_id;
         }
     }
 
@@ -904,6 +909,14 @@ function tigon_dms_create_woo_product($cart_id, $title, $price, $cart_data, $spe
         }
     }
 
+    // 10b. Utility Task Vehicles (UTVs) — for Utility passengers
+    if (($cart_data['cartAttributes']['passengers'] ?? '') === 'Utility') {
+        $utv_cat_id = tigon_dms_get_existing_category('Utility Task Vehicles (UTVs)', 0);
+        if ($utv_cat_id) {
+            $categories[] = $utv_cat_id;
+        }
+    }
+
     // 11. New/Used category
     $new_used_cat_id = tigon_dms_get_existing_category($is_used ? 'Used' : 'New', 0);
     if ($new_used_cat_id) {
@@ -911,13 +924,43 @@ function tigon_dms_create_woo_product($cart_id, $title, $price, $cart_data, $spe
     }
 
     // 12. Inventory status category
-    if ($is_used) {
-        $inv_cat_id = tigon_dms_get_existing_category('Local Used Active Inventory', 0);
+    $is_rental = !empty($cart_data['isRental']);
+    if ($is_rental) {
+        if ($is_used) {
+            $inv_cat_id = tigon_dms_get_existing_category('Local Used Rental Inventory', 0);
+        } else {
+            $inv_cat_id = tigon_dms_get_existing_category('Local New Rental Inventory', 0);
+        }
+        // Also add Rental category
+        $rental_cat_id = tigon_dms_get_existing_category('Rental', 0);
+        if ($rental_cat_id) {
+            $categories[] = $rental_cat_id;
+        }
     } else {
-        $inv_cat_id = tigon_dms_get_existing_category('Local New Active Inventory', 0);
+        if ($is_used) {
+            $inv_cat_id = tigon_dms_get_existing_category('Local Used Active Inventory', 0);
+        } else {
+            $inv_cat_id = tigon_dms_get_existing_category('Local New Active Inventory', 0);
+        }
     }
     if (!empty($inv_cat_id)) {
         $categories[] = $inv_cat_id;
+    }
+
+    // 13. Parent hierarchy categories (Passengers, Drivetrain, Power Source, Batteries, Vehicle Class, Location)
+    foreach (array('Passengers', 'DriveTrain', 'Power Source', 'Vehicle Class', 'Location') as $parent_name) {
+        $parent_id = tigon_dms_get_existing_category($parent_name, 0);
+        if ($parent_id) {
+            $categories[] = $parent_id;
+        }
+    }
+
+    // Batteries parent (electric only)
+    if (isset($cart_data['isElectric']) && $cart_data['isElectric']) {
+        $batteries_cat_id = tigon_dms_get_existing_category('Batteries', 0);
+        if ($batteries_cat_id) {
+            $categories[] = $batteries_cat_id;
+        }
     }
 
     // Assign all categories to product
@@ -1243,12 +1286,17 @@ function tigon_dms_update_woo_product($product_id, $title, $price, $cart_data, $
         }
     }
 
-    // 9. Lifted category
+    // 9. Lifted / Non-Lifted category
     $is_lifted = isset($cart_data['cartAttributes']['isLifted']) && $cart_data['cartAttributes']['isLifted'];
     if ($is_lifted) {
         $lifted_cat_id = tigon_dms_get_existing_category('Lifted', 0);
         if ($lifted_cat_id) {
             $categories[] = $lifted_cat_id;
+        }
+    } else {
+        $non_lifted_cat_id = tigon_dms_get_existing_category('NON-Lifted', 0);
+        if ($non_lifted_cat_id) {
+            $categories[] = $non_lifted_cat_id;
         }
     }
 
@@ -1265,6 +1313,14 @@ function tigon_dms_update_woo_product($product_id, $title, $price, $cart_data, $
         }
     }
 
+    // 10b. Utility Task Vehicles (UTVs) — for Utility passengers
+    if (($cart_data['cartAttributes']['passengers'] ?? '') === 'Utility') {
+        $utv_cat_id = tigon_dms_get_existing_category('Utility Task Vehicles (UTVs)', 0);
+        if ($utv_cat_id) {
+            $categories[] = $utv_cat_id;
+        }
+    }
+
     // 11. New/Used category
     $new_used_cat_id = tigon_dms_get_existing_category($is_used ? 'Used' : 'New', 0);
     if ($new_used_cat_id) {
@@ -1272,13 +1328,43 @@ function tigon_dms_update_woo_product($product_id, $title, $price, $cart_data, $
     }
 
     // 12. Inventory status category
-    if ($is_used) {
-        $inv_cat_id = tigon_dms_get_existing_category('Local Used Active Inventory', 0);
+    $is_rental = !empty($cart_data['isRental']);
+    if ($is_rental) {
+        if ($is_used) {
+            $inv_cat_id = tigon_dms_get_existing_category('Local Used Rental Inventory', 0);
+        } else {
+            $inv_cat_id = tigon_dms_get_existing_category('Local New Rental Inventory', 0);
+        }
+        // Also add Rental category
+        $rental_cat_id = tigon_dms_get_existing_category('Rental', 0);
+        if ($rental_cat_id) {
+            $categories[] = $rental_cat_id;
+        }
     } else {
-        $inv_cat_id = tigon_dms_get_existing_category('Local New Active Inventory', 0);
+        if ($is_used) {
+            $inv_cat_id = tigon_dms_get_existing_category('Local Used Active Inventory', 0);
+        } else {
+            $inv_cat_id = tigon_dms_get_existing_category('Local New Active Inventory', 0);
+        }
     }
     if (!empty($inv_cat_id)) {
         $categories[] = $inv_cat_id;
+    }
+
+    // 13. Parent hierarchy categories (Passengers, Drivetrain, Power Source, Batteries, Vehicle Class, Location)
+    foreach (array('Passengers', 'DriveTrain', 'Power Source', 'Vehicle Class', 'Location') as $parent_name) {
+        $parent_id = tigon_dms_get_existing_category($parent_name, 0);
+        if ($parent_id) {
+            $categories[] = $parent_id;
+        }
+    }
+
+    // Batteries parent (electric only)
+    if (isset($cart_data['isElectric']) && $cart_data['isElectric']) {
+        $batteries_cat_id = tigon_dms_get_existing_category('Batteries', 0);
+        if ($batteries_cat_id) {
+            $categories[] = $batteries_cat_id;
+        }
     }
 
     // Assign all categories to product

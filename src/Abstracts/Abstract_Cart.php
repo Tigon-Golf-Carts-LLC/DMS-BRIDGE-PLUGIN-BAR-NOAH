@@ -873,7 +873,7 @@ abstract class Abstract_Cart
             );
         }
 
-        // lifted
+        // lifted / non-lifted
         if ($this->cart['cartAttributes']['isLifted']) {
             array_push(
                 $this->taxonomy_terms,
@@ -881,6 +881,9 @@ abstract class Abstract_Cart
                 $this->generated_attributes->tags['LIFTED']
             );
         } else {
+            if (isset($this->generated_attributes->categories['NON-LIFTED'])) {
+                array_push($this->taxonomy_terms, $this->generated_attributes->categories['NON-LIFTED']);
+            }
             array_push(
                 $this->taxonomy_terms,
                 $this->generated_attributes->tags['NON LIFTED']
@@ -997,11 +1000,55 @@ abstract class Abstract_Cart
             }
         } 
 
-        // Drivetrain
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->categories['2X4']
-        );
+        // Drivetrain category — use actual payload value
+        $drivetrain_cat = strtoupper($this->cart['cartAttributes']['driveTrain'] ?? '2X4');
+        if (isset($this->generated_attributes->categories[$drivetrain_cat])) {
+            array_push($this->taxonomy_terms, $this->generated_attributes->categories[$drivetrain_cat]);
+        }
+        // DRIVETRAIN parent category
+        if (isset($this->generated_attributes->categories['DRIVETRAIN'])) {
+            array_push($this->taxonomy_terms, $this->generated_attributes->categories['DRIVETRAIN']);
+        }
+
+        // Passengers parent category
+        if (isset($this->generated_attributes->categories['PASSENGERS'])) {
+            array_push($this->taxonomy_terms, $this->generated_attributes->categories['PASSENGERS']);
+        }
+
+        // Power Source parent category
+        if (isset($this->generated_attributes->categories['POWER SOURCE'])) {
+            array_push($this->taxonomy_terms, $this->generated_attributes->categories['POWER SOURCE']);
+        }
+
+        // Batteries parent category
+        if ($this->cart['isElectric'] && isset($this->generated_attributes->categories['BATTERIES'])) {
+            array_push($this->taxonomy_terms, $this->generated_attributes->categories['BATTERIES']);
+        }
+
+        // Vehicle Class parent category
+        if (isset($this->generated_attributes->categories['VEHICLE CLASS'])) {
+            array_push($this->taxonomy_terms, $this->generated_attributes->categories['VEHICLE CLASS']);
+        }
+
+        // Utility Task Vehicles (UTVs) — for Utility passengers
+        if ($this->cart['cartAttributes']['passengers'] == 'Utility') {
+            if (isset($this->generated_attributes->categories['UTILITY TASK VEHICLES (UTVS)'])) {
+                array_push($this->taxonomy_terms, $this->generated_attributes->categories['UTILITY TASK VEHICLES (UTVS)']);
+            }
+        }
+
+        // Location hierarchy categories (Location > State > City)
+        $state_name = Attributes::$locations[$this->location_id]['state'] ?? '';
+        if (!empty($state_name) && isset($this->generated_attributes->categories[strtoupper($state_name)])) {
+            array_push($this->taxonomy_terms, $this->generated_attributes->categories[strtoupper($state_name)]);
+        }
+        if (isset($this->generated_attributes->categories['LOCATION'])) {
+            array_push($this->taxonomy_terms, $this->generated_attributes->categories['LOCATION']);
+        }
+        $city_name = $this->city_shortname ?? '';
+        if (!empty($city_name) && isset($this->generated_attributes->categories[strtoupper($city_name)])) {
+            array_push($this->taxonomy_terms, $this->generated_attributes->categories[strtoupper($city_name)]);
+        }
 
         // TIGON Dealership
         array_push(
