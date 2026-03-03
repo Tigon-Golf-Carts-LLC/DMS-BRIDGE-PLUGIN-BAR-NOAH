@@ -3308,7 +3308,23 @@ abstract class Abstract_Cart
         $this->downloadable = 'no';
         $this->download_limit = '-1';
         $this->download_expiry = '-1';
-        array_push($this->taxonomy_terms, 665);//shipping class
+        // Shipping class: Rentals get "Golf Cart Rentals" (6076), everything else gets "Golf Cart Shipping" (665)
+        if (isset($this->cart['isRental']) && $this->cart['isRental']) {
+            $shipping_slug = 'golf-cart-rentals';
+            $shipping_name = 'Golf Cart Rentals';
+        } else {
+            $shipping_slug = 'golf-cart-shipping';
+            $shipping_name = 'Golf Cart Shipping';
+        }
+        $shipping_term = get_term_by('slug', $shipping_slug, 'product_shipping_class');
+        if (!$shipping_term || is_wp_error($shipping_term)) {
+            $new_shipping = wp_insert_term($shipping_name, 'product_shipping_class', ['slug' => $shipping_slug]);
+            if (!is_wp_error($new_shipping)) {
+                array_push($this->taxonomy_terms, $new_shipping['term_id']);
+            }
+        } else {
+            array_push($this->taxonomy_terms, $shipping_term->term_id);
+        }
         $this->bit_is_cornerstone = '1';
         $this->attr_exclude_global_forms = '1';
         $this->stock = 10000;

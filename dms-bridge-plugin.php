@@ -2640,11 +2640,21 @@ function tigon_dms_set_product_fields_meta($product_id, $cart_data) {
     // 8. Shipping class term
     // ---------------------------------------------------------------
     if (taxonomy_exists('product_shipping_class')) {
-        $shipping_term = get_term_by('slug', 'golf-cart', 'product_shipping_class');
-        if (!$shipping_term) {
-            $shipping_term = get_term_by('slug', 'golf-carts', 'product_shipping_class');
+        // Rentals get "Golf Cart Rentals", everything else gets "Golf Cart Shipping"
+        if ($is_rental) {
+            $shipping_slug = 'golf-cart-rentals';
+            $shipping_name = 'Golf Cart Rentals';
+        } else {
+            $shipping_slug = 'golf-cart-shipping';
+            $shipping_name = 'Golf Cart Shipping';
         }
-        if ($shipping_term && !is_wp_error($shipping_term)) {
+        $shipping_term = get_term_by('slug', $shipping_slug, 'product_shipping_class');
+        if (!$shipping_term || is_wp_error($shipping_term)) {
+            $new_shipping = wp_insert_term($shipping_name, 'product_shipping_class', array('slug' => $shipping_slug));
+            if (!is_wp_error($new_shipping)) {
+                wp_set_object_terms($product_id, array($new_shipping['term_id']), 'product_shipping_class');
+            }
+        } else {
             wp_set_object_terms($product_id, array($shipping_term->term_id), 'product_shipping_class');
         }
     }
