@@ -1430,6 +1430,9 @@ abstract class Abstract_Cart
         if ($make_lower === 'tomberlin-ev') {
             $make_lower = 'tomberlin';
         }
+        if ($make_lower === 'yamaha-ev') {
+            $make_lower = 'yamaha';
+        }
 
         // USED products always get pa_cart-color (with auto-creation of missing color terms)
         if ($this->cart['isUsed']) {
@@ -2058,6 +2061,28 @@ abstract class Abstract_Cart
                     }
                 }
             }
+
+            // Yamaha used products also get pa_yamaha-cart-colors (with auto-creation)
+            if ($make_lower === 'yamaha') {
+                $this->attributes['pa_yamaha-cart-colors'] = $this->generated_attributes->attributes['yamaha-cart-colors']['object'];
+                $yam_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
+                if (isset($this->generated_attributes->attributes['yamaha-cart-colors']['options'][$yam_color_upper])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['yamaha-cart-colors']['options'][$yam_color_upper]
+                    );
+                } else {
+                    $new_yam_term = wp_insert_term(
+                        ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
+                        'pa_yamaha-cart-colors',
+                        ['slug' => sanitize_title($this->cart['cartAttributes']['cartColor'])]
+                    );
+                    if (!is_wp_error($new_yam_term)) {
+                        $this->generated_attributes->attributes['yamaha-cart-colors']['options'][$yam_color_upper] = $new_yam_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_yam_term['term_id']);
+                    }
+                }
+            }
         } elseif (array_search($make_lower, $make_attrs) !== false) {
             // Navitas uses singular "cart-color" / "seat-color" instead of plural
             if ($make_lower === 'navitas') {
@@ -2102,8 +2127,8 @@ abstract class Abstract_Cart
                 $this->attributes["pa_$make_lower-cart-colors"] = $this->generated_attributes->attributes[$make_lower . '-cart-colors']['object'];
                 $make_cart_color_upper = strtoupper($this->cart['cartAttributes']['cartColor']);
 
-                // Club Car / Denago / Epic / Evolution / EZGO / ICON / Polaris / Royal EV / Star EV / Swift / Tara / Teko / Tomberlin: auto-create missing cart color terms
-                if (in_array($make_lower, ['club-car', 'denago', 'epic', 'evolution', 'ezgo', 'icon', 'polaris', 'royal-ev', 'star-ev', 'swift', 'tara', 'teko', 'tomberlin']) && !isset($this->generated_attributes->attributes[$make_lower . '-cart-colors']['options'][$make_cart_color_upper])) {
+                // Club Car / Denago / Epic / Evolution / EZGO / ICON / Polaris / Royal EV / Star EV / Swift / Tara / Teko / Tomberlin / Yamaha: auto-create missing cart color terms
+                if (in_array($make_lower, ['club-car', 'denago', 'epic', 'evolution', 'ezgo', 'icon', 'polaris', 'royal-ev', 'star-ev', 'swift', 'tara', 'teko', 'tomberlin', 'yamaha']) && !isset($this->generated_attributes->attributes[$make_lower . '-cart-colors']['options'][$make_cart_color_upper])) {
                     $new_color_term = wp_insert_term(
                         ucwords(strtolower($this->cart['cartAttributes']['cartColor'])),
                         "pa_$make_lower-cart-colors",
