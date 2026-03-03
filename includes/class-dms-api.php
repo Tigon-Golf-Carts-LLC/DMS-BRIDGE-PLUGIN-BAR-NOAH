@@ -26,8 +26,9 @@ class DMS_API
      *
      * @var string
      */
-    private static $s3_carts_url = 'https://s3.amazonaws.com/prod.docs.s3/carts/';
-    private static $s3_window_stickers_url = 'https://s3.amazonaws.com/prod.docs.s3/cart-window-stickers/';
+    private static $s3_carts_url = 'https://s3.us-east-1.amazonaws.com/prod.docs.s3/carts/';
+    private static $s3_window_stickers_url = 'https://s3.us-east-1.amazonaws.com/prod.docs.s3/cart-window-stickers/';
+    private static $s3_default_images_url = 'https://s3.amazonaws.com/test.docs.s3/default-cart-web-images/';
 
     /**
      * Placeholder image for carts without public images
@@ -374,9 +375,14 @@ class DMS_API
     /**
      * Resolve public image URLs for a cart.
      *
-     * Only `imageUrls` are publicly accessible via S3.
-     * `internalCartImageUrls` are private and will 403.
-     * When no public images exist, returns a single coming-soon placeholder.
+     * Priority order:
+     * 1. `imageUrls` from the API payload (prod S3 bucket)
+     * 2. Default cart images for NEW carts (test.docs.s3 bucket) — location-specific first, national fallback
+     * 3. Coming-soon placeholder
+     *
+     * Default image naming: {color}-{make}-{model}-in-{location}-{N}.jpg
+     * New carts normally have 4 default images (index 1-4).
+     * Used carts do NOT get default images.
      *
      * @param array $cart_data Full cart payload
      * @return array Array of full image URLs
@@ -385,19 +391,133 @@ class DMS_API
     {
         $image_filenames = $cart_data['imageUrls'] ?? array();
 
-        if (empty($image_filenames) || !is_array($image_filenames)) {
-            // No public images — use placeholder
-            return array(self::$coming_soon_image);
-        }
-
-        $urls = array();
-        foreach ($image_filenames as $filename) {
-            if (!empty($filename)) {
-                $urls[] = self::$s3_carts_url . ltrim($filename, '/');
+        // 1. Use prod S3 images if available
+        if (!empty($image_filenames) && is_array($image_filenames)) {
+            $urls = array();
+            foreach ($image_filenames as $filename) {
+                if (!empty($filename)) {
+                    $urls[] = self::$s3_carts_url . ltrim($filename, '/');
+                }
+            }
+            if (!empty($urls)) {
+                return $urls;
             }
         }
 
-        return !empty($urls) ? $urls : array(self::$coming_soon_image);
+        // 2. For NEW carts only, try default cart images from test.docs.s3
+        $is_used = !empty($cart_data['isUsed']);
+        if (!$is_used) {
+            $default_urls = self::resolve_default_cart_images($cart_data);
+            if (!empty($default_urls)) {
+                return $default_urls;
+            }
+        }
+
+        // 3. Fallback to coming-soon placeholder
+        return array(self::$coming_soon_image);
+    }
+
+    /**
+     * Resolve default cart images from the test.docs.s3 bucket for NEW carts.
+     *
+     * Naming pattern: {color}-{make}-{model}-in-{location}-{N}.jpg
+     * where {location} is "{city}-{state}" (e.g., "ocean-view-new-jersey")
+     * or "national" for the national fallback.
+     *
+     * Tries location-specific images first, falls back to national.
+     * Each new cart normally has 4 images (index 1-4).
+     *
+     * @param array $cart_data Full cart payload
+     * @return array Array of image URLs, or empty array if none found
+     */
+    private static function resolve_default_cart_images(array $cart_data): array
+    {
+        $color = $cart_data['cartAttributes']['cartColor'] ?? '';
+        $make  = $cart_data['cartType']['make'] ?? '';
+        $model = $cart_data['cartType']['model'] ?? '';
+        $store_id = $cart_data['cartLocation']['locationId'] ?? '';
+
+        if (empty($color) || empty($make) || empty($model)) {
+            return array();
+        }
+
+        // Build the base filename: sanitize to lowercase hyphenated
+        $color_slug = sanitize_title($color);
+        $make_slug  = sanitize_title(preg_replace('/[®™]/', '', $make));
+        $model_slug = sanitize_title($model);
+
+        // Resolve city and state for location-specific images
+        $city = '';
+        $state = '';
+        if (!empty($store_id)) {
+            if (class_exists('\Tigon\DmsConnect\Admin\Attributes')) {
+                $loc = \Tigon\DmsConnect\Admin\Attributes::get_location($store_id);
+                if ($loc) {
+                    $city  = $loc['city'] ?? '';
+                    $state = $loc['state'] ?? '';
+                }
+            }
+            if (empty($city)) {
+                $store_data = self::get_city_and_state_by_store_id($store_id);
+                $city  = $store_data['city'] ?? '';
+                $state = $store_data['state'] ?? '';
+            }
+        }
+
+        $base_prefix = $color_slug . '-' . $make_slug . '-' . $model_slug . '-in-';
+        $image_count = 4;
+
+        // Try location-specific images first
+        if (!empty($city) && !empty($state)) {
+            $location_slug = sanitize_title($city . ' ' . $state);
+            $location_urls = self::build_default_image_urls($base_prefix . $location_slug, $image_count);
+            if (!empty($location_urls)) {
+                return $location_urls;
+            }
+        }
+
+        // Fall back to national images
+        $national_urls = self::build_default_image_urls($base_prefix . 'national', $image_count);
+        if (!empty($national_urls)) {
+            return $national_urls;
+        }
+
+        return array();
+    }
+
+    /**
+     * Build default image URLs and verify at least the first one exists.
+     *
+     * @param string $base_name  Base filename without index (e.g., "arctic-gray-evolution-classic-2-pro-in-national")
+     * @param int    $count      Number of images to try (default 4)
+     * @return array Array of verified image URLs, or empty if first image doesn't exist
+     */
+    private static function build_default_image_urls(string $base_name, int $count = 4): array
+    {
+        // Check if the first image exists via a HEAD request
+        $first_url = self::$s3_default_images_url . $base_name . '-1.jpg';
+
+        $response = wp_remote_head($first_url, array(
+            'timeout'   => 5,
+            'sslverify' => false,
+        ));
+
+        if (is_wp_error($response)) {
+            return array();
+        }
+
+        $status_code = wp_remote_retrieve_response_code($response);
+        if ($status_code !== 200) {
+            return array();
+        }
+
+        // First image exists — build all URLs (1 through $count)
+        $urls = array();
+        for ($i = 1; $i <= $count; $i++) {
+            $urls[] = self::$s3_default_images_url . $base_name . '-' . $i . '.jpg';
+        }
+
+        return $urls;
     }
 
 }
