@@ -294,14 +294,9 @@
         // Build inventory URL
         const inventoryUrl = config.baseUrl + '/dms/cart/' + cartId + '/';
 
-        // Get city from API data for ribbon
-        const cityName = getCityFromStoreId(storeId);
-        const ribbonText = cityName || '';
-
-        // Create card HTML with ribbon - show city from /tigon-stores API
+        // Create card HTML
         const $card = $(`
             <article class="dms-inventory-cart">
-                ${ribbonText ? `<div class="dms-ribbon">${escapeHtml(ribbonText)}</div>` : ''}
                 <img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(cartTitle)}" loading="lazy">
                 <div class="dms-cart-content">
                     <h3>${escapeHtml(cartTitle)}</h3>
