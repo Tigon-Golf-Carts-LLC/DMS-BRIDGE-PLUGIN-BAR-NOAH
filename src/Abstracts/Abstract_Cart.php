@@ -2139,8 +2139,44 @@ abstract class Abstract_Cart
             );
         }
 
+        // Store Code (with auto-creation)
+        if (!empty($this->cart['cartLocation']['locationId'])) {
+            $store_id = $this->cart['cartLocation']['locationId'];
+            if (strtolower($store_id) === 'national') {
+                $store_code_value = 'UNITED STATES OF AMERICA';
+            } else {
+                $loc_data = Attributes::get_location($store_id);
+                if ($loc_data) {
+                    $city = $loc_data['city_short'] ?? $loc_data['city'];
+                    $st = $loc_data['st'] ?? '';
+                    $store_code_value = strtoupper(trim($city . ' ' . $st));
+                } else {
+                    $store_code_value = '';
+                }
+            }
+            if (!empty($store_code_value)) {
+                $this->attributes['pa_store-code'] = $this->generated_attributes->attributes['store-code']['object'];
+                if (isset($this->generated_attributes->attributes['store-code']['options'][$store_code_value])) {
+                    array_push(
+                        $this->taxonomy_terms,
+                        $this->generated_attributes->attributes['store-code']['options'][$store_code_value]
+                    );
+                } else {
+                    $new_store_term = wp_insert_term(
+                        $store_code_value,
+                        'pa_store-code',
+                        ['slug' => sanitize_title($store_code_value)]
+                    );
+                    if (!is_wp_error($new_store_term)) {
+                        $this->generated_attributes->attributes['store-code']['options'][$store_code_value] = $new_store_term['term_id'];
+                        array_push($this->taxonomy_terms, $new_store_term['term_id']);
+                    }
+                }
+            }
+        }
+
         // // TODO - Incomplete Data
-        // // Utility Bed 
+        // // Utility Bed
         // if ($this->cart['cartAttributes']['passengers'] === 'Utility') {
         //     $this->attributes['pa_utility-bed'] = $this->generated_attributes->attributes['utility-bed']['object'];
         //     array_push(

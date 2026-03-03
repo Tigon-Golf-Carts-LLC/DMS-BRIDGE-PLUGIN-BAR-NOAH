@@ -2113,6 +2113,25 @@ function tigon_dms_assign_product_attributes($product_id, $cart_data) {
         $set_attr('tire-profile', array($tire_profile));
     }
 
+    // Store Code
+    if (!empty($store_id)) {
+        if (strtolower($store_id) === 'national') {
+            $store_code_val = 'UNITED STATES OF AMERICA';
+        } else {
+            $loc_data = \Tigon\DmsConnect\Admin\Attributes::get_location($store_id);
+            if ($loc_data) {
+                $city = $loc_data['city_short'] ?? $loc_data['city'];
+                $st = $loc_data['st'] ?? '';
+                $store_code_val = strtoupper(trim($city . ' ' . $st));
+            } else {
+                $store_code_val = '';
+            }
+        }
+        if (!empty($store_code_val)) {
+            $set_attr('store-code', array($store_code_val));
+        }
+    }
+
     // Vehicle Class
     $vehicle_classes = array('GOLF CART');
     if ($is_electric) {
