@@ -1020,12 +1020,57 @@ abstract class Abstract_Cart
             $this->generated_attributes->tags['TIGON GOLF CARTS']
         );
 
+        // 0% FINANCING tag — all vehicles
+        $this->taxonomy_terms[] = $this->resolve_or_create_tag('0% FINANCING');
+
+        // Year tag
+        if (!empty($this->cart['cartType']['year'])) {
+            $this->taxonomy_terms[] = $this->resolve_or_create_tag($this->cart['cartType']['year']);
+        }
+
+        // Passengers tag (e.g. "4 Passenger", "6 Passenger")
+        if (!empty($this->cart['cartAttributes']['passengers']) && $this->cart['cartAttributes']['passengers'] !== 'Utility') {
+            $num = explode(' ', $this->cart['cartAttributes']['passengers'])[0];
+            if (is_numeric($num)) {
+                $this->taxonomy_terms[] = $this->resolve_or_create_tag($num . ' Passenger');
+            }
+        }
+
+        // Drivetrain tag (2X4, 4X4, AWD)
+        $drivetrain_tag = strtoupper($this->cart['cartAttributes']['driveTrain'] ?? '2X4');
+        $this->taxonomy_terms[] = $this->resolve_or_create_tag($drivetrain_tag);
+
         /*
          * Primary Category ID
          */
         $this->primary_category = $this->generated_attributes->categories[strtoupper($this->make_with_symbol)];
     }
 
+    /**
+     * Resolve a product_tag by name from the Attributes cache, or create it if missing.
+     *
+     * @param string $name Tag name.
+     * @return int|null     Term ID, or null on failure.
+     */
+    private function resolve_or_create_tag($name)
+    {
+        $key = strtoupper($name);
+        if (isset($this->generated_attributes->tags[$key])) {
+            return $this->generated_attributes->tags[$key];
+        }
+        $new_term = wp_insert_term($name, 'product_tag', ['slug' => sanitize_title($name)]);
+        if (!is_wp_error($new_term)) {
+            $this->generated_attributes->tags[$key] = $new_term['term_id'];
+            return $new_term['term_id'];
+        }
+        // Term may already exist with a different case — try fetching it
+        $existing = get_term_by('name', $name, 'product_tag');
+        if ($existing && !is_wp_error($existing)) {
+            $this->generated_attributes->tags[$key] = $existing->term_id;
+            return $existing->term_id;
+        }
+        return null;
+    }
 
     protected function attach_attributes()
     {

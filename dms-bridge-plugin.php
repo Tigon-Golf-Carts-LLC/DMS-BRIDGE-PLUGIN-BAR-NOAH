@@ -1566,7 +1566,9 @@ function tigon_dms_assign_product_tags($product_id, $cart_data) {
     $make  = $cart_data['cartType']['make'] ?? '';
     $model = $cart_data['cartType']['model'] ?? '';
     $color = $cart_data['cartAttributes']['cartColor'] ?? '';
+    $year  = $cart_data['cartType']['year'] ?? '';
     $passengers    = $cart_data['cartAttributes']['passengers'] ?? '';
+    $drivetrain    = $cart_data['cartAttributes']['driveTrain'] ?? '2X4';
     $is_used       = !empty($cart_data['isUsed']);
     $is_electric   = !empty($cart_data['isElectric']);
     $is_street_legal = !empty($cart_data['title']['isStreetLegal']);
@@ -1645,6 +1647,25 @@ function tigon_dms_assign_product_tags($product_id, $cart_data) {
         $tags[] = 'GAS';
         $tags[] = 'PTV';
     }
+
+    // 0% FINANCING — all vehicles
+    $tags[] = '0% FINANCING';
+
+    // Year tag
+    if (!empty($year)) {
+        $tags[] = strtoupper($year);
+    }
+
+    // Passengers tag (e.g. "4 Passenger", "6 Passenger")
+    if (!empty($passengers) && $passengers !== 'Utility') {
+        $num = explode(' ', $passengers)[0];
+        if (is_numeric($num)) {
+            $tags[] = $num . ' Passenger';
+        }
+    }
+
+    // Drivetrain tag (2X4, 4X4, AWD)
+    $tags[] = strtoupper($drivetrain);
 
     // General tags
     $tags[] = 'GOLF CART';
