@@ -2586,13 +2586,26 @@ abstract class Abstract_Cart
             }
         }
 
-        // Year of Vehicle
-        if ($this->cart['cartType']['year']) {
+        // Year of Vehicle (with auto-creation) — based on payload cartType.year
+        if (!empty($this->cart['cartType']['year'])) {
+            $year_value = strtoupper($this->cart['cartType']['year']);
             $this->attributes['pa_year-of-vehicle'] = $this->generated_attributes->attributes['year-of-vehicle']['object'];
-            array_push(
-                $this->taxonomy_terms,
-                $this->generated_attributes->attributes['year-of-vehicle']['options'][strtoupper($this->cart['cartType']['year'])]
-            );
+            if (isset($this->generated_attributes->attributes['year-of-vehicle']['options'][$year_value])) {
+                array_push(
+                    $this->taxonomy_terms,
+                    $this->generated_attributes->attributes['year-of-vehicle']['options'][$year_value]
+                );
+            } else {
+                $new_year_term = wp_insert_term(
+                    $this->cart['cartType']['year'],
+                    'pa_year-of-vehicle',
+                    ['slug' => sanitize_title($this->cart['cartType']['year'])]
+                );
+                if (!is_wp_error($new_year_term)) {
+                    $this->generated_attributes->attributes['year-of-vehicle']['options'][$year_value] = $new_year_term['term_id'];
+                    array_push($this->taxonomy_terms, $new_year_term['term_id']);
+                }
+            }
         }
 
         // Serialize for database storage
