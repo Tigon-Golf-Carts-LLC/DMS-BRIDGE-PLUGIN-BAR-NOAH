@@ -568,6 +568,119 @@ function tigon_dms_parse_cart_warranty($cart_data) {
 }
 
 /**
+ * Retrieve the file_source (S3 bucket base URL) from plugin config.
+ *
+ * @return string Base URL (no trailing slash) or empty string
+ */
+function tigon_dms_get_file_source() {
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'tigon_dms_config';
+    $value = $wpdb->get_var("SELECT option_value FROM $table_name WHERE option_name = 'file_source'");
+    return $value ? rtrim($value, '/') : '';
+}
+
+/**
+ * Download DMS cart images from S3 and attach them to a WooCommerce product.
+ *
+ * Sets _thumbnail_id (featured image) and _product_image_gallery (gallery)
+ * so images display natively through WooCommerce.
+ *
+ * @param int    $product_id  WooCommerce product ID
+ * @param array  $image_names Array of image filenames from DMS (imageUrls)
+ * @param string $title       Product title (used for image alt/title text)
+ * @param array  $cart_data   Full DMS cart payload (for template variables)
+ */
+function tigon_dms_download_and_attach_images($product_id, $image_names, $title, $cart_data = array()) {
+    if (empty($image_names) || !is_array($image_names)) {
+        return;
+    }
+
+    $file_source = tigon_dms_get_file_source();
+    if (empty($file_source)) {
+        error_log('DMS Sync: Cannot download images — file_source not configured.');
+        return;
+    }
+
+    require_once(ABSPATH . 'wp-admin/includes/file.php');
+    require_once(ABSPATH . 'wp-admin/includes/media.php');
+    require_once(ABSPATH . 'wp-admin/includes/image.php');
+
+    // Build image name from schema template
+    $templates = tigon_dms_get_schema_templates();
+    $vars      = !empty($cart_data) ? tigon_dms_build_template_variables_from_cart($cart_data) : array();
+    $image_tpl = isset($templates['schema_image_name']) && $templates['schema_image_name'] !== ''
+        ? $templates['schema_image_name']
+        : '{^make} {^model} {cartColor} in {city}, {stateAbbr} image';
+
+    // Delete existing attached images to avoid duplicates on re-sync
+    $existing_featured = get_post_thumbnail_id($product_id);
+    if ($existing_featured) {
+        wp_delete_post($existing_featured, true);
+        delete_post_thumbnail($product_id);
+    }
+    $existing_gallery = get_post_meta($product_id, '_product_image_gallery', true);
+    if (!empty($existing_gallery)) {
+        foreach (explode(',', $existing_gallery) as $img_id) {
+            if (!empty($img_id)) {
+                wp_delete_post((int) $img_id, true);
+            }
+        }
+        delete_post_meta($product_id, '_product_image_gallery');
+    }
+
+    $attachment_ids = array();
+    $i = 0;
+
+    foreach ($image_names as $remote_image_name) {
+        if (empty($remote_image_name)) {
+            continue;
+        }
+
+        $url = $file_source . '/carts/' . $remote_image_name;
+
+        // Generate descriptive filename from schema template
+        $vars['index'] = $i + 1;
+        $image_name = tigon_dms_evaluate_template($image_tpl, $vars, false);
+        $image_filename = preg_replace('/\s+/', '-', strtolower($image_name));
+
+        $image_data = array(
+            'post_title'   => $image_name,
+            'post_content' => $title,
+            'post_excerpt' => $title,
+        );
+        $image_meta = array(
+            '_wp_attachment_image_alt' => $title,
+        );
+
+        $att_id = \Tigon\DmsConnect\Includes\Somatic::attach_external_image(
+            url: $url,
+            post_id: $product_id,
+            filename: $image_filename,
+            post_data: $image_data,
+            metadata: $image_meta
+        );
+
+        if (!is_wp_error($att_id)) {
+            $attachment_ids[] = $att_id;
+        } else {
+            error_log('DMS Sync: Failed to download image ' . $url . ' for product ' . $product_id . ': ' . $att_id->get_error_message());
+        }
+
+        $i++;
+    }
+
+    // First image = featured, rest = gallery
+    if (!empty($attachment_ids)) {
+        $featured = array_shift($attachment_ids);
+        set_post_thumbnail($product_id, $featured);
+
+        if (!empty($attachment_ids)) {
+            update_post_meta($product_id, '_product_image_gallery', implode(',', $attachment_ids));
+        }
+    }
+}
+
+/**
  * Create or update WooCommerce product from DMS cart data
  *
  * @param array  $cart_data Full DMS cart payload
@@ -1065,6 +1178,9 @@ function tigon_dms_create_woo_product($cart_id, $title, $price, $cart_data, $spe
     update_post_meta($product_id, '_download_limit', '-1');
     update_post_meta($product_id, '_download_expiry', '-1');
 
+    // Download images from S3 and attach as WooCommerce featured/gallery images
+    tigon_dms_download_and_attach_images($product_id, $images, $title, $cart_data);
+
     // Apply user-configured field mappings (overrides from admin Field Mapping page)
     tigon_dms_apply_custom_mappings($product_id, $cart_data);
 
@@ -1449,6 +1565,9 @@ function tigon_dms_update_woo_product($product_id, $title, $price, $cart_data, $
     update_post_meta($product_id, '_wc_fb_visibility', 'yes');
     update_post_meta($product_id, '_wc_pinterest_condition', $condition);
     update_post_meta($product_id, '_wc_pinterest_google_product_category', 'Vehicles & Parts > Vehicles > Motor Vehicles > Golf Carts');
+
+    // Download images from S3 and attach as WooCommerce featured/gallery images
+    tigon_dms_download_and_attach_images($product_id, $images, $title, $cart_data);
 
     // Apply user-configured field mappings (overrides from admin Field Mapping page)
     tigon_dms_apply_custom_mappings($product_id, $cart_data);
