@@ -78,7 +78,7 @@ jQuery(document).ready(function () {
     });
 
     // ── Tab switching ────────────────────────────────────────────────
-    var tabIds = ["general", "urls", "endpoints", "schema"];
+    var tabIds = ["general", "urls", "endpoints", "schema", "locations"];
 
     function activateTab(id) {
         jQuery(".tigon-dms-tab").removeClass("active");

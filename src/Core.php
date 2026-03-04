@@ -55,6 +55,7 @@ class Core
         add_action('wp_ajax_tigon_dms_save_field_mapping', 'Tigon\DmsConnect\Core::ajax_save_field_mapping');
         add_action('wp_ajax_tigon_dms_delete_field_mapping', 'Tigon\DmsConnect\Core::ajax_delete_field_mapping');
         add_action('wp_ajax_tigon_dms_get_mapping_meta', 'Tigon\DmsConnect\Core::ajax_get_mapping_meta');
+        add_action('wp_ajax_tigon_dms_save_locations', 'Tigon\DmsConnect\Admin\Ajax_Settings_Controller::save_locations');
 
         // Add admin page
         add_action('admin_menu', 'Tigon\DmsConnect\Admin\Admin_Page::add_menu_page');

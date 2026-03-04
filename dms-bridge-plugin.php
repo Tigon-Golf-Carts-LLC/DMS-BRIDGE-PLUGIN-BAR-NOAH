@@ -580,6 +580,155 @@ function tigon_dms_get_file_source() {
 }
 
 /**
+ * Read a single option from the tigon_dms_config table.
+ *
+ * @param string      $option_name  Option key
+ * @param string|null $default      Fallback when row is missing or empty
+ * @return string|null
+ */
+function tigon_dms_get_config($option_name, $default = null) {
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'tigon_dms_config';
+    $value = $wpdb->get_var(
+        $wpdb->prepare("SELECT option_value FROM {$table_name} WHERE option_name = %s LIMIT 1", $option_name)
+    );
+    return ($value !== null && $value !== '') ? $value : $default;
+}
+
+/**
+ * Write a single option to the tigon_dms_config table (upsert).
+ *
+ * @param string $option_name
+ * @param string $option_value
+ */
+function tigon_dms_set_config($option_name, $option_value) {
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'tigon_dms_config';
+    $exists = $wpdb->get_var(
+        $wpdb->prepare("SELECT COUNT(*) FROM {$table_name} WHERE option_name = %s", $option_name)
+    );
+    if ($exists) {
+        $wpdb->update($table_name, ['option_value' => $option_value], ['option_name' => $option_name]);
+    } else {
+        $wpdb->insert($table_name, ['option_name' => $option_name, 'option_value' => $option_value]);
+    }
+}
+
+/**
+ * Get the showcase locations configuration.
+ *
+ * Returns an associative array keyed by location slug (e.g. 'national',
+ * 'tigon_hatfield') with 'landing_page', 'archive', and 'archive_not_in'
+ * for each location.
+ *
+ * Priority: stored config → slug-based page lookup → empty (skip).
+ *
+ * @return array<string, array{landing_page: int, archive: int, archive_not_in: int[]}>
+ */
+function tigon_dms_get_showcase_locations() {
+    $json = tigon_dms_get_config('showcase_locations', '');
+    $locations = $json ? json_decode($json, true) : null;
+    if (is_array($locations) && !empty($locations)) {
+        return $locations;
+    }
+
+    // Fallback: slug-based page lookup for known locations
+    $location_slugs = [
+        'national'        => ['landing_slug' => 'shop',               'archive_slug' => ''],
+        'tigon_hatfield'  => ['landing_slug' => 'tigon-hatfield',     'archive_slug' => 'tigon-hatfield-archive'],
+        'tigon_ocean_view'=> ['landing_slug' => 'tigon-ocean-view',   'archive_slug' => 'tigon-ocean-view-archive'],
+        'tigon_pocono'    => ['landing_slug' => 'tigon-pocono',       'archive_slug' => 'tigon-pocono-archive'],
+        'tigon_dover'     => ['landing_slug' => 'tigon-dover',        'archive_slug' => 'tigon-dover-archive'],
+        'tigon_scranton'  => ['landing_slug' => 'tigon-scranton',     'archive_slug' => 'tigon-scranton-archive'],
+    ];
+
+    $locations = [];
+    $all_archive_ids = [];
+
+    foreach ($location_slugs as $key => $slugs) {
+        $landing_page = 0;
+        $archive      = 0;
+
+        if (!empty($slugs['landing_slug'])) {
+            $page = get_page_by_path($slugs['landing_slug']);
+            $landing_page = $page ? (int) $page->ID : 0;
+        }
+        if (!empty($slugs['archive_slug'])) {
+            $page = get_page_by_path($slugs['archive_slug']);
+            $archive = $page ? (int) $page->ID : 0;
+        }
+
+        if ($archive) {
+            $all_archive_ids[] = $archive;
+        }
+
+        $locations[$key] = [
+            'landing_page'   => $landing_page,
+            'archive'        => $archive,
+            'archive_not_in' => [],
+        ];
+    }
+
+    // National's archive_not_in = all location archive IDs
+    if (isset($locations['national'])) {
+        $locations['national']['archive_not_in'] = $all_archive_ids;
+    }
+
+    return $locations;
+}
+
+/**
+ * Get the WooCommerce product_cat term_taxonomy_id for the "new active inventory" category.
+ *
+ * Priority: stored config → slug lookup → 0.
+ *
+ * @return int
+ */
+function tigon_dms_get_new_inventory_term_taxonomy_id() {
+    $stored = tigon_dms_get_config('new_inventory_term_slug', '');
+
+    // If stored value is numeric, treat as direct term_taxonomy_id
+    if ($stored !== '' && is_numeric($stored)) {
+        return (int) $stored;
+    }
+
+    // Slug-based lookup
+    $slug = ($stored !== '') ? $stored : 'local-new-active-inventory';
+    $term = get_term_by('slug', $slug, 'product_cat');
+    if ($term) {
+        return (int) $term->term_taxonomy_id;
+    }
+
+    // Try by name as final fallback
+    $term = get_term_by('name', 'Local New Active Inventory', 'product_cat');
+    return $term ? (int) $term->term_taxonomy_id : 0;
+}
+
+/**
+ * Get the WooCommerce product_cat term_taxonomy_id for the "used active inventory" category.
+ *
+ * Priority: stored config → slug lookup → 0.
+ *
+ * @return int
+ */
+function tigon_dms_get_used_inventory_term_taxonomy_id() {
+    $stored = tigon_dms_get_config('used_inventory_term_slug', '');
+
+    if ($stored !== '' && is_numeric($stored)) {
+        return (int) $stored;
+    }
+
+    $slug = ($stored !== '') ? $stored : 'local-used-active-inventory';
+    $term = get_term_by('slug', $slug, 'product_cat');
+    if ($term) {
+        return (int) $term->term_taxonomy_id;
+    }
+
+    $term = get_term_by('name', 'Local Used Active Inventory', 'product_cat');
+    return $term ? (int) $term->term_taxonomy_id : 0;
+}
+
+/**
  * Download DMS cart images from S3 and attach them to a WooCommerce product.
  *
  * Sets _thumbnail_id (featured image) and _product_image_gallery (gallery)

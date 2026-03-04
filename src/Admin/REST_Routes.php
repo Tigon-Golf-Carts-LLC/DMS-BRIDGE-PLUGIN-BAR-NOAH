@@ -329,44 +329,17 @@ class REST_Routes
     {
         $processed_request = (is_object($request) && get_class($request) == 'WP_REST_Request') ? json_decode($request->get_body(), true) : $request;
         if (isset($processed_request['data']) && isset($processed_request['key'])) {
-            switch ($processed_request['key']) {
-                case 'national':
-                    $landing_page = 741;
-                    $archive = 0;
-                    $archive_not_in = array(61168,61188,61183,61186,72286);
-                    break;
-                    
-                // Locations
-                case 'tigon_hatfield':
-                    $landing_page = 59477;
-                    $archive = 61168;
-                    $archive_not_in = array();
-                    break;
-                case 'tigon_ocean_view':
-                    $landing_page = 59498;
-                    $archive = 61188;
-                    $archive_not_in = array();
-                    break;
-                case 'tigon_pocono':
-                    $landing_page = 59487;
-                    $archive = 61183;
-                    $archive_not_in = array();
-                    break;
-                case 'tigon_dover':
-                    $landing_page = 59509;
-                    $archive = 61186;
-                    $archive_not_in = array();
-                    break;
-                case 'tigon_scranton':
-                    $landing_page = 71302;
-                    $archive = 72286;
-                    $archive_not_in = array();
-                    break;
+            $locations = tigon_dms_get_showcase_locations();
+            $key = $processed_request['key'];
 
-                // Page does not exist
-                default:
-                    return new \WP_Error('Bad Request', 'Invalid showcase name', $processed_request['key']);
+            if (!isset($locations[$key])) {
+                return new \WP_Error('Bad Request', 'Invalid showcase name', $key);
             }
+
+            $loc = $locations[$key];
+            $landing_page   = (int) ($loc['landing_page'] ?? 0);
+            $archive        = (int) ($loc['archive'] ?? 0);
+            $archive_not_in = array_map('intval', $loc['archive_not_in'] ?? []);
 
             $result = \Tigon\DmsConnect\Admin\REST_Product_Grid_Controller::set(
                 landing_page: $landing_page,

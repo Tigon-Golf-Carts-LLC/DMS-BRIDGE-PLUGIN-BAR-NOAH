@@ -1524,13 +1524,14 @@ class Admin_Page
 
         
         // Get new carts of inventory type ACTIVE NEW INVENTORY as Slugs
-        $new_carts = $wpdb->get_results('
+        $new_inv_ttid = tigon_dms_get_new_inventory_term_taxonomy_id();
+        $new_carts = $wpdb->get_results($wpdb->prepare('
             SELECT post_name
             FROM `'.$wpdb->prefix.'posts`
             WHERE ID IN
             (
                 SELECT object_id FROM '.$wpdb->prefix.'term_relationships
-                WHERE term_taxonomy_id = 4549
+                WHERE term_taxonomy_id = %d
             )
             AND ID IN
             (
@@ -1539,13 +1540,14 @@ class Admin_Page
                 AND meta_value = "instock"
             )
             ORDER BY ID ASC;
-        ');
+        ', $new_inv_ttid));
         $new_carts = array_map(function($cart) {
             return $cart->post_name;
         }, $new_carts);
 
         // Get used carts of inventory type ACTIVE USED INVENTORY as SKUs
-        $used_carts = $wpdb->get_results('
+        $used_inv_ttid = tigon_dms_get_used_inventory_term_taxonomy_id();
+        $used_carts = $wpdb->get_results($wpdb->prepare('
             SELECT meta_value
             FROM `'.$wpdb->prefix.'postmeta`
             WHERE post_id IN
@@ -1553,11 +1555,11 @@ class Admin_Page
                 SELECT * FROM
                 (
                     SELECT object_id FROM
-                    `'.$wpdb->prefix.'term_relationships` WHERE '.$wpdb->prefix.'term_relationships.term_taxonomy_id = 4553
+                    `'.$wpdb->prefix.'term_relationships` WHERE '.$wpdb->prefix.'term_relationships.term_taxonomy_id = %d
                 ) AS subquery
             )
             AND meta_key = "_sku";
-        ');
+        ', $used_inv_ttid));
         $used_carts = array_map(function($cart) {
             return $cart->meta_value;
         }, $used_carts);
@@ -2794,6 +2796,7 @@ class Admin_Page
                     <button class="tigon-dms-tab" id="urls-tab">DMS API &amp; S3</button>
                     <button class="tigon-dms-tab" id="endpoints-tab">REST Endpoints</button>
                     <button class="tigon-dms-tab" id="schema-tab">Schema</button>
+                    <button class="tigon-dms-tab" id="locations-tab">Locations</button>
                 </div>
 
                 <div class="action-box settings-panel" id="general">
@@ -3111,13 +3114,76 @@ class Admin_Page
                     </div>
                     <a id="save" class="tigon_dms_action tigon_dms_save" data-nonce="' . $nonce . '"><button>Save Settings</button></a>
                 </div>
+
+                <div class="action-box settings-panel" id="locations">
+                    <div class="settings-panel-header">
+                        <h3>Showcase Locations &amp; Inventory Categories</h3>
+                        <p>Configure the page IDs and inventory term slugs used by the showcase grid and sync diagnostics. These replace hardcoded IDs so the plugin survives database migrations.</p>
+                    </div>
+                    <div class="settings-panel-body">';
+
+        // ── Inventory Category Settings ──
+        $new_inv_slug  = tigon_dms_get_config('new_inventory_term_slug', 'local-new-active-inventory');
+        $used_inv_slug = tigon_dms_get_config('used_inventory_term_slug', 'local-used-active-inventory');
+
+        echo '
+                        <h4 style="margin-top:0;">Inventory Category Slugs</h4>
+                        <p style="font-size:0.82rem;color:#666;margin-top:-0.3rem;">The <code>product_cat</code> slugs used to identify new and used active inventory. Used by sync diagnostics queries.</p>
+                        <div class="settings form" style="max-width:600px;">
+                            <div>
+                                <span>New Inventory Slug:</span>
+                                <input type="text" style="float:right" id="loc-new-inv-slug" value="' . esc_attr($new_inv_slug) . '" placeholder="local-new-active-inventory" />
+                            </div>
+                            <div>
+                                <span>Used Inventory Slug:</span>
+                                <input type="text" style="float:right" id="loc-used-inv-slug" value="' . esc_attr($used_inv_slug) . '" placeholder="local-used-active-inventory" />
+                            </div>
+                        </div>
+
+                        <hr style="margin:1.5rem 0;border:none;border-top:1px solid #ddd;" />
+
+                        <h4>Showcase Locations</h4>
+                        <p style="font-size:0.82rem;color:#666;margin-top:-0.3rem;">Each location maps a key (sent by DMS) to a landing page ID, an archive page ID, and optional archive-not-in exclusions. Set a page ID to <code>0</code> to skip it.</p>
+                        <div style="overflow-x:auto;">
+                        <table class="dbo-table" id="locations-table" style="font-size:0.82rem;">
+                            <thead><tr>
+                                <th>Location Key</th>
+                                <th>Landing Page ID</th>
+                                <th>Archive Page ID</th>
+                                <th>Archive Not-In (comma-separated)</th>
+                                <th style="width:40px;"></th>
+                            </tr></thead>
+                            <tbody>';
+
+        $locations = tigon_dms_get_showcase_locations();
+        foreach ($locations as $loc_key => $loc) {
+            $not_in_str = implode(',', array_map('intval', $loc['archive_not_in'] ?? []));
+            echo '<tr>
+                <td><input type="text" class="loc-key" value="' . esc_attr($loc_key) . '" style="width:140px;" /></td>
+                <td><input type="number" class="loc-landing" value="' . esc_attr($loc['landing_page'] ?? 0) . '" style="width:90px;" /></td>
+                <td><input type="number" class="loc-archive" value="' . esc_attr($loc['archive'] ?? 0) . '" style="width:90px;" /></td>
+                <td><input type="text" class="loc-not-in" value="' . esc_attr($not_in_str) . '" style="width:180px;" placeholder="e.g. 100,200,300" /></td>
+                <td><button type="button" class="loc-remove-row" style="border:none;background:none;color:#cf1010;cursor:pointer;font-size:1.1rem;" title="Remove">&times;</button></td>
+            </tr>';
+        }
+
+        echo '          </tbody>
+                        </table>
+                        </div>
+                        <div style="margin-top:0.5rem;display:flex;gap:0.5rem;">
+                            <button type="button" id="loc-add-row" class="fm-btn fm-btn-secondary">+ Add Location</button>
+                        </div>
+                    </div>
+                    <a class="tigon_dms_action" style="margin-top:1rem;display:inline-block;"><button type="button" id="loc-save-btn" class="fm-btn fm-btn-primary">Save Locations</button></a>
+                    <span id="loc-save-status" style="font-size:0.85rem;color:#666;margin-left:0.5rem;"></span>
+                </div>
             </div>
                 </div>
         </div>
         <script>
         /* ── Tab switching (inline so it works even if external JS delays) ── */
         (function(){
-            var tabIds = ["general", "urls", "endpoints", "schema"];
+            var tabIds = ["general", "urls", "endpoints", "schema", "locations"];
             function activateTab(id){
                 tabIds.forEach(function(t){
                     var btn   = document.getElementById(t + "-tab");
@@ -3169,6 +3235,73 @@ class Admin_Page
                 }
             });
         });
+
+        /* ── Locations tab ── */
+        (function(){
+            var tbody = document.querySelector("#locations-table tbody");
+            var addBtn = document.getElementById("loc-add-row");
+            var saveBtn = document.getElementById("loc-save-btn");
+            var status  = document.getElementById("loc-save-status");
+
+            if(addBtn) addBtn.addEventListener("click", function(){
+                var tr = document.createElement("tr");
+                tr.innerHTML =
+                    \'<td><input type="text" class="loc-key" value="" style="width:140px;" placeholder="location_key" /></td>\' +
+                    \'<td><input type="number" class="loc-landing" value="0" style="width:90px;" /></td>\' +
+                    \'<td><input type="number" class="loc-archive" value="0" style="width:90px;" /></td>\' +
+                    \'<td><input type="text" class="loc-not-in" value="" style="width:180px;" placeholder="e.g. 100,200,300" /></td>\' +
+                    \'<td><button type="button" class="loc-remove-row" style="border:none;background:none;color:#cf1010;cursor:pointer;font-size:1.1rem;" title="Remove">&times;</button></td>\';
+                tbody.appendChild(tr);
+            });
+
+            if(tbody) tbody.addEventListener("click", function(e){
+                if(e.target.classList.contains("loc-remove-row")){
+                    e.target.closest("tr").remove();
+                }
+            });
+
+            if(saveBtn) saveBtn.addEventListener("click", function(){
+                saveBtn.disabled = true;
+                status.textContent = "Saving…";
+
+                var locations = [];
+                tbody.querySelectorAll("tr").forEach(function(tr){
+                    var key = tr.querySelector(".loc-key").value.trim();
+                    if(!key) return;
+                    locations.push({
+                        key: key,
+                        landing_page: tr.querySelector(".loc-landing").value || "0",
+                        archive:      tr.querySelector(".loc-archive").value || "0",
+                        archive_not_in: tr.querySelector(".loc-not-in").value || ""
+                    });
+                });
+
+                var payload = {
+                    new_inventory_term_slug:  document.getElementById("loc-new-inv-slug").value,
+                    used_inventory_term_slug: document.getElementById("loc-used-inv-slug").value,
+                    locations: locations
+                };
+
+                jQuery.ajax({
+                    url: (typeof globals !== "undefined" && globals.ajaxurl) ? globals.ajaxurl : "/wp-admin/admin-ajax.php",
+                    method: "POST",
+                    data: {
+                        action: "tigon_dms_save_locations",
+                        nonce: "' . esc_js($nonce) . '",
+                        data: payload
+                    }
+                }).done(function(res){
+                    status.textContent = res.success ? "Saved!" : "Error saving.";
+                    status.style.color = res.success ? "#39c939" : "#cf1010";
+                }).fail(function(){
+                    status.textContent = "Request failed.";
+                    status.style.color = "#cf1010";
+                }).always(function(){
+                    saveBtn.disabled = false;
+                    setTimeout(function(){ status.textContent = ""; }, 3000);
+                });
+            });
+        })();
         </script>
         ';
     }
