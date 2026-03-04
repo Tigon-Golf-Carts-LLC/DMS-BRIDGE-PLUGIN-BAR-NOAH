@@ -574,6 +574,11 @@ class Core
             wc_update_product_lookup_tables();
         }
 
+        // Clear DMS API caches so frontend serves fresh data
+        if (class_exists('DMS_API')) {
+            \DMS_API::clear_caches();
+        }
+
         wp_send_json_success($stats);
     }
 
@@ -734,6 +739,11 @@ class Core
         // Refresh WooCommerce lookup tables
         if (function_exists('wc_update_product_lookup_tables')) {
             wc_update_product_lookup_tables();
+        }
+
+        // Clear DMS API caches so frontend serves fresh data
+        if (class_exists('DMS_API')) {
+            \DMS_API::clear_caches();
         }
 
         wp_send_json_success($stats);
@@ -1006,6 +1016,9 @@ class Core
                 if (function_exists('wc_update_product_lookup_tables')) {
                     wc_update_product_lookup_tables();
                 }
+                if (class_exists('DMS_API')) {
+                    \DMS_API::clear_caches();
+                }
             }
 
             wp_send_json_success(array_merge($stats, [
@@ -1249,6 +1262,9 @@ class Core
             delete_transient($sync_id);
             if (function_exists('wc_update_product_lookup_tables')) {
                 wc_update_product_lookup_tables();
+            }
+            if (class_exists('DMS_API')) {
+                \DMS_API::clear_caches();
             }
         } else {
             // Persist updated offset

@@ -233,6 +233,10 @@ class DMS_Sync
             wc_update_product_lookup_tables();
         }
 
+        // Clear DMS API transient caches so the next frontend page load
+        // picks up the freshly-synced data instead of stale cached results.
+        DMS_API::clear_caches();
+
         return array(
             'success' => true,
             'stats'   => $stats,
