@@ -3115,6 +3115,36 @@ class Admin_Page
                 </div>
         </div>
         <script>
+        /* ── Tab switching (inline so it works even if external JS delays) ── */
+        (function(){
+            var tabIds = ["general", "urls", "endpoints", "schema"];
+            function activateTab(id){
+                tabIds.forEach(function(t){
+                    var btn   = document.getElementById(t + "-tab");
+                    var panel = document.getElementById(t);
+                    if(!btn || !panel) return;
+                    if(t === id){
+                        btn.classList.add("active");
+                        panel.style.display = "flex";
+                    } else {
+                        btn.classList.remove("active");
+                        panel.style.display = "none";
+                    }
+                });
+                try{ history.replaceState(null,"","#"+id); }catch(e){}
+            }
+
+            var hash = window.location.hash ? window.location.hash.substring(1) : "general";
+            if(tabIds.indexOf(hash) === -1) hash = "general";
+            activateTab(hash);
+
+            tabIds.forEach(function(id){
+                var btn = document.getElementById(id + "-tab");
+                if(btn) btn.addEventListener("click", function(){ activateTab(id); });
+            });
+        })();
+
+        /* ── Copy buttons ── */
         document.querySelectorAll(".tigon-copy-btn").forEach(function(btn){
             btn.addEventListener("click", function(){
                 var target = document.getElementById(btn.dataset.target);

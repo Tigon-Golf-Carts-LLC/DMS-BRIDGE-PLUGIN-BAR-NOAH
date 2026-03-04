@@ -117,7 +117,7 @@ class Core
     public static function diagnostic_script_enqueue()
     {
         $js_url = self::asset_url();
-        $ver    = defined('TIGON_DMS_VERSION') ? TIGON_DMS_VERSION : '1.0.' . filemtime(__DIR__ . '/../../assets/js/tigon-dms/diagnostic.js');
+        $ver    = defined('TIGON_DMS_VERSION') ? TIGON_DMS_VERSION : '1.0.' . filemtime(__DIR__ . '/../assets/js/tigon-dms/diagnostic.js');
 
         wp_register_script('tigon-dms-diagnostics', $js_url . 'diagnostic.js', array('jquery'), $ver, true);
 
@@ -151,7 +151,7 @@ class Core
     public static function settings_script_enqueue()
     {
         $js_url = self::asset_url();
-        $ver    = defined('TIGON_DMS_VERSION') ? TIGON_DMS_VERSION : '1.0.' . filemtime(__DIR__ . '/../../assets/js/tigon-dms/settings.js');
+        $ver    = defined('TIGON_DMS_VERSION') ? TIGON_DMS_VERSION : '1.0.' . filemtime(__DIR__ . '/../assets/js/tigon-dms/settings.js');
 
         wp_register_script('tigon-dms-settings', $js_url . 'settings.js', array('jquery'), $ver, true);
 
