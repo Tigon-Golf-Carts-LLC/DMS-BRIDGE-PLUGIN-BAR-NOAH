@@ -4714,6 +4714,33 @@ function tigon_dms_products_per_page($cols) {
 add_filter('loop_shop_per_page', 'tigon_dms_products_per_page', 20);
 
 /**
+ * Change "Add to cart" button text to "See Details" for DMS products
+ */
+function tigon_dms_add_to_cart_text($text, $product) {
+    if (get_post_meta($product->get_id(), '_dms_cart_id', true)) {
+        return __('See Details', 'tigon-dms-connect');
+    }
+    return $text;
+}
+add_filter('woocommerce_product_add_to_cart_text', 'tigon_dms_add_to_cart_text', 10, 2);
+add_filter('woocommerce_product_single_add_to_cart_text', 'tigon_dms_add_to_cart_text', 10, 2);
+
+/**
+ * Make DMS product archive buttons link to the product page instead of adding to cart
+ */
+function tigon_dms_loop_add_to_cart_link($link, $product) {
+    if (get_post_meta($product->get_id(), '_dms_cart_id', true)) {
+        return sprintf(
+            '<a href="%s" class="button product_type_simple">%s</a>',
+            esc_url($product->get_permalink()),
+            esc_html__('See Details', 'tigon-dms-connect')
+        );
+    }
+    return $link;
+}
+add_filter('woocommerce_loop_add_to_cart_link', 'tigon_dms_loop_add_to_cart_link', 10, 2);
+
+/**
  * ============================================================================
  * BACKGROUND INVENTORY SYNC
  * ============================================================================
