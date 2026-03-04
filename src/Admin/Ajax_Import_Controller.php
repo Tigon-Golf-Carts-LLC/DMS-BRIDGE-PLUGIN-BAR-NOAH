@@ -158,7 +158,7 @@ abstract class Ajax_Import_Controller extends \Tigon\DmsConnect\Abstracts\Abstra
             // Data from AJAX request
             // AJAX produces unwanted slashes
             $data = stripcslashes($_REQUEST['data']);
-            $data = unserialize($data);
+            $data = unserialize($data, ['allowed_classes' => [Database_Object::class]]);
             $result = Ajax_Import_Controller::import_create($data);
             echo $result;
 
@@ -210,7 +210,7 @@ abstract class Ajax_Import_Controller extends \Tigon\DmsConnect\Abstracts\Abstra
             // Data from AJAX request
             // AJAX produces unwanted slashes
             $data = stripcslashes($_REQUEST['data']);
-            $data = unserialize($data);
+            $data = unserialize($data, ['allowed_classes' => [Database_Object::class]]);
             $result = Ajax_Import_Controller::import_update($data);
             echo $result;
 
@@ -251,7 +251,7 @@ abstract class Ajax_Import_Controller extends \Tigon\DmsConnect\Abstracts\Abstra
             // Data from AJAX request
             // AJAX produces unwanted slashes
             $data = stripcslashes($_REQUEST['data']);
-            $data = unserialize($data);
+            $data = unserialize($data, ['allowed_classes' => [Database_Object::class]]);
 
             echo Ajax_Import_Controller::import_delete($data);
         } else {
