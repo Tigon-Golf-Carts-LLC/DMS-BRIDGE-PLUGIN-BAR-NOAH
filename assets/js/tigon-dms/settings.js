@@ -1,23 +1,25 @@
-import { global } from './globals.js';
+jQuery(document).ready(function () {
+    var ajaxurl = (typeof globals !== 'undefined' && globals.ajaxurl)
+        ? globals.ajaxurl
+        : (typeof ajaxurl !== 'undefined' ? ajaxurl : '/wp-admin/admin-ajax.php');
 
-jQuery(document).ready(() => {
     var activeInput;
     var inputIndex;
 
     jQuery(".body").attr('style', "display:flex;flex-direction:column;");
 
-    jQuery(".form input").click(e => {
+    jQuery(".form input").click(function (e) {
         activeInput = jQuery(e.target);
     });
 
-    jQuery(".form input").blur(e => {
+    jQuery(".form input").blur(function (e) {
         inputIndex = e.target.selectionEnd;
     });
 
-    jQuery(".form input").on("input", e => {
+    jQuery(".form input").on("input", function (e) {
         var regex = /{.+?}/g;
-        let match;
-        var values = []; 
+        var match;
+        var values = [];
         while ((match = regex.exec(e.target.value)) !== null) {
             values.push({"value":match[0], "index":match.index});
         }
@@ -25,9 +27,9 @@ jQuery(document).ready(() => {
         console.log(values);
     });
 
-    var dmsProps = jQuery.ajax({
+    jQuery.ajax({
         dataType: 'json',
-        url: global.ajaxurl,
+        url: ajaxurl,
         data: { action: "tigon_dms_get_dms_props" },
         complete: function(res) {
             jQuery("#dms-schema").html(res.responseText);
@@ -68,7 +70,7 @@ jQuery(document).ready(() => {
 
         jQuery.ajax({
             dataType: 'json',
-            url: global.ajaxurl,
+            url: ajaxurl,
             data: { action: "tigon_dms_save_settings", data: settings }
         }).then(response => {
             location.reload();
@@ -105,7 +107,7 @@ jQuery(document).ready(() => {
         output.html('<p style="color:#888;text-align:center;padding:2rem 0;">Loading…</p>');
 
         jQuery.ajax({
-            url: global.ajaxurl,
+            url: ajaxurl,
             method: "POST",
             dataType: "json",
             data: { action: "tigon_dms_get_full_schema" }
