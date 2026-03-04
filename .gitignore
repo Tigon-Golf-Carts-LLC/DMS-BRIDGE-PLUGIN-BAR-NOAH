@@ -1,1 +1,28 @@
+# Dependencies
 node_modules/
+
+# Environment & secrets
+.env
+.env.*
+
+# Logs
+*.log
+error_log
+debug.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# WordPress
+wp-config.php
+/uploads/
+
+# Build artifacts
+*.map
