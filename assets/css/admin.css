@@ -452,8 +452,8 @@ input {
     display: none;
 }
 
-/* Settings tabs — all hidden by default, JS activates the correct one */
-#general,
+/* Settings tabs — hidden by default; JS activates the correct one.
+   #general is visible by default so the page works even if JS delays. */
 #urls,
 #endpoints,
 #schema {
