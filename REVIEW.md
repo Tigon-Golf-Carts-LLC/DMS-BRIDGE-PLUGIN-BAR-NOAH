@@ -226,15 +226,11 @@ public static function uninstall() {}
 
 The plugin creates custom database tables on activation but never cleans them up. Consider implementing `uninstall()` to drop `tigon_dms_config` and `tigon_dms_cart_lists` tables.
 
-### 18. Missing `.gitignore`
+### 18. ~~Missing `.gitignore`~~ — RESOLVED
 
-No `.gitignore` file exists. At minimum, it should exclude:
-```
-vendor/
-node_modules/
-*.log
-.env
-```
+~~No `.gitignore` file exists.~~
+
+**Fixed:** A comprehensive `.gitignore` has been added that excludes `node_modules/`, `.env` / `.env.*`, `*.log`, `error_log`, `debug.log`, OS files (`.DS_Store`, `Thumbs.db`), IDE/editor directories (`.idea/`, `.vscode/`), swap files, and build artifacts (`*.map`). `vendor/` is intentionally kept tracked as it contains only the Composer autoloader required for PSR-4 class loading in production.
 
 ---
 
@@ -256,7 +252,7 @@ node_modules/
 | Code duplication | 4 areas | MEDIUM |
 | Monolithic entry file | 2,897 lines | MEDIUM |
 | Disabled caching | 1 | MEDIUM |
-| Missing .gitignore | 1 | LOW |
+| ~~Missing .gitignore~~ | ~~1~~ | ~~LOW~~ RESOLVED |
 | Constructor typo | 1 | LOW |
 
 ### Recommended Priority Order
@@ -268,6 +264,6 @@ node_modules/
 5. **Add output escaping** (`esc_html()`, `esc_attr()`, `esc_url()`) in admin templates
 6. **Fix the undefined `$converted` variable** in `delete_used_cart()`
 7. **Remove the `tigon-dms-connect/` duplicate** directory
-8. **Add `.gitignore`** and remove committed `node_modules/`
+8. ~~**Add `.gitignore`**~~ (DONE) and remove committed `node_modules/`
 9. **Refactor `dms-bridge-plugin.php`** — move logic into `src/` classes
 10. **Replace hardcoded IDs** with configurable settings
