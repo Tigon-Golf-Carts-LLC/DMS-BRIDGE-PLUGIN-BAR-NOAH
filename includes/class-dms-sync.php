@@ -109,25 +109,18 @@ class DMS_Sync
                 //   else → delete/skip
                 // ---------------------------------------------------------
 
-                // Skip boneyard carts
-                $is_in_boneyard = !empty($cart_data['isInBoneyard']);
-                if ($is_in_boneyard) {
-                    $stats['skipped']++;
-                    continue;
-                }
-
-                // Skip carts not in stock
-                $is_in_stock = isset($cart_data['isInStock']) ? $cart_data['isInStock'] : true;
-                if (!$is_in_stock) {
-                    $stats['skipped']++;
-                    continue;
-                }
-
-                // Skip carts not flagged for website (advertising.needOnWebsite)
-                $need_on_website = $cart_data['advertising']['needOnWebsite']
-                    ?? ($cart_data['needOnWebsite'] ?? true);
-                if (!$need_on_website) {
-                    $stats['skipped']++;
+                // Check eligibility using centralized logic
+                if (!\Tigon\DmsConnect\Includes\Product_Manager::should_be_on_website($cart_data)) {
+                    // Cart is ineligible — delete existing product if one exists
+                    $existing_pid = function_exists('tigon_dms_get_product_by_cart_id')
+                        ? tigon_dms_get_product_by_cart_id($cart_id)
+                        : false;
+                    if ($existing_pid) {
+                        \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
+                        $stats['sold']++;
+                    } else {
+                        $stats['skipped']++;
+                    }
                     continue;
                 }
 
@@ -207,19 +200,18 @@ class DMS_Sync
         }
 
         // -----------------------------------------------------------------
-        // Sold product detection (mirrors Database_Write_Controller cleanup)
+        // Sold product detection
         //
         // Find WooCommerce products with _dms_cart_id that are no longer
-        // in the active DMS inventory and mark them as sold/out-of-stock.
+        // in the active DMS inventory and fully delete them (product +
+        // all media attachments).
         // -----------------------------------------------------------------
         if (!empty($active_cart_ids)) {
             $sold_products = self::detect_sold_products($active_cart_ids);
             foreach ($sold_products as $sold_product_id) {
-                if (function_exists('tigon_dms_handle_sold_product')) {
-                    $handled = tigon_dms_handle_sold_product($sold_product_id);
-                    if ($handled) {
-                        $stats['sold']++;
-                    }
+                $deleted = \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $sold_product_id);
+                if ($deleted) {
+                    $stats['sold']++;
                 }
             }
         }

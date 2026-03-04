@@ -6,6 +6,7 @@ use Automattic\WooCommerce\Blocks\Utils\Utils;
 use ErrorException;
 use Tigon\DmsConnect\Admin\Used\Cart as UsedCart;
 use Tigon\DmsConnect\Admin\New\Cart as NewCart;
+use Tigon\DmsConnect\Includes\Product_Media;
 use Tigon\DmsConnect\Includes\Utilities;
 use WP_Error;
 use WP_REST_Response;
@@ -18,6 +19,36 @@ class REST_Routes
     }
 
     /**
+     * Resolve a product ID from a request, falling back to SKU lookup.
+     *
+     * @param array $data Request data with 'pid', 'vinNo', 'serialNo'.
+     * @return \WC_Product|null The product, or null if not found.
+     */
+    private static function resolve_product(array &$data): ?\WC_Product
+    {
+        if (!empty($data['pid'])) {
+            $product = wc_get_product($data['pid']);
+            if ($product !== false) {
+                return $product;
+            }
+
+            // PID didn't resolve — try SKU fallback
+            $sku = !empty($data['vinNo']) ? $data['vinNo'] : ($data['serialNo'] ?? '');
+            if ($sku) {
+                $data['pid'] = wc_get_product_id_by_sku($sku);
+                $product = wc_get_product($data['pid']);
+                if ($product !== false) {
+                    return $product;
+                }
+            }
+
+            $data['pid'] = null;
+        }
+
+        return null;
+    }
+
+    /**
      * REST Callback for used CREATABLE
      *
      * @param array|WP_REST_Request $request
@@ -25,11 +56,10 @@ class REST_Routes
      */
     public static function push_used_cart($request)
     {
-        require_once(ABSPATH . 'wp-admin/includes/media.php');
-        require_once(ABSPATH . 'wp-admin/includes/file.php');
-        require_once(ABSPATH . 'wp-admin/includes/image.php');
+        Product_Media::require_media_functions();
         $processed_request = (get_class($request) == 'WP_REST_Request') ? json_decode($request->get_body(), true) : $request;
         if (isset($processed_request['_id']) || isset($processed_request['pid'])) {
+            // If cart is not eligible for website, delete it
             if (
                 !$processed_request['isInStock'] ||
                 !$processed_request['advertising']['needOnWebsite'] ||
@@ -38,28 +68,10 @@ class REST_Routes
                 return self::delete_used_cart($processed_request);
             }
 
-            if ($processed_request['pid']) {
-                $product = wc_get_product($processed_request['pid']);
-                if($product===false) {
-                    $processed_request['pid'] = wc_get_product_id_by_sku($processed_request['vinNo']?$processed_request['vinNo']:$processed_request['serialNo']);
-                    $product = wc_get_product(
-                        $processed_request['pid']
-                    );
-                }
-
-                if($product) {
-                    $featured_image = get_post_thumbnail_id($processed_request['pid']);
-                    wp_delete_post($featured_image, true);
-
-                    $images = $product?->get_gallery_image_ids()??[];
-                    foreach ($images as $i) {
-                        wp_delete_post($i, true);
-                    }
-
-                    $monroney_url = explode('"', get_post_meta($processed_request['pid'])['monroney_sticker'][0])[1];
-                    $monroney = attachment_url_to_postid($monroney_url);
-                    wp_delete_post($monroney, true);
-                } else $processed_request['pid'] = null;
+            // Clear existing media before re-import
+            $product = self::resolve_product($processed_request);
+            if ($product) {
+                Product_Media::delete_product_media((int) $processed_request['pid']);
             }
 
             $used_cart = new UsedCart($processed_request);
@@ -99,55 +111,29 @@ class REST_Routes
     /**
      * REST Callback for used DELETABLE
      *
+     * Fully deletes the product and all associated media.
+     *
      * @param array|WP_REST_Request $request
      * @return WP_REST_Response|WP_Error
      */
     public static function delete_used_cart($request)
     {
-        require_once(ABSPATH . 'wp-admin/includes/media.php');
-        require_once(ABSPATH . 'wp-admin/includes/file.php');
-        require_once(ABSPATH . 'wp-admin/includes/image.php');
+        Product_Media::require_media_functions();
         if (isset($request['pid']) || isset($request['vinNo']) || isset($request['serialNo'])) {
-            // Get attached images
-            $featured = get_post_thumbnail_id($request['pid']);
-            $product = wc_get_product($request['pid']);
-            if($product===false) {
-                $request['pid'] = wc_get_product_id_by_sku($request['vinNo']?$request['vinNo']:$request['serialNo']);
-                $product = wc_get_product(
-                    $request['pid']
-                );
-            }
-            if(!$product) {
+            $product = self::resolve_product($request);
+            if (!$product) {
                 return new \WP_REST_Response('No fight left to fight', 410);
             }
-            $images = $product?->get_gallery_image_ids()??[];
 
-            // Get Monroney PDF
-            $monroney_url = explode('"', get_post_meta($request['pid'])['monroney_sticker'][0])[1];
-            $monroney = attachment_url_to_postid($monroney_url);
+            $pid = (int) $request['pid'];
 
-            array_push($images, $featured);
-            array_push($images, $monroney);
-
-            $result = \Tigon\DmsConnect\Admin\REST_Import_Controller::import_delete(new Database_Object(id: $request['pid']));
-            if (is_wp_error($result)) {
-                return new \WP_Error(500, ['pid' => 0, 'error' => 'Deletion failure']);
-            }
-
-            if (isset($result['errors'])) {
-                REST_Import_Controller::process_post_import();
-                return new \WP_REST_Response($result, 500);
-            }
-
-            // Delete associated images on success
-            foreach ($images as $i) {
-                wp_delete_post($i, false);
-            }
+            // Fully delete product and all its media
+            Product_Media::delete_product($pid);
 
             REST_Import_Controller::process_post_import();
             return new \WP_REST_Response([
-                'message'     => 'Post ' . $request['pid'] . ' deleted successfully',
-                'pid'         => $request['pid'],
+                'message'     => 'Post ' . $pid . ' deleted successfully',
+                'pid'         => $pid,
                 'isOnWebsite' => false,
             ], 200);
         } else
@@ -162,9 +148,7 @@ class REST_Routes
      */
     public static function push_new_cart($request)
     {
-        require_once(ABSPATH . 'wp-admin/includes/media.php');
-        require_once(ABSPATH . 'wp-admin/includes/file.php');
-        require_once(ABSPATH . 'wp-admin/includes/image.php');
+        Product_Media::require_media_functions();
         $processed_request = (is_object($request) && get_class($request) == 'WP_REST_Request') ? json_decode($request->get_body(), true) : $request;
         if (isset($processed_request['_id']) && isset($processed_request['pid']) && (isset($processed_request['vinNo']) || isset($processed_request['serialNo']))) {
             $result = \Tigon\DmsConnect\Admin\REST_Import_Controller::replace_new($processed_request);
@@ -212,9 +196,7 @@ class REST_Routes
      */
     public static function push_single_cart($request)
     {
-        require_once ABSPATH . 'wp-admin/includes/media.php';
-        require_once ABSPATH . 'wp-admin/includes/file.php';
-        require_once ABSPATH . 'wp-admin/includes/image.php';
+        Product_Media::require_media_functions();
 
         $cart = (is_object($request) && get_class($request) === 'WP_REST_Request')
             ? json_decode($request->get_body(), true)

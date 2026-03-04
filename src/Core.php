@@ -653,19 +653,15 @@ class Core
             }
 
             // ---------------------------------------------------------
-            // Cart eligibility filters (mirrors import.js + Abstract_Cart)
-            // Skip carts that should not be on the website.
+            // Cart eligibility — delete product if cart is ineligible
             // ---------------------------------------------------------
-            if (!empty($cart['isInBoneyard'])) {
-                continue;
-            }
-            $is_in_stock = isset($cart['isInStock']) ? $cart['isInStock'] : true;
-            if (!$is_in_stock) {
-                continue;
-            }
-            $need_on_website = $cart['advertising']['needOnWebsite']
-                ?? ($cart['needOnWebsite'] ?? true);
-            if (!$need_on_website) {
+            if (!\Tigon\DmsConnect\Includes\Product_Manager::should_be_on_website($cart)) {
+                $existing_pid = function_exists('tigon_dms_get_product_by_cart_id')
+                    ? tigon_dms_get_product_by_cart_id($cart_id)
+                    : false;
+                if ($existing_pid) {
+                    \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
+                }
                 continue;
             }
             $serial = strtoupper($cart['serialNo'] ?? '');
@@ -909,23 +905,18 @@ class Core
                     continue;
                 }
 
-                // Eligibility filters
-                if (!empty($cart['isInBoneyard'])) {
-                    $stats['skipped']++;
-                    $stats['skip_details'][] = "{$cart_label}: Skipped — in boneyard";
-                    continue;
-                }
-                $is_in_stock = isset($cart['isInStock']) ? $cart['isInStock'] : true;
-                if (!$is_in_stock) {
-                    $stats['skipped']++;
-                    $stats['skip_details'][] = "{$cart_label}: Skipped — not in stock";
-                    continue;
-                }
-                $need_on_website = $cart['advertising']['needOnWebsite']
-                    ?? ($cart['needOnWebsite'] ?? true);
-                if (!$need_on_website) {
-                    $stats['skipped']++;
-                    $stats['skip_details'][] = "{$cart_label}: Skipped — needOnWebsite is false";
+                // Eligibility check — delete product if ineligible
+                if (!\Tigon\DmsConnect\Includes\Product_Manager::should_be_on_website($cart)) {
+                    $existing_pid = function_exists('tigon_dms_get_product_by_cart_id')
+                        ? tigon_dms_get_product_by_cart_id($cart_id)
+                        : false;
+                    if ($existing_pid) {
+                        \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
+                        $stats['skip_details'][] = "{$cart_label}: Deleted — not eligible for website";
+                    } else {
+                        $stats['skipped']++;
+                        $stats['skip_details'][] = "{$cart_label}: Skipped — not eligible for website";
+                    }
                     continue;
                 }
                 $serial_upper = strtoupper($cart['serialNo'] ?? '');
@@ -1657,10 +1648,40 @@ class Core
     // Deactivation Hook
     public static function deactivate()
     {
+        // Clear scheduled sync events
+        wp_clear_scheduled_hook('tigon_dms_sync_inventory');
     }
 
-    // Uninstall Hook
+    /**
+     * Uninstall Hook — clean up all plugin data from the database.
+     *
+     * Drops custom tables and removes all DMS-related transients.
+     * Product data (posts, postmeta, attachments) is left in place
+     * to avoid accidental data loss. Use the admin UI to bulk-delete
+     * products before uninstalling if you want a clean removal.
+     */
     public static function uninstall()
     {
+        global $wpdb;
+
+        // Drop custom database tables
+        $tables = [
+            $wpdb->prefix . 'tigon_dms_config',
+            $wpdb->prefix . 'tigon_dms_cart_lists',
+            $wpdb->prefix . 'tigon_dms_field_mappings',
+            $wpdb->prefix . 'tigon_dms_carts',
+        ];
+
+        foreach ($tables as $table) {
+            $wpdb->query("DROP TABLE IF EXISTS {$table}");
+        }
+
+        // Clear all DMS-related transients
+        if (class_exists('DMS_API')) {
+            \DMS_API::clear_caches();
+        }
+
+        // Clear scheduled events
+        wp_clear_scheduled_hook('tigon_dms_sync_inventory');
     }
 }
