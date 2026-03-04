@@ -3453,8 +3453,17 @@ abstract class Abstract_Cart
         $this->comment_count = '0';
         $this->post_author = '3';
 
-        $this->price = $this->cart['retailPrice'];
-        $this->sale_price = $this->cart['salePrice'];
+        $raw_price = $this->cart['retailPrice'] ?? null;
+        if ($raw_price !== null && $raw_price !== '' && floatval($raw_price) > 0) {
+            $this->price = (string) floatval($raw_price);
+        } else {
+            $this->price = null;
+            error_log('[DMS Sync] Cart ' . ($this->cart['_id'] ?? 'unknown') . ' has no valid retailPrice: ' . var_export($raw_price, true));
+        }
+        $raw_sale = $this->cart['salePrice'] ?? null;
+        $this->sale_price = ($raw_sale !== null && $raw_sale !== '' && floatval($raw_sale) > 0)
+            ? (string) floatval($raw_sale)
+            : null;
         $this->tax_status = "taxable";
         $this->tax_class = "standard";
         $this->in_stock = $this->cart['isInStock'] ? 'instock' : 'outofstock';

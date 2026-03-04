@@ -51,6 +51,12 @@ final class Database_Write_Controller {
             $wpdb->update($wpdb->prefix.'posts', ['post_name' => $unique_slug], ['ID' => $post_id]);
         }
 
+        // Update WooCommerce product lookup table so prices, stock, and
+        // other meta are visible on the frontend (raw SQL writes bypass WC hooks).
+        if ($post_id && function_exists('tigon_dms_refresh_wc_product_data')) {
+            tigon_dms_refresh_wc_product_data($post_id);
+        }
+
         return $post_id;
     }
 

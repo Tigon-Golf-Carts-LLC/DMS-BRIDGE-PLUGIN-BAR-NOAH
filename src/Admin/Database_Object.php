@@ -201,11 +201,11 @@ class Database_Object
         if (!empty($attributes)) $this->data['postmeta']['_product_attributes']['meta_value'] = $attributes;
         if (!empty($featured_image)) $this->data['postmeta']['_thumbnail_id']['meta_value'] = $featured_image;
         if (!empty($images_list)) $this->data['postmeta']['_product_image_gallery']['meta_value'] = $images_list;
-        if (!empty($price)) {
+        if ($price !== null && $price !== '' && floatval($price) > 0) {
             $this->data['postmeta']['_regular_price']['meta_value'] = $price;
             $this->data['postmeta']['_price']['meta_value'] = $price;
         }
-        if (!empty($sale_price) && floatval($sale_price) > 0 && floatval($sale_price) < floatval($price)) {
+        if ($sale_price !== null && $sale_price !== '' && floatval($sale_price) > 0 && floatval($sale_price) < floatval($price)) {
             $this->data['postmeta']['_sale_price']['meta_value'] = $sale_price;
             $this->data['postmeta']['_price']['meta_value'] = $sale_price;
         }
