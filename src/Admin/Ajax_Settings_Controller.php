@@ -10,6 +10,11 @@ class Ajax_Settings_Controller
 
     public static function save_settings($input)
     {
+        check_ajax_referer('tigon_dms_run_import_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
         if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest') {
             header("Content-Type: application/json; charset=utf-8", true);
             global $wpdb;
@@ -114,8 +119,61 @@ class Ajax_Settings_Controller
         exit;
     }
 
+    /**
+     * AJAX handler — save showcase locations and inventory category slugs.
+     */
+    public static function save_locations()
+    {
+        check_ajax_referer('tigon_dms_run_import_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
+        $new_inv_slug  = sanitize_text_field(wp_unslash($_REQUEST['data']['new_inventory_term_slug'] ?? ''));
+        $used_inv_slug = sanitize_text_field(wp_unslash($_REQUEST['data']['used_inventory_term_slug'] ?? ''));
+
+        if ($new_inv_slug !== '') {
+            tigon_dms_set_config('new_inventory_term_slug', $new_inv_slug);
+        }
+        if ($used_inv_slug !== '') {
+            tigon_dms_set_config('used_inventory_term_slug', $used_inv_slug);
+        }
+
+        // Build locations array from submitted rows
+        $raw_locations = $_REQUEST['data']['locations'] ?? [];
+        $locations = [];
+        if (is_array($raw_locations)) {
+            foreach ($raw_locations as $loc) {
+                $key = sanitize_key($loc['key'] ?? '');
+                if ($key === '') {
+                    continue;
+                }
+                $not_in = [];
+                if (!empty($loc['archive_not_in'])) {
+                    $not_in = array_map('intval', array_filter(explode(',', $loc['archive_not_in'])));
+                }
+                $locations[$key] = [
+                    'landing_page'   => intval($loc['landing_page'] ?? 0),
+                    'archive'        => intval($loc['archive'] ?? 0),
+                    'archive_not_in' => $not_in,
+                ];
+            }
+        }
+
+        if (!empty($locations)) {
+            tigon_dms_set_config('showcase_locations', wp_json_encode($locations));
+        }
+
+        wp_send_json_success(['saved' => true]);
+    }
+
     public static function get_dms_props()
     {
+        check_ajax_referer('tigon_dms_run_import_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
         $boolean_svg = preg_replace(
             '/#000000/',
             '#333333',
@@ -265,6 +323,11 @@ class Ajax_Settings_Controller
      */
     public static function get_full_schema()
     {
+        check_ajax_referer('tigon_dms_run_import_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
         $response = wp_remote_post('https://api.tigondms.com/wp-website/get-carts', [
             'headers' => ['Content-Type' => 'application/json'],
             'body'    => wp_json_encode(['pageNumber' => 0, 'pageSize' => 20]),

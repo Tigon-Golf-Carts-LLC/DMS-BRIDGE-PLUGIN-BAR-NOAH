@@ -128,16 +128,7 @@ add_action('template_redirect', 'tigon_dms_handle_cart_route', 5);
  * @return string Normalized title with " In "
  */
 function tigon_dms_normalize_title($title) {
-    // Convert en-dash (–) to " In "
-    $normalized = str_replace(' – ', ' In ', $title);
-    
-    // Convert regular hyphen (-) to " In "
-    $normalized = str_replace(' - ', ' In ', $normalized);
-    
-    // Normalize whitespace (collapse multiple spaces)
-    $normalized = preg_replace('/\s+/', ' ', $normalized);
-    
-    return trim($normalized);
+    return \Tigon\DmsConnect\Includes\Template_Engine::normalize_title($title);
 }
 
 /**
@@ -146,32 +137,7 @@ function tigon_dms_normalize_title($title) {
  * @return array<string,string>
  */
 function tigon_dms_get_schema_templates() {
-    global $wpdb;
-
-    $table_name = $wpdb->prefix . 'tigon_dms_config';
-
-    $defaults = [
-        'schema_name'              => '{^make}® {^model} {cartColor} in {city}, {stateAbbr}',
-        'schema_slug'              => '{make}-{model}-{cartColor}-seat-{seatColor}-{city}-{state}',
-        'schema_image_name'        => '{^make}® {^model} {cartColor} in {city}, {stateAbbr} image',
-        'schema_monroney_name'     => '{^make}® {^model} {cartColor} in {city}, {stateAbbr} monroney',
-        'schema_description'       => '',
-        'schema_short_description' => '',
-    ];
-
-    $templates = [];
-    foreach ($defaults as $key => $default) {
-        $value = $wpdb->get_var( $wpdb->prepare(
-            "SELECT option_value FROM {$table_name} WHERE option_name = %s LIMIT 1",
-            $key
-        ) );
-        if ($value === null || $value === '') {
-            $value = $default;
-        }
-        $templates[$key] = $value;
-    }
-
-    return $templates;
+    return \Tigon\DmsConnect\Includes\Template_Engine::get_schema_templates();
 }
 
 /**
@@ -181,24 +147,7 @@ function tigon_dms_get_schema_templates() {
  * @return string Two-letter abbreviation (e.g. "PA"), or the original string if not found
  */
 function tigon_dms_state_abbreviation($state_name) {
-    static $map = [
-        'Alabama'=>'AL','Alaska'=>'AK','Arizona'=>'AZ','Arkansas'=>'AR','California'=>'CA',
-        'Colorado'=>'CO','Connecticut'=>'CT','Delaware'=>'DE','Florida'=>'FL','Georgia'=>'GA',
-        'Hawaii'=>'HI','Idaho'=>'ID','Illinois'=>'IL','Indiana'=>'IN','Iowa'=>'IA',
-        'Kansas'=>'KS','Kentucky'=>'KY','Louisiana'=>'LA','Maine'=>'ME','Maryland'=>'MD',
-        'Massachusetts'=>'MA','Michigan'=>'MI','Minnesota'=>'MN','Mississippi'=>'MS','Missouri'=>'MO',
-        'Montana'=>'MT','Nebraska'=>'NE','Nevada'=>'NV','New Hampshire'=>'NH','New Jersey'=>'NJ',
-        'New Mexico'=>'NM','New York'=>'NY','North Carolina'=>'NC','North Dakota'=>'ND','Ohio'=>'OH',
-        'Oklahoma'=>'OK','Oregon'=>'OR','Pennsylvania'=>'PA','Rhode Island'=>'RI','South Carolina'=>'SC',
-        'South Dakota'=>'SD','Tennessee'=>'TN','Texas'=>'TX','Utah'=>'UT','Vermont'=>'VT',
-        'Virginia'=>'VA','Washington'=>'WA','West Virginia'=>'WV','Wisconsin'=>'WI','Wyoming'=>'WY',
-        'District of Columbia'=>'DC',
-    ];
-    $name = trim($state_name);
-    if (strlen($name) === 2) {
-        return strtoupper($name);
-    }
-    return $map[ucwords(strtolower($name))] ?? $name;
+    return \Tigon\DmsConnect\Includes\Template_Engine::state_abbreviation($state_name);
 }
 
 /**
@@ -254,58 +203,7 @@ function tigon_dms_apply_custom_mappings($product_id, array $cart_data) {
  * @return array<string,mixed>
  */
 function tigon_dms_build_template_variables_from_cart(array $cart_data) {
-    $make   = $cart_data['cartType']['make'] ?? '';
-    $model  = $cart_data['cartType']['model'] ?? '';
-    $year   = $cart_data['cartType']['year'] ?? '';
-    $color  = $cart_data['cartAttributes']['cartColor'] ?? '';
-    $seat   = $cart_data['cartAttributes']['seatColor'] ?? '';
-    $store_id = $cart_data['cartLocation']['locationId'] ?? '';
-
-    $city  = '';
-    $state = '';
-    $stateAbbr = '';
-
-    if ($store_id && class_exists('DMS_API')) {
-        $location_data = DMS_API::get_city_and_state_by_store_id($store_id);
-        $city  = $location_data['city'] ?? '';
-        $state = $location_data['state'] ?? '';
-        $stateAbbr = tigon_dms_state_abbreviation($state);
-    }
-
-    $vars = [
-        'make'        => $make,
-        'model'       => $model,
-        'year'        => $year,
-        'cartColor'   => $color,
-        'seatColor'   => $seat,
-        'city'        => $city,
-        'state'       => $state,
-        'stateAbbr'   => $stateAbbr,
-        'retailPrice' => $cart_data['retailPrice'] ?? '',
-        'salePrice'   => $cart_data['salePrice'] ?? '',
-    ];
-
-    $vars['batteryType']     = $cart_data['battery']['type'] ?? '';
-    $vars['batteryVoltage']  = $cart_data['battery']['batteryVoltage'] ?? '';
-    $vars['packVoltage']     = $cart_data['battery']['packVoltage'] ?? '';
-    $vars['batteryBrand']    = $cart_data['battery']['brand'] ?? '';
-    $vars['batteryYear']     = $cart_data['battery']['year'] ?? '';
-    $vars['batteryAmpHours'] = $cart_data['battery']['ampHours'] ?? '';
-
-    $vars['isStreetLegal'] = isset($cart_data['title']['isStreetLegal'])
-        ? ($cart_data['title']['isStreetLegal'] ? 'Yes' : 'No')
-        : '';
-    $vars['isElectric'] = isset($cart_data['isElectric'])
-        ? ($cart_data['isElectric'] ? 'ELECTRIC' : 'GAS')
-        : '';
-    $vars['isUsed'] = isset($cart_data['isUsed'])
-        ? ($cart_data['isUsed'] ? 'USED' : 'NEW')
-        : '';
-
-    $vars['serialNumber'] = $cart_data['serialNo'] ?? '';
-    $vars['vinNumber']    = $cart_data['vinNo'] ?? '';
-
-    return $vars;
+    return \Tigon\DmsConnect\Includes\Template_Engine::build_template_variables($cart_data);
 }
 
 /**
@@ -317,34 +215,7 @@ function tigon_dms_build_template_variables_from_cart(array $cart_data) {
  * @return string
  */
 function tigon_dms_evaluate_template($template, array $vars, $slugify = false) {
-    $result = preg_replace_callback('/\{([^}]+)\}/', function ($matches) use ($vars) {
-        $key = $matches[1];
-        $should_ucwords = false;
-
-        if (strpos($key, '^') === 0) {
-            $should_ucwords = true;
-            $key = substr($key, 1);
-        }
-
-        $value = isset($vars[$key]) ? $vars[$key] : '';
-        if (!is_string($value)) {
-            $value = (string) $value;
-        }
-
-        if ($should_ucwords && $value !== '') {
-            $value = ucwords(strtolower($value));
-        }
-
-        return $value;
-    }, $template);
-
-    $result = trim(preg_replace('/\s+/', ' ', $result));
-
-    if ($slugify) {
-        $result = sanitize_title($result);
-    }
-
-    return $result;
+    return \Tigon\DmsConnect\Includes\Template_Engine::evaluate($template, $vars, $slugify);
 }
 
 /**
@@ -357,186 +228,7 @@ function tigon_dms_evaluate_template($template, array $vars, $slugify = false) {
  * @return array Parsed specs array with Feature => Description pairs
  */
 function tigon_dms_parse_cart_specs($cart_data) {
-    $specs = array();
-    
-    // ========== DESCRIPTION TAB FIELDS ==========
-    
-    // Cart Type: Make, Model, Year
-    if (!empty($cart_data['cartType'])) {
-        $cart_type = $cart_data['cartType'];
-        if (!empty($cart_type['make'])) {
-            $specs['Make'] = $cart_type['make'];
-        }
-        if (!empty($cart_type['model'])) {
-            $specs['Model'] = $cart_type['model'];
-        }
-        if (!empty($cart_type['year'])) {
-            $specs['Year'] = $cart_type['year'];
-        }
-    }
-    
-    // Street Legal (from title.isStreetLegal)
-    if (isset($cart_data['title']['isStreetLegal'])) {
-        $specs['Street Legal'] = $cart_data['title']['isStreetLegal'] ? 'Fully Street Legal' : 'No';
-    }
-    
-    // Cart Attributes
-    if (!empty($cart_data['cartAttributes'])) {
-        $attrs = $cart_data['cartAttributes'];
-        
-        // Color
-        if (!empty($attrs['cartColor'])) {
-            $specs['Color'] = $attrs['cartColor'];
-        }
-        
-        // Seat Color
-        if (!empty($attrs['seatColor'])) {
-            $specs['Seat Color'] = $attrs['seatColor'];
-        }
-        
-        // Tires (tireType field)
-        if (!empty($attrs['tireType'])) {
-            $specs['Tires'] = $attrs['tireType'];
-        }
-        
-        // Rims (tireRimSize field)
-        if (!empty($attrs['tireRimSize'])) {
-            $specs['Rims'] = $attrs['tireRimSize'] . '"';
-        }
-        
-        // Drivetrain
-        if (!empty($attrs['driveTrain'])) {
-            $specs['Drivetrain'] = $attrs['driveTrain'];
-        }
-        
-        // Passengers
-        if (!empty($attrs['passengers'])) {
-            $specs['Passengers'] = $attrs['passengers'];
-        }
-        
-        // Sound System (hasSoundSystem)
-        if (isset($attrs['hasSoundSystem']) && $attrs['hasSoundSystem'] !== null) {
-            $specs['Sound System'] = $attrs['hasSoundSystem'] ? 'Yes' : 'No';
-        }
-        
-        // Lift Kit (isLifted)
-        if (isset($attrs['isLifted']) && $attrs['isLifted'] !== null) {
-            $specs['Lift Kit'] = $attrs['isLifted'] ? 'Yes' : 'No';
-        }
-        
-        // Receiver Hitch (hasHitch)
-        if (isset($attrs['hasHitch']) && $attrs['hasHitch'] !== null) {
-            $specs['Receiver Hitch'] = $attrs['hasHitch'] ? 'Yes' : 'No';
-        }
-        
-        // Extended Top (hasExtendedTop)
-        if (isset($attrs['hasExtendedTop']) && $attrs['hasExtendedTop'] !== null) {
-            $specs['Extended Top'] = $attrs['hasExtendedTop'] ? 'Yes' : 'No';
-        }
-    }
-    
-    // Battery Information
-    if (!empty($cart_data['battery']) && is_array($cart_data['battery'])) {
-        $battery = $cart_data['battery'];
-        
-        if (!empty($battery['type'])) {
-            $specs['Battery Type'] = $battery['type'];
-        }
-        if (!empty($battery['brand'])) {
-            $specs['Battery Brand'] = $battery['brand'];
-        }
-        if (!empty($battery['year'])) {
-            $specs['Battery Year'] = $battery['year'];
-        }
-        if (!empty($battery['ampHours'])) {
-            $specs['Capacity'] = $battery['ampHours'] . ' Amp Hours';
-        }
-        if (!empty($battery['batteryVoltage'])) {
-            $specs['Battery Voltage'] = $battery['batteryVoltage'] . 'V';
-        }
-        if (!empty($battery['warrantyLength'])) {
-            $specs['Battery Warranty'] = $battery['warrantyLength'];
-        }
-    }
-    
-    // Engine Information (for gas carts)
-    if (!empty($cart_data['engine']) && is_array($cart_data['engine'])) {
-        $engine = $cart_data['engine'];
-        
-        if (!empty($engine['make'])) {
-            $specs['Engine'] = $engine['make'];
-        }
-        if (!empty($engine['horsepower'])) {
-            $specs['Horsepower'] = $engine['horsepower'] . ' HP';
-        }
-        if (!empty($engine['stroke'])) {
-            $specs['Stroke'] = $engine['stroke'];
-        }
-    }
-    
-    // Vehicle Warranty (top-level warrantyLength)
-    if (!empty($cart_data['warrantyLength'])) {
-        $specs['Warranty'] = $cart_data['warrantyLength'];
-    }
-    
-    // ========== ADDITIONAL INFORMATION FIELDS ==========
-    
-    // Vehicle Power (isElectric)
-    if (isset($cart_data['isElectric'])) {
-        $specs['Vehicle Power'] = $cart_data['isElectric'] ? 'ELECTRIC' : 'GAS';
-    }
-    
-    // Vehicle Status (isUsed)
-    if (isset($cart_data['isUsed'])) {
-        $specs['Vehicle Status'] = $cart_data['isUsed'] ? 'USED' : 'NEW';
-    }
-    
-    // Serial Number
-    if (!empty($cart_data['serialNo'])) {
-        $specs['Serial Number'] = $cart_data['serialNo'];
-    }
-    
-    // VIN Number
-    if (!empty($cart_data['vinNo'])) {
-        $specs['VIN'] = $cart_data['vinNo'];
-    }
-    
-    // Odometer
-    if (!empty($cart_data['odometer'])) {
-        $specs['Odometer'] = $cart_data['odometer'];
-    }
-    
-    // Hours
-    if (!empty($cart_data['hour'])) {
-        $specs['Hours'] = $cart_data['hour'];
-    }
-    
-    // Location
-    if (!empty($cart_data['cartLocation'])) {
-        $store_id = $cart_data['cartLocation']['locationId'] ?? '';
-        if ($store_id && class_exists('DMS_API')) {
-            $location_data = DMS_API::get_city_and_state_by_store_id($store_id);
-            if (!empty($location_data['city']) || !empty($location_data['state'])) {
-                $location_parts = array();
-                if (!empty($location_data['city'])) {
-                    $location_parts[] = $location_data['city'];
-                }
-                if (!empty($location_data['state'])) {
-                    $location_parts[] = $location_data['state'];
-                }
-                if (!empty($location_parts)) {
-                    $specs['Location'] = implode(', ', $location_parts);
-                }
-            }
-        }
-    }
-    
-    // Year of Vehicle (duplicate for Additional Info format)
-    if (!empty($cart_data['cartType']['year'])) {
-        $specs['Year of Vehicle'] = $cart_data['cartType']['year'];
-    }
-    
-    return $specs;
+    return \Tigon\DmsConnect\Includes\Template_Engine::parse_cart_specs($cart_data);
 }
 
 /**
@@ -546,7 +238,7 @@ function tigon_dms_parse_cart_specs($cart_data) {
  * @return array Array of image filenames/URLs
  */
 function tigon_dms_parse_cart_images($cart_data) {
-    return $cart_data['imageUrls'] ?? array();
+    return \Tigon\DmsConnect\Includes\Template_Engine::parse_cart_images($cart_data);
 }
 
 /**
@@ -556,15 +248,7 @@ function tigon_dms_parse_cart_images($cart_data) {
  * @return array Warranty data array
  */
 function tigon_dms_parse_cart_warranty($cart_data) {
-    $warranty = array();
-    
-    // Extract any warranty-related fields from cart data
-    // Adjust these keys based on actual DMS payload structure
-    if (!empty($cart_data['warranty'])) {
-        $warranty = $cart_data['warranty'];
-    }
-    
-    return $warranty;
+    return \Tigon\DmsConnect\Includes\Template_Engine::parse_cart_warranty($cart_data);
 }
 
 /**
@@ -577,6 +261,155 @@ function tigon_dms_get_file_source() {
     $table_name = $wpdb->prefix . 'tigon_dms_config';
     $value = $wpdb->get_var("SELECT option_value FROM $table_name WHERE option_name = 'file_source'");
     return $value ? rtrim($value, '/') : '';
+}
+
+/**
+ * Read a single option from the tigon_dms_config table.
+ *
+ * @param string      $option_name  Option key
+ * @param string|null $default      Fallback when row is missing or empty
+ * @return string|null
+ */
+function tigon_dms_get_config($option_name, $default = null) {
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'tigon_dms_config';
+    $value = $wpdb->get_var(
+        $wpdb->prepare("SELECT option_value FROM {$table_name} WHERE option_name = %s LIMIT 1", $option_name)
+    );
+    return ($value !== null && $value !== '') ? $value : $default;
+}
+
+/**
+ * Write a single option to the tigon_dms_config table (upsert).
+ *
+ * @param string $option_name
+ * @param string $option_value
+ */
+function tigon_dms_set_config($option_name, $option_value) {
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'tigon_dms_config';
+    $exists = $wpdb->get_var(
+        $wpdb->prepare("SELECT COUNT(*) FROM {$table_name} WHERE option_name = %s", $option_name)
+    );
+    if ($exists) {
+        $wpdb->update($table_name, ['option_value' => $option_value], ['option_name' => $option_name]);
+    } else {
+        $wpdb->insert($table_name, ['option_name' => $option_name, 'option_value' => $option_value]);
+    }
+}
+
+/**
+ * Get the showcase locations configuration.
+ *
+ * Returns an associative array keyed by location slug (e.g. 'national',
+ * 'tigon_hatfield') with 'landing_page', 'archive', and 'archive_not_in'
+ * for each location.
+ *
+ * Priority: stored config → slug-based page lookup → empty (skip).
+ *
+ * @return array<string, array{landing_page: int, archive: int, archive_not_in: int[]}>
+ */
+function tigon_dms_get_showcase_locations() {
+    $json = tigon_dms_get_config('showcase_locations', '');
+    $locations = $json ? json_decode($json, true) : null;
+    if (is_array($locations) && !empty($locations)) {
+        return $locations;
+    }
+
+    // Fallback: slug-based page lookup for known locations
+    $location_slugs = [
+        'national'        => ['landing_slug' => 'shop',               'archive_slug' => ''],
+        'tigon_hatfield'  => ['landing_slug' => 'tigon-hatfield',     'archive_slug' => 'tigon-hatfield-archive'],
+        'tigon_ocean_view'=> ['landing_slug' => 'tigon-ocean-view',   'archive_slug' => 'tigon-ocean-view-archive'],
+        'tigon_pocono'    => ['landing_slug' => 'tigon-pocono',       'archive_slug' => 'tigon-pocono-archive'],
+        'tigon_dover'     => ['landing_slug' => 'tigon-dover',        'archive_slug' => 'tigon-dover-archive'],
+        'tigon_scranton'  => ['landing_slug' => 'tigon-scranton',     'archive_slug' => 'tigon-scranton-archive'],
+    ];
+
+    $locations = [];
+    $all_archive_ids = [];
+
+    foreach ($location_slugs as $key => $slugs) {
+        $landing_page = 0;
+        $archive      = 0;
+
+        if (!empty($slugs['landing_slug'])) {
+            $page = get_page_by_path($slugs['landing_slug']);
+            $landing_page = $page ? (int) $page->ID : 0;
+        }
+        if (!empty($slugs['archive_slug'])) {
+            $page = get_page_by_path($slugs['archive_slug']);
+            $archive = $page ? (int) $page->ID : 0;
+        }
+
+        if ($archive) {
+            $all_archive_ids[] = $archive;
+        }
+
+        $locations[$key] = [
+            'landing_page'   => $landing_page,
+            'archive'        => $archive,
+            'archive_not_in' => [],
+        ];
+    }
+
+    // National's archive_not_in = all location archive IDs
+    if (isset($locations['national'])) {
+        $locations['national']['archive_not_in'] = $all_archive_ids;
+    }
+
+    return $locations;
+}
+
+/**
+ * Get the WooCommerce product_cat term_taxonomy_id for the "new active inventory" category.
+ *
+ * Priority: stored config → slug lookup → 0.
+ *
+ * @return int
+ */
+function tigon_dms_get_new_inventory_term_taxonomy_id() {
+    $stored = tigon_dms_get_config('new_inventory_term_slug', '');
+
+    // If stored value is numeric, treat as direct term_taxonomy_id
+    if ($stored !== '' && is_numeric($stored)) {
+        return (int) $stored;
+    }
+
+    // Slug-based lookup
+    $slug = ($stored !== '') ? $stored : 'local-new-active-inventory';
+    $term = get_term_by('slug', $slug, 'product_cat');
+    if ($term) {
+        return (int) $term->term_taxonomy_id;
+    }
+
+    // Try by name as final fallback
+    $term = get_term_by('name', 'Local New Active Inventory', 'product_cat');
+    return $term ? (int) $term->term_taxonomy_id : 0;
+}
+
+/**
+ * Get the WooCommerce product_cat term_taxonomy_id for the "used active inventory" category.
+ *
+ * Priority: stored config → slug lookup → 0.
+ *
+ * @return int
+ */
+function tigon_dms_get_used_inventory_term_taxonomy_id() {
+    $stored = tigon_dms_get_config('used_inventory_term_slug', '');
+
+    if ($stored !== '' && is_numeric($stored)) {
+        return (int) $stored;
+    }
+
+    $slug = ($stored !== '') ? $stored : 'local-used-active-inventory';
+    $term = get_term_by('slug', $slug, 'product_cat');
+    if ($term) {
+        return (int) $term->term_taxonomy_id;
+    }
+
+    $term = get_term_by('name', 'Local Used Active Inventory', 'product_cat');
+    return $term ? (int) $term->term_taxonomy_id : 0;
 }
 
 /**
@@ -601,9 +434,7 @@ function tigon_dms_download_and_attach_images($product_id, $image_names, $title,
         return;
     }
 
-    require_once(ABSPATH . 'wp-admin/includes/file.php');
-    require_once(ABSPATH . 'wp-admin/includes/media.php');
-    require_once(ABSPATH . 'wp-admin/includes/image.php');
+    \Tigon\DmsConnect\Includes\Product_Media::require_media_functions();
 
     // Build image name from schema template
     $templates = tigon_dms_get_schema_templates();
@@ -613,20 +444,7 @@ function tigon_dms_download_and_attach_images($product_id, $image_names, $title,
         : '{^make} {^model} {cartColor} in {city}, {stateAbbr} image';
 
     // Delete existing attached images to avoid duplicates on re-sync
-    $existing_featured = get_post_thumbnail_id($product_id);
-    if ($existing_featured) {
-        wp_delete_post($existing_featured, true);
-        delete_post_thumbnail($product_id);
-    }
-    $existing_gallery = get_post_meta($product_id, '_product_image_gallery', true);
-    if (!empty($existing_gallery)) {
-        foreach (explode(',', $existing_gallery) as $img_id) {
-            if (!empty($img_id)) {
-                wp_delete_post((int) $img_id, true);
-            }
-        }
-        delete_post_meta($product_id, '_product_image_gallery');
-    }
+    \Tigon\DmsConnect\Includes\Product_Media::delete_product_media($product_id);
 
     $attachment_ids = array();
     $i = 0;
@@ -1634,78 +1452,17 @@ function tigon_dms_refresh_wc_product_data($product_id) {
 /**
  * Handle a product whose DMS cart is no longer in the active inventory.
  *
- * Mirrors Database_Write_Controller::delete_by_id() cleanup but uses a soft
- * approach: sets stock to out-of-stock and moves to draft instead of hard
- * deleting. Optionally removes attachments (images, monroney PDF).
+ * Hard-deletes the product and all associated media (images, gallery,
+ * monroney stickers, and any other attachments). When a cart is sold or
+ * isInStock is false/null/empty, the product must be fully removed from
+ * WordPress, WooCommerce, and the database.
  *
  * @param int  $product_id      WooCommerce product ID
- * @param bool $delete_images   Whether to also delete attached images (default false)
- * @return bool True if product was handled, false on error
+ * @param bool $delete_images   Deprecated — media is always deleted now.
+ * @return bool True if product was deleted, false if not found
  */
-function tigon_dms_handle_sold_product($product_id, $delete_images = false) {
-    if (!get_post($product_id)) {
-        return false;
-    }
-
-    // Mark out of stock
-    update_post_meta($product_id, '_stock_status', 'outofstock');
-    update_post_meta($product_id, '_stock', 0);
-
-    // Move to draft so it no longer appears on frontend
-    wp_update_post(array(
-        'ID'          => $product_id,
-        'post_status' => 'draft',
-    ));
-
-    // Remove from catalog visibility
-    wp_set_object_terms($product_id, array('exclude-from-catalog', 'exclude-from-search'), 'product_visibility');
-
-    // Optionally clean up attachments (mirrors REST_Routes delete path)
-    if ($delete_images) {
-        // Delete featured image
-        $featured_id = get_post_thumbnail_id($product_id);
-        if ($featured_id) {
-            wp_delete_post($featured_id, true);
-        }
-
-        // Delete gallery images
-        $gallery_ids = get_post_meta($product_id, '_product_image_gallery', true);
-        if (!empty($gallery_ids)) {
-            foreach (explode(',', $gallery_ids) as $img_id) {
-                if (!empty($img_id)) {
-                    wp_delete_post((int) $img_id, true);
-                }
-            }
-            delete_post_meta($product_id, '_product_image_gallery');
-        }
-
-        // Delete monroney sticker attachment
-        $monroney_url = get_post_meta($product_id, 'monroney_sticker', true);
-        if (!empty($monroney_url)) {
-            global $wpdb;
-            $monroney_id = $wpdb->get_var(
-                $wpdb->prepare(
-                    "SELECT ID FROM {$wpdb->posts} WHERE guid = %s AND post_type = 'attachment' LIMIT 1",
-                    $monroney_url
-                )
-            );
-            if ($monroney_id) {
-                wp_delete_post((int) $monroney_id, true);
-            }
-        }
-    }
-
-    // Clean WC lookup table for this product (mirrors Database_Write_Controller)
-    global $wpdb;
-    $wpdb->delete($wpdb->prefix . 'wc_product_meta_lookup', array('product_id' => $product_id));
-
-    // Refresh caches
-    clean_post_cache($product_id);
-    if (function_exists('wc_delete_product_transients')) {
-        wc_delete_product_transients($product_id);
-    }
-
-    return true;
+function tigon_dms_handle_sold_product($product_id, $delete_images = true) {
+    return \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $product_id);
 }
 
 /**
@@ -3635,12 +3392,18 @@ function tigon_dms_activation() {
 register_activation_hook(__FILE__, 'tigon_dms_activation');
 
 /**
- * Flush rewrite rules on deactivation
+ * Plugin deactivation: flush rewrite rules and clear scheduled events
  */
 function tigon_dms_deactivation() {
     flush_rewrite_rules();
+    \Tigon\DmsConnect\Core::deactivate();
 }
 register_deactivation_hook(__FILE__, 'tigon_dms_deactivation');
+
+/**
+ * Plugin uninstall: drop custom database tables and clean up transients
+ */
+register_uninstall_hook(__FILE__, ['Tigon\DmsConnect\Core', 'uninstall']);
 
 /**
  * ============================================================================

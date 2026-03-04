@@ -483,5 +483,10 @@ abstract class Abstract_Import_Controller
      */
     public static function process_post_import() {
         wc_update_product_lookup_tables();
-    } 
+
+        // Clear DMS API caches so frontend serves fresh data
+        if (class_exists('DMS_API')) {
+            \DMS_API::clear_caches();
+        }
+    }
 }

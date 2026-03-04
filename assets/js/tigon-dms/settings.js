@@ -30,7 +30,7 @@ jQuery(document).ready(function () {
     jQuery.ajax({
         dataType: 'json',
         url: ajaxurl,
-        data: { action: "tigon_dms_get_dms_props" },
+        data: { action: "tigon_dms_get_dms_props", nonce: globals.nonce },
         complete: function(res) {
             jQuery("#dms-schema").html(res.responseText);
             jQuery(".caret").click(e => {
@@ -71,14 +71,14 @@ jQuery(document).ready(function () {
         jQuery.ajax({
             dataType: 'json',
             url: ajaxurl,
-            data: { action: "tigon_dms_save_settings", data: settings }
+            data: { action: "tigon_dms_save_settings", nonce: globals.nonce, data: settings }
         }).then(response => {
             location.reload();
         });
     });
 
     // ── Tab switching ────────────────────────────────────────────────
-    var tabIds = ["general", "urls", "endpoints", "schema"];
+    var tabIds = ["general", "urls", "endpoints", "schema", "locations"];
 
     function activateTab(id) {
         jQuery(".tigon-dms-tab").removeClass("active");
@@ -110,7 +110,7 @@ jQuery(document).ready(function () {
             url: ajaxurl,
             method: "POST",
             dataType: "json",
-            data: { action: "tigon_dms_get_full_schema" }
+            data: { action: "tigon_dms_get_full_schema", nonce: globals.nonce }
         }).done(function (res) {
             if (res.success) {
                 status.text("Merged schema from " + res.data.cartCount + " carts.");

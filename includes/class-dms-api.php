@@ -51,14 +51,13 @@ class DMS_API
      */
     public static function get_featured_carts($key = 'national')
     {
-        // Create unique transient key for this location
         $transient_key = 'dms_carts_' . sanitize_key($key);
 
-        // Try to get cached data
-        // $cached_data = get_transient($transient_key);
-        // if ($cached_data !== false) {
-        //     return $cached_data;
-        // }
+        // Return cached data — only refreshed when sync runs
+        $cached_data = get_transient($transient_key);
+        if ($cached_data !== false) {
+            return $cached_data;
+        }
 
         // No cache, fetch from API
         $response = wp_remote_post(
@@ -87,8 +86,8 @@ class DMS_API
             return array();
         }
 
-        // Cache for 5 minutes (300 seconds) - COMMENTED OUT
-        // set_transient($transient_key, $data, 300);
+        // Cache for 24 hours — cleared explicitly when sync runs
+        set_transient($transient_key, $data, DAY_IN_SECONDS);
 
         return $data;
     }
@@ -520,4 +519,34 @@ class DMS_API
         return $urls;
     }
 
+    /**
+     * Clear all DMS API transient caches.
+     *
+     * Call this after a sync completes (scheduled or manual) so the next
+     * frontend page load fetches fresh data from the API.
+     */
+    public static function clear_caches()
+    {
+        global $wpdb;
+
+        // Delete all dms_carts_* transients (featured carts per location)
+        $wpdb->query(
+            "DELETE FROM {$wpdb->options}
+             WHERE option_name LIKE '_transient_dms_carts_%'
+                OR option_name LIKE '_transient_timeout_dms_carts_%'"
+        );
+
+        // Delete individual cart transients
+        $wpdb->query(
+            "DELETE FROM {$wpdb->options}
+             WHERE option_name LIKE '_transient_dms_cart_%'
+                OR option_name LIKE '_transient_timeout_dms_cart_%'"
+        );
+
+        // Delete stores transient
+        delete_transient('dms_stores');
+
+        // Reset static cache
+        self::$cached_stores_data = null;
+    }
 }
