@@ -568,6 +568,119 @@ function tigon_dms_parse_cart_warranty($cart_data) {
 }
 
 /**
+ * Retrieve the file_source (S3 bucket base URL) from plugin config.
+ *
+ * @return string Base URL (no trailing slash) or empty string
+ */
+function tigon_dms_get_file_source() {
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'tigon_dms_config';
+    $value = $wpdb->get_var("SELECT option_value FROM $table_name WHERE option_name = 'file_source'");
+    return $value ? rtrim($value, '/') : '';
+}
+
+/**
+ * Download DMS cart images from S3 and attach them to a WooCommerce product.
+ *
+ * Sets _thumbnail_id (featured image) and _product_image_gallery (gallery)
+ * so images display natively through WooCommerce.
+ *
+ * @param int    $product_id  WooCommerce product ID
+ * @param array  $image_names Array of image filenames from DMS (imageUrls)
+ * @param string $title       Product title (used for image alt/title text)
+ * @param array  $cart_data   Full DMS cart payload (for template variables)
+ */
+function tigon_dms_download_and_attach_images($product_id, $image_names, $title, $cart_data = array()) {
+    if (empty($image_names) || !is_array($image_names)) {
+        return;
+    }
+
+    $file_source = tigon_dms_get_file_source();
+    if (empty($file_source)) {
+        error_log('DMS Sync: Cannot download images — file_source not configured.');
+        return;
+    }
+
+    require_once(ABSPATH . 'wp-admin/includes/file.php');
+    require_once(ABSPATH . 'wp-admin/includes/media.php');
+    require_once(ABSPATH . 'wp-admin/includes/image.php');
+
+    // Build image name from schema template
+    $templates = tigon_dms_get_schema_templates();
+    $vars      = !empty($cart_data) ? tigon_dms_build_template_variables_from_cart($cart_data) : array();
+    $image_tpl = isset($templates['schema_image_name']) && $templates['schema_image_name'] !== ''
+        ? $templates['schema_image_name']
+        : '{^make} {^model} {cartColor} in {city}, {stateAbbr} image';
+
+    // Delete existing attached images to avoid duplicates on re-sync
+    $existing_featured = get_post_thumbnail_id($product_id);
+    if ($existing_featured) {
+        wp_delete_post($existing_featured, true);
+        delete_post_thumbnail($product_id);
+    }
+    $existing_gallery = get_post_meta($product_id, '_product_image_gallery', true);
+    if (!empty($existing_gallery)) {
+        foreach (explode(',', $existing_gallery) as $img_id) {
+            if (!empty($img_id)) {
+                wp_delete_post((int) $img_id, true);
+            }
+        }
+        delete_post_meta($product_id, '_product_image_gallery');
+    }
+
+    $attachment_ids = array();
+    $i = 0;
+
+    foreach ($image_names as $remote_image_name) {
+        if (empty($remote_image_name)) {
+            continue;
+        }
+
+        $url = $file_source . '/carts/' . $remote_image_name;
+
+        // Generate descriptive filename from schema template
+        $vars['index'] = $i + 1;
+        $image_name = tigon_dms_evaluate_template($image_tpl, $vars, false);
+        $image_filename = preg_replace('/\s+/', '-', strtolower($image_name));
+
+        $image_data = array(
+            'post_title'   => $image_name,
+            'post_content' => $title,
+            'post_excerpt' => $title,
+        );
+        $image_meta = array(
+            '_wp_attachment_image_alt' => $title,
+        );
+
+        $att_id = \Tigon\DmsConnect\Includes\Somatic::attach_external_image(
+            url: $url,
+            post_id: $product_id,
+            filename: $image_filename,
+            post_data: $image_data,
+            metadata: $image_meta
+        );
+
+        if (!is_wp_error($att_id)) {
+            $attachment_ids[] = $att_id;
+        } else {
+            error_log('DMS Sync: Failed to download image ' . $url . ' for product ' . $product_id . ': ' . $att_id->get_error_message());
+        }
+
+        $i++;
+    }
+
+    // First image = featured, rest = gallery
+    if (!empty($attachment_ids)) {
+        $featured = array_shift($attachment_ids);
+        set_post_thumbnail($product_id, $featured);
+
+        if (!empty($attachment_ids)) {
+            update_post_meta($product_id, '_product_image_gallery', implode(',', $attachment_ids));
+        }
+    }
+}
+
+/**
  * Create or update WooCommerce product from DMS cart data
  *
  * @param array  $cart_data Full DMS cart payload
@@ -1065,6 +1178,9 @@ function tigon_dms_create_woo_product($cart_id, $title, $price, $cart_data, $spe
     update_post_meta($product_id, '_download_limit', '-1');
     update_post_meta($product_id, '_download_expiry', '-1');
 
+    // Download images from S3 and attach as WooCommerce featured/gallery images
+    tigon_dms_download_and_attach_images($product_id, $images, $title, $cart_data);
+
     // Apply user-configured field mappings (overrides from admin Field Mapping page)
     tigon_dms_apply_custom_mappings($product_id, $cart_data);
 
@@ -1449,6 +1565,9 @@ function tigon_dms_update_woo_product($product_id, $title, $price, $cart_data, $
     update_post_meta($product_id, '_wc_fb_visibility', 'yes');
     update_post_meta($product_id, '_wc_pinterest_condition', $condition);
     update_post_meta($product_id, '_wc_pinterest_google_product_category', 'Vehicles & Parts > Vehicles > Motor Vehicles > Golf Carts');
+
+    // Download images from S3 and attach as WooCommerce featured/gallery images
+    tigon_dms_download_and_attach_images($product_id, $images, $title, $cart_data);
 
     // Apply user-configured field mappings (overrides from admin Field Mapping page)
     tigon_dms_apply_custom_mappings($product_id, $cart_data);
@@ -3505,324 +3624,6 @@ function tigon_dms_get_dms_product_data($product_id) {
 
 
 /**
- * Override WooCommerce product tabs to inject DMS data as separate tabs
- * 
- * For DMS products: Remove "Custom Data" tab and add "Description" and "Additional Information" tabs
- * 
- * @param array $tabs Existing product tabs
- * @return array Modified tabs array
- */
-function tigon_dms_override_product_tabs($tabs) {
-    global $product;
-    
-    // Only process on single product pages
-    if (!is_product() || !$product) {
-        return $tabs;
-    }
-    
-    // Check if this is a DMS product
-    $product_id = $product->get_id();
-    $cart_id = get_post_meta($product_id, '_dms_cart_id', true);
-    
-    if (empty($cart_id)) {
-        // Not a DMS product - return tabs unchanged
-        return $tabs;
-    }
-    
-    // Remove existing tabs that we're replacing
-    $tabs_to_remove = array('custom_data', 'specifications', 'specs', 'additional_information', 'dms_custom_data');
-    foreach ($tabs_to_remove as $tab_key) {
-        if (isset($tabs[$tab_key])) {
-            unset($tabs[$tab_key]);
-        }
-    }
-    
-    // Add "Description" tab with DMS specs
-    $tabs['dms_description'] = array(
-        'title'    => __('Description', 'tigon-dms-connect'),
-        'priority' => 10,
-        'callback' => function() use ($product_id) {
-            tigon_dms_render_description_tab($product_id);
-        },
-    );
-    
-    // Add "Additional Information" tab with detailed features
-    $tabs['dms_additional_info'] = array(
-        'title'    => __('Additional Information', 'tigon-dms-connect'),
-        'priority' => 20,
-        'callback' => function() use ($product_id) {
-            tigon_dms_render_additional_info_tab($product_id);
-        },
-    );
-    
-    return $tabs;
-}
-add_filter('woocommerce_product_tabs', 'tigon_dms_override_product_tabs', 98);
-
-/**
- * Render the Description tab content (main specs from first image)
- * 
- * @param int $product_id Product ID
- */
-function tigon_dms_render_description_tab($product_id) {
-    $dms_data = tigon_dms_get_dms_product_data($product_id);
-    $specs = $dms_data['specs'];
-    
-    // Main specs fields for Description tab (from /get-cart-by-id API)
-    $main_fields = array(
-        'Make', 'Model', 'Year', 'Street Legal', 'Color', 'Seat Color', 
-        'Tires', 'Rims', 'Drivetrain', 'Passengers',
-        'Battery Type', 'Battery Brand', 'Battery Year', 'Capacity', 'Battery Voltage', 'Battery Warranty',
-        'Engine', 'Horsepower', 'Stroke',
-        'Warranty'
-    );
-    
-    // Build main_specs in the correct order from main_fields
-    $main_specs = array();
-    if (!empty($specs)) {
-        // Process in order defined in main_fields array
-        foreach ($main_fields as $field_key) {
-            if (isset($specs[$field_key]) && !empty($specs[$field_key])) {
-                $main_specs[$field_key] = $specs[$field_key];
-            }
-        }
-    }
-    
-    if (empty($main_specs)) {
-        echo '<p>' . esc_html__('No description data available.', 'tigon-dms-connect') . '</p>';
-        return;
-    }
-    ?>
-    <div class="dms-description-tab">
-        <table class="dms-specs-table dms-additional-info-table">
-            <tbody>
-                <?php foreach ($main_specs as $label => $value): ?>
-                    <tr>
-                        <td class="dms-specs-feature"><strong><?php echo esc_html(strtoupper($label)); ?></strong></td>
-                        <td class="dms-specs-description">
-                            <?php
-                            // Red link styling for brand names (Make is always red, Model only if Denago)
-                            if ($label === 'Make' || ($label === 'Model' && strpos(strtolower($value), 'denago') !== false)) {
-                                echo '<span class="dms-brand-link">' . esc_html($value) . '</span>';
-                            } else {
-                                echo esc_html($value);
-                            }
-                            ?>
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
-    </div>
-    <?php
-    tigon_dms_output_tab_styles();
-}
-
-/**
- * Render the Additional Information tab content (detailed features from second image)
- * 
- * @param int $product_id Product ID
- */
-function tigon_dms_render_additional_info_tab($product_id) {
-    $dms_data = tigon_dms_get_dms_product_data($product_id);
-    $specs = $dms_data['specs'];
-    
-    // Additional info fields (from /get-cart-by-id API) - all fields not in Description tab
-    $additional_fields = array(
-        'Sound System', 'Lift Kit', 'Receiver Hitch', 'Extended Top',
-        'Vehicle Power', 'Vehicle Status', 
-        'Serial Number', 'VIN', 'Odometer', 'Hours',
-        'Location', 'Year of Vehicle',
-        'Drivetrain', 'Passengers' // These may appear in both tabs if needed
-    );
-    
-    // Main fields that go to Description tab (exclude from Additional Info)
-    $main_fields = array(
-        'Make', 'Model', 'Year', 'Street Legal', 'Color', 'Seat Color', 
-        'Tires', 'Rims', 'Drivetrain', 'Passengers',
-        'Battery Type', 'Battery Brand', 'Battery Year', 'Capacity', 'Battery Voltage', 'Battery Warranty',
-        'Engine', 'Horsepower', 'Stroke',
-        'Warranty'
-    );
-    
-    $additional_info = array();
-    if (!empty($specs)) {
-        foreach ($specs as $key => $value) {
-            // Include if it's in additional_fields AND not in main_fields (to avoid duplicates)
-            if (in_array($key, $additional_fields) && !in_array($key, $main_fields)) {
-                $additional_info[$key] = $value;
-            }
-        }
-    }
-    ?>
-    <div class="dms-additional-info-tab">
-        <table class="dms-specs-table dms-additional-info-table">
-            <tbody>
-                <?php foreach ($additional_info as $label => $value): ?>
-                    <?php if (!empty($value)): ?>
-                        <tr>
-                            <td class="dms-specs-feature"><strong><?php echo esc_html(strtoupper($label)); ?></strong></td>
-                            <td class="dms-specs-description">
-                                <?php
-                                // Red link styling for certain values (matching the image)
-                                $is_red_link = false;
-                                if (strpos(strtolower($value), 'seater') !== false ||
-                                    $value === 'Yes' || $value === 'No' ||
-                                    strpos(strtolower($value), 'day') !== false ||
-                                    strpos(strtolower($value), 'inch') !== false ||
-                                    strpos(strtolower($value), 'local') !== false ||
-                                    strpos(strtolower($value), 'terrain') !== false ||
-                                    strpos(strtolower($value), 'electric') !== false ||
-                                    strpos(strtolower($value), 'new') !== false ||
-                                    strpos(strtolower($value), 'golf cart') !== false ||
-                                    strpos(strtolower($value), 'vehicle') !== false ||
-                                    strpos(strtolower($value), 'year') !== false ||
-                                    is_numeric($value)) {
-                                    $is_red_link = true;
-                                }
-                                
-                                if ($is_red_link) {
-                                    echo '<span class="dms-brand-link">' . esc_html($value) . '</span>';
-                                } else {
-                                    echo esc_html($value);
-                                }
-                                ?>
-                            </td>
-                        </tr>
-                    <?php endif; ?>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
-    </div>
-    <?php
-    tigon_dms_output_tab_styles();
-}
-
-/**
- * Output shared CSS styles for DMS tabs (only once per page)
- */
-function tigon_dms_output_tab_styles() {
-    static $styles_output = false;
-    if ($styles_output) {
-        return;
-    }
-    $styles_output = true;
-    ?>
-    <style>
-        /* DMS Specs Table Styling */
-        .dms-specs-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 15px;
-            margin-bottom: 20px;
-            border: 1px solid #d32f2f;
-        }
-        
-        .dms-specs-table thead {
-            background-color: #4a4a4a;
-            color: #fff;
-        }
-        
-        .dms-specs-table th {
-            padding: 12px 15px;
-            text-align: left;
-            font-weight: 600;
-            font-size: 14px;
-            border: 1px solid #333;
-        }
-        
-        .dms-specs-table thead .dms-specs-feature,
-        .dms-specs-table thead .dms-specs-description {
-            background-color: #4a4a4a;
-        }
-        
-        .dms-specs-table .dms-specs-feature {
-            width: 20%;
-        }
-        
-        .dms-specs-table .dms-specs-description {
-            width: 80%;
-        }
-        
-        .dms-specs-table tbody tr {
-            border-bottom: 1px solid #d32f2f;
-        }
-        
-        .dms-specs-table tbody tr:last-child {
-            border-bottom: none;
-        }
-        
-        .dms-specs-table tbody td {
-            padding: 12px 15px;
-            vertical-align: top;
-            background-color: #fff;
-        }
-        
-        .dms-specs-table tbody td:first-child {
-            font-weight: 600;
-            color: #333;
-            border-right: 1px solid #d32f2f;
-        }
-        
-        .dms-specs-table tbody td:last-child {
-            color: #333;
-        }
-        
-        /* Additional Information Table (no header, uppercase labels) */
-        .dms-additional-info-table tbody td:first-child {
-            background-color: #f5f5f5;
-            text-transform: uppercase;
-            font-size: 13px;
-            letter-spacing: 0.5px;
-        }
-        
-        /* Brand Link Styling (red and underlined) */
-        .dms-brand-link {
-            color: #d32f2f;
-            text-decoration: underline;
-        }
-        
-        /* Images Grid */
-        .dms-tab-images-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-            gap: 10px;
-            margin-top: 10px;
-        }
-        
-        .dms-tab-image-item {
-            border: 1px solid #e0e0e0;
-            border-radius: 4px;
-            overflow: hidden;
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-        }
-        
-        .dms-tab-image-item:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-        }
-        
-        .dms-tab-image-item img {
-            width: 100%;
-            height: auto;
-            display: block;
-        }
-        
-        /* Window Sticker Link */
-        .dms-window-sticker-link {
-            color: #0c4774;
-            text-decoration: underline;
-            font-weight: 500;
-        }
-        
-        .dms-window-sticker-link:hover {
-            color: #AF1F31;
-        }
-    </style>
-    <?php
-}
-
-/**
  * Flush rewrite rules on activation + create database tables
  */
 function tigon_dms_activation() {
@@ -4712,6 +4513,33 @@ function tigon_dms_products_per_page($cols) {
     return 20;
 }
 add_filter('loop_shop_per_page', 'tigon_dms_products_per_page', 20);
+
+/**
+ * Change "Add to cart" button text to "See Details" for DMS products
+ */
+function tigon_dms_add_to_cart_text($text, $product) {
+    if (get_post_meta($product->get_id(), '_dms_cart_id', true)) {
+        return __('See Details', 'tigon-dms-connect');
+    }
+    return $text;
+}
+add_filter('woocommerce_product_add_to_cart_text', 'tigon_dms_add_to_cart_text', 10, 2);
+add_filter('woocommerce_product_single_add_to_cart_text', 'tigon_dms_add_to_cart_text', 10, 2);
+
+/**
+ * Make DMS product archive buttons link to the product page instead of adding to cart
+ */
+function tigon_dms_loop_add_to_cart_link($link, $product) {
+    if (get_post_meta($product->get_id(), '_dms_cart_id', true)) {
+        return sprintf(
+            '<a href="%s" class="button product_type_simple">%s</a>',
+            esc_url($product->get_permalink()),
+            esc_html__('See Details', 'tigon-dms-connect')
+        );
+    }
+    return $link;
+}
+add_filter('woocommerce_loop_add_to_cart_link', 'tigon_dms_loop_add_to_cart_link', 10, 2);
 
 /**
  * ============================================================================

@@ -77,20 +77,7 @@ class Cart extends \Tigon\DmsConnect\Abstracts\Abstract_Cart
         // throw new ErrorException($this->slug);
     }
 
-    /**
-     * Sideload and/or Initialize images
-     *
-     * @return void
-     */
-    protected function fetch_images()
-    {
-        $this->images = null;
-    }
-
-    protected function generate_image_name($i)
-    {
-        return 'woocommerce-placeholder';
-    }
+    // fetch_images() inherited from Abstract_Cart — downloads images from S3
 
     protected function field_overrides()
     {

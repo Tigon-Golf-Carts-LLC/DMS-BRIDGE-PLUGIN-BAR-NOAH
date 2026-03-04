@@ -118,7 +118,7 @@ class Core
     {
         $js_url = self::asset_url();
         wp_register_script('@tigon-dms/globals', $js_url . 'globals.js');
-        wp_register_script_module('@tigon-dms/diagnostics', $js_url . 'diagnostic.js', array('jquery'));
+        wp_register_script('@tigon-dms/diagnostics', $js_url . 'diagnostic.js', array('jquery', '@tigon-dms/globals'), false, true);
 
         wp_localize_script('@tigon-dms/globals', 'globals', [
             'ajaxurl' => admin_url('admin-ajax.php'),
@@ -127,7 +127,7 @@ class Core
 
         wp_enqueue_script('@tigon-dms/globals');
         wp_enqueue_script('jquery');
-        wp_enqueue_script_module('@tigon-dms/diagnostics');
+        wp_enqueue_script('@tigon-dms/diagnostics');
     }
 
     /**
@@ -152,7 +152,7 @@ class Core
     {
         $js_url = self::asset_url();
         wp_register_script('@tigon-dms/globals', $js_url . 'globals.js');
-        wp_register_script_module('@tigon-dms/settings', $js_url . 'settings.js', array('jquery'));
+        wp_register_script('@tigon-dms/settings', $js_url . 'settings.js', array('jquery', '@tigon-dms/globals'), false, true);
 
         wp_localize_script('@tigon-dms/globals', 'globals', [
             'ajaxurl' => admin_url('admin-ajax.php'),
@@ -161,7 +161,7 @@ class Core
 
         wp_enqueue_script('@tigon-dms/globals');
         wp_enqueue_script('jquery');
-        wp_enqueue_script_module('@tigon-dms/settings');
+        wp_enqueue_script('@tigon-dms/settings');
     }
 
     /**
