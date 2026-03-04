@@ -2790,7 +2790,7 @@ class Admin_Page
         <div class="body" style="display:flex; flex-direction:column;">
             <div class="tabbed-panel">
                 <div class="tigon-dms-nav">
-                    <button class="tigon-dms-tab" id="general-tab">General</button>
+                    <button class="tigon-dms-tab active" id="general-tab">General</button>
                     <button class="tigon-dms-tab" id="urls-tab">DMS API &amp; S3</button>
                     <button class="tigon-dms-tab" id="endpoints-tab">REST Endpoints</button>
                     <button class="tigon-dms-tab" id="schema-tab">Schema</button>

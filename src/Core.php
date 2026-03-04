@@ -117,17 +117,17 @@ class Core
     public static function diagnostic_script_enqueue()
     {
         $js_url = self::asset_url();
-        wp_register_script('@tigon-dms/globals', $js_url . 'globals.js');
-        wp_register_script('@tigon-dms/diagnostics', $js_url . 'diagnostic.js', array('jquery', '@tigon-dms/globals'), false, true);
+        $ver    = defined('TIGON_DMS_VERSION') ? TIGON_DMS_VERSION : '1.0.' . filemtime(__DIR__ . '/../../assets/js/tigon-dms/diagnostic.js');
 
-        wp_localize_script('@tigon-dms/globals', 'globals', [
+        wp_register_script('tigon-dms-diagnostics', $js_url . 'diagnostic.js', array('jquery'), $ver, true);
+
+        wp_localize_script('tigon-dms-diagnostics', 'globals', [
             'ajaxurl' => admin_url('admin-ajax.php'),
             'siteurl' => get_site_url()
         ]);
 
-        wp_enqueue_script('@tigon-dms/globals');
         wp_enqueue_script('jquery');
-        wp_enqueue_script('@tigon-dms/diagnostics');
+        wp_enqueue_script('tigon-dms-diagnostics');
     }
 
     /**
@@ -151,17 +151,17 @@ class Core
     public static function settings_script_enqueue()
     {
         $js_url = self::asset_url();
-        wp_register_script('@tigon-dms/globals', $js_url . 'globals.js');
-        wp_register_script('@tigon-dms/settings', $js_url . 'settings.js', array('jquery', '@tigon-dms/globals'), false, true);
+        $ver    = defined('TIGON_DMS_VERSION') ? TIGON_DMS_VERSION : '1.0.' . filemtime(__DIR__ . '/../../assets/js/tigon-dms/settings.js');
 
-        wp_localize_script('@tigon-dms/globals', 'globals', [
+        wp_register_script('tigon-dms-settings', $js_url . 'settings.js', array('jquery'), $ver, true);
+
+        wp_localize_script('tigon-dms-settings', 'globals', [
             'ajaxurl' => admin_url('admin-ajax.php'),
             'siteurl' => get_site_url()
         ]);
 
-        wp_enqueue_script('@tigon-dms/globals');
         wp_enqueue_script('jquery');
-        wp_enqueue_script('@tigon-dms/settings');
+        wp_enqueue_script('tigon-dms-settings');
     }
 
     /**
@@ -1510,15 +1510,17 @@ class Core
      */
     public static function field_mapping_script_enqueue()
     {
+        // Field mapping page only needs jQuery + the globals localized data.
+        // Register a tiny stub so wp_localize_script has a handle to attach to.
         $js_url = self::asset_url();
-        wp_register_script('@tigon-dms/globals', $js_url . 'globals.js');
+        wp_register_script('tigon-dms-globals', $js_url . 'globals.js', array(), '1.0', false);
 
-        wp_localize_script('@tigon-dms/globals', 'globals', [
+        wp_localize_script('tigon-dms-globals', 'globals', [
             'ajaxurl' => admin_url('admin-ajax.php'),
             'siteurl' => get_site_url(),
         ]);
 
-        wp_enqueue_script('@tigon-dms/globals');
+        wp_enqueue_script('tigon-dms-globals');
         wp_enqueue_script('jquery');
     }
 
