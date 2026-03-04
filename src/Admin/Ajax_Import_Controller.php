@@ -17,6 +17,11 @@ abstract class Ajax_Import_Controller extends \Tigon\DmsConnect\Abstracts\Abstra
      */
     public static function query_dms()
     {
+        check_ajax_referer('tigon_dms_run_import_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
         ignore_user_abort(true);
         if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest') {
             header("Content-Type: application/json; charset=utf-8", true);
@@ -40,9 +45,12 @@ abstract class Ajax_Import_Controller extends \Tigon\DmsConnect\Abstracts\Abstra
      */
     public static function ajax_import_convert()
     {
+        check_ajax_referer('tigon_dms_run_import_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
         ignore_user_abort(true);
-
-
         if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest') {
             header("Content-Type: application/json; charset=utf-8", true);
 
@@ -97,6 +105,11 @@ abstract class Ajax_Import_Controller extends \Tigon\DmsConnect\Abstracts\Abstra
      */
     public static function ajax_new_import_convert()
     {
+        check_ajax_referer('tigon_dms_run_import_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
         ignore_user_abort(true);
         if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest') {
             header("Content-Type: application/json; charset=utf-8", true);
@@ -133,8 +146,12 @@ abstract class Ajax_Import_Controller extends \Tigon\DmsConnect\Abstracts\Abstra
     // Ajax wrapper for above
     public static function ajax_import_create()
     {
-        ignore_user_abort(true);
+        check_ajax_referer('tigon_dms_run_import_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
 
+        ignore_user_abort(true);
         if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest') {
             header("Content-Type: application/json; charset=utf-8", true);
 
@@ -181,8 +198,12 @@ abstract class Ajax_Import_Controller extends \Tigon\DmsConnect\Abstracts\Abstra
     // Ajax wrapper for above
     public static function ajax_import_update()
     {
-        ignore_user_abort(true);
+        check_ajax_referer('tigon_dms_run_import_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
 
+        ignore_user_abort(true);
         if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest') {
             header("Content-Type: application/json; charset=utf-8", true);
 
@@ -218,8 +239,12 @@ abstract class Ajax_Import_Controller extends \Tigon\DmsConnect\Abstracts\Abstra
     // Ajax wrapper for above
     public static function ajax_import_delete()
     {
-        ignore_user_abort(true);
+        check_ajax_referer('tigon_dms_run_import_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
 
+        ignore_user_abort(true);
         if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest') {
             header("Content-Type: application/json; charset=utf-8", true);
 
@@ -238,8 +263,12 @@ abstract class Ajax_Import_Controller extends \Tigon\DmsConnect\Abstracts\Abstra
 
     public static function ajax_import_new()
     {
-        ignore_user_abort(true);
+        check_ajax_referer('tigon_dms_run_import_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
 
+        ignore_user_abort(true);
         if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest') {
             header("Content-Type: application/json; charset=utf-8", true);
 

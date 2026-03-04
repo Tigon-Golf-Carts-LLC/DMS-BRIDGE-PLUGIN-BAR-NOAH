@@ -10,6 +10,11 @@ class Ajax_Settings_Controller
 
     public static function save_settings($input)
     {
+        check_ajax_referer('tigon_dms_run_import_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
         if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest') {
             header("Content-Type: application/json; charset=utf-8", true);
             global $wpdb;
@@ -116,6 +121,11 @@ class Ajax_Settings_Controller
 
     public static function get_dms_props()
     {
+        check_ajax_referer('tigon_dms_run_import_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
         $boolean_svg = preg_replace(
             '/#000000/',
             '#333333',
@@ -265,6 +275,11 @@ class Ajax_Settings_Controller
      */
     public static function get_full_schema()
     {
+        check_ajax_referer('tigon_dms_run_import_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
         $response = wp_remote_post('https://api.tigondms.com/wp-website/get-carts', [
             'headers' => ['Content-Type' => 'application/json'],
             'body'    => wp_json_encode(['pageNumber' => 0, 'pageSize' => 20]),

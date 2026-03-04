@@ -123,7 +123,8 @@ class Core
 
         wp_localize_script('tigon-dms-diagnostics', 'globals', [
             'ajaxurl' => admin_url('admin-ajax.php'),
-            'siteurl' => get_site_url()
+            'siteurl' => get_site_url(),
+            'nonce'   => wp_create_nonce('tigon_dms_run_import_nonce'),
         ]);
 
         wp_enqueue_script('jquery');
@@ -157,7 +158,8 @@ class Core
 
         wp_localize_script('tigon-dms-settings', 'globals', [
             'ajaxurl' => admin_url('admin-ajax.php'),
-            'siteurl' => get_site_url()
+            'siteurl' => get_site_url(),
+            'nonce'   => wp_create_nonce('tigon_dms_run_import_nonce'),
         ]);
 
         wp_enqueue_script('jquery');
@@ -1518,6 +1520,7 @@ class Core
         wp_localize_script('tigon-dms-globals', 'globals', [
             'ajaxurl' => admin_url('admin-ajax.php'),
             'siteurl' => get_site_url(),
+            'nonce'   => wp_create_nonce('tigon_dms_run_import_nonce'),
         ]);
 
         wp_enqueue_script('tigon-dms-globals');
