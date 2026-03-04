@@ -130,30 +130,26 @@ class REST_Routes
             array_push($images, $monroney);
 
             $result = \Tigon\DmsConnect\Admin\REST_Import_Controller::import_delete(new Database_Object(id: $request['pid']));
-            if (isset($result['errors'])) {
-                $code = 500;
-                $message = $result;
-            } else {
-                // Delete associated images on success
-                foreach ($images as $i) {
-                    wp_delete_post($i, false);
-                }
-                $code = 200;
-                $message = [
-                    'message' => 'Post '.$request['pid'].' deleted successfully',
-                    'pid' => $request['pid'],
-                    'isOnWebsite'=>false
-                ];
-            }
-
             if (is_wp_error($result)) {
                 return new \WP_Error(500, ['pid' => 0, 'error' => 'Deletion failure']);
             }
 
-            $result = json_decode($result, true);
+            if (isset($result['errors'])) {
+                REST_Import_Controller::process_post_import();
+                return new \WP_REST_Response($result, 500);
+            }
+
+            // Delete associated images on success
+            foreach ($images as $i) {
+                wp_delete_post($i, false);
+            }
 
             REST_Import_Controller::process_post_import();
-            return new \WP_REST_Response($message, $code);
+            return new \WP_REST_Response([
+                'message'     => 'Post ' . $request['pid'] . ' deleted successfully',
+                'pid'         => $request['pid'],
+                'isOnWebsite' => false,
+            ], 200);
         } else
             return new \WP_Error(400, 'Bad Request: Body must be of the form {"pid":######}', $request);
     }

@@ -2804,19 +2804,19 @@ class Admin_Page
                     <div class="settings form">
                         <div>
                             <span>GitHub Access Token:</span>
-                            <input type="text" style="float:right" id="txt-github-token" placeholder="' . $github_token . '" />
+                            <input type="text" style="float:right" id="txt-github-token" placeholder="' . esc_attr($github_token) . '" />
                         </div>
                         <div>
                             <span>DMS API Address:</span>
-                            <input type="text" style="float:right" id="txt-url" placeholder="' . $dms_url . '" />
+                            <input type="text" style="float:right" id="txt-url" placeholder="' . esc_attr($dms_url) . '" />
                         </div>
                         <div>
                             <span>DMS Amplify User ID:</span>
-                            <input type="text" style="float:right" id="txt-api-key" placeholder="' . $api_key . '"></textarea>
+                            <input type="text" style="float:right" id="txt-api-key" placeholder="' . esc_attr($api_key) . '" />
                         </div>
                         <div>
                             <span>File source:</span>
-                            <input type="text" style="float:right" id="txt-file-source" placeholder="' . $file_source . '"></textarea>
+                            <input type="text" style="float:right" id="txt-file-source" placeholder="' . esc_attr($file_source) . '" />
                         </div>
                     </div>
                     <a class="tigon_dms_action tigon_dms_save" data-nonce="' . $nonce . '"><button>Save Settings</button></a>
@@ -2980,7 +2980,7 @@ class Admin_Page
                             
                             <!--<div>
                                 <span>Field Overrides:</span>
-                                <input type="text" style="float:right" id="Field Overrides" placeholder="'.$dms_url.'" />
+                                <input type="text" style="float:right" id="Field Overrides" placeholder="'.esc_attr($dms_url).'" />
                             </div>-->
 
                             <div>
@@ -3096,11 +3096,11 @@ class Admin_Page
                                 <span class="nested">
                                     <div>
                                         <span>Short Description:</span>
-                                        <input type="text" style="float:right" id="Short Description" placeholder="'.$dms_url.'" />
+                                        <input type="text" style="float:right" id="Short Description" placeholder="'.esc_attr($dms_url).'" />
                                     </div>
                                     <div>
                                         <span>Short Description:</span>
-                                        <input type="text" style="float:right" id="Short Description" placeholder="'.$dms_url.'" />
+                                        <input type="text" style="float:right" id="Short Description" placeholder="'.esc_attr($dms_url).'" />
                                     </div>
                                 </span>
                             </div>
