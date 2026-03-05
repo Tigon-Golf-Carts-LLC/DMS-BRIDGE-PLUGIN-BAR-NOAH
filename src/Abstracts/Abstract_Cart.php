@@ -682,10 +682,20 @@ abstract class Abstract_Cart
      */
     protected function fetch_images()
     {
+        // WooCommerce placeholder image attachment ID (used when DMS has no images)
+        $placeholder_image_id = 70055;
+
         /*
          * Images
          */
         $this->images = array();
+
+        // If no images from DMS, use the WooCommerce placeholder
+        if (empty($this->cart['imageUrls']) || !is_array($this->cart['imageUrls'])) {
+            $this->images = array($placeholder_image_id);
+            return;
+        }
+
         $i = 0;
         foreach ($this->cart['imageUrls'] as $remote_image_name) {
             $image_name = $this->generate_image_name($i);

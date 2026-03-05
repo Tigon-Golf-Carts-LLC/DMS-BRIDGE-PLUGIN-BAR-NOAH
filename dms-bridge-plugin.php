@@ -424,8 +424,23 @@ function tigon_dms_get_used_inventory_term_taxonomy_id() {
  * @param array  $cart_data   Full DMS cart payload (for template variables)
  */
 function tigon_dms_download_and_attach_images($product_id, $image_names, $title, $cart_data = array()) {
+    // WooCommerce placeholder image attachment ID (used when DMS has no images)
+    $placeholder_image_id = 70055;
+
     if (empty($image_names) || !is_array($image_names)) {
+        // No images from DMS — use WooCommerce placeholder image
+        $current_thumb = get_post_thumbnail_id($product_id);
+        if (!$current_thumb || (int) $current_thumb === $placeholder_image_id) {
+            set_post_thumbnail($product_id, $placeholder_image_id);
+            update_post_meta($product_id, '_product_image_gallery', '');
+        }
         return;
+    }
+
+    // Real images arrived — remove placeholder if it was the featured image
+    $current_thumb = get_post_thumbnail_id($product_id);
+    if ((int) $current_thumb === $placeholder_image_id) {
+        delete_post_thumbnail($product_id);
     }
 
     $file_source = tigon_dms_get_file_source();

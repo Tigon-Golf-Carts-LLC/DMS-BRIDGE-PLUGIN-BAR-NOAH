@@ -34,25 +34,35 @@ class Product_Media
      * @param int  $product_id The WooCommerce product (post) ID.
      * @param bool $force_delete Whether to bypass trash (true = permanent delete).
      */
+    /**
+     * WooCommerce placeholder image attachment ID.
+     * This shared image must never be deleted by product media cleanup.
+     */
+    const PLACEHOLDER_IMAGE_ID = 70055;
+
     public static function delete_product_media(int $product_id, bool $force_delete = true): void
     {
         if ($product_id <= 0) {
             return;
         }
 
-        // 1. Delete featured image
+        // 1. Delete featured image (skip if it's the shared placeholder)
         $featured_id = get_post_thumbnail_id($product_id);
         if ($featured_id) {
-            wp_delete_attachment((int) $featured_id, $force_delete);
+            if ((int) $featured_id !== self::PLACEHOLDER_IMAGE_ID) {
+                wp_delete_attachment((int) $featured_id, $force_delete);
+            }
             delete_post_thumbnail($product_id);
         }
 
-        // 2. Delete gallery images
+        // 2. Delete gallery images (skip placeholder)
         $gallery_ids_str = get_post_meta($product_id, '_product_image_gallery', true);
         if (!empty($gallery_ids_str)) {
             $gallery_ids = array_filter(array_map('intval', explode(',', $gallery_ids_str)));
             foreach ($gallery_ids as $img_id) {
-                wp_delete_attachment($img_id, $force_delete);
+                if ($img_id !== self::PLACEHOLDER_IMAGE_ID) {
+                    wp_delete_attachment($img_id, $force_delete);
+                }
             }
             delete_post_meta($product_id, '_product_image_gallery');
         }

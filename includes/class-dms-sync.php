@@ -339,6 +339,29 @@ class DMS_Sync
 
     private static function sync_product_images($product_id, $cart_data)
     {
+        // WooCommerce placeholder image attachment ID (used when DMS has no images)
+        $placeholder_image_id = 70055;
+
+        // Check if the DMS payload has real images (not resolved/fallback URLs)
+        $raw_image_urls = $cart_data['imageUrls'] ?? array();
+        $has_real_images = !empty($raw_image_urls) && is_array($raw_image_urls);
+
+        if (!$has_real_images) {
+            // No real images from DMS — use WooCommerce placeholder
+            $current_thumb = get_post_thumbnail_id($product_id);
+            if (!$current_thumb || (int) $current_thumb === $placeholder_image_id) {
+                set_post_thumbnail($product_id, $placeholder_image_id);
+                update_post_meta($product_id, '_product_image_gallery', '');
+            }
+            return;
+        }
+
+        // Real images arrived — remove placeholder if it was the featured image
+        $current_thumb = get_post_thumbnail_id($product_id);
+        if ((int) $current_thumb === $placeholder_image_id) {
+            delete_post_thumbnail($product_id);
+        }
+
         // Use centralized image resolver (handles coming-soon placeholder)
         $resolved_urls = DMS_API::resolve_cart_image_urls($cart_data);
 
