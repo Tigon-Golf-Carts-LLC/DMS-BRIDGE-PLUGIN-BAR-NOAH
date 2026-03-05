@@ -424,8 +424,23 @@ function tigon_dms_get_used_inventory_term_taxonomy_id() {
  * @param array  $cart_data   Full DMS cart payload (for template variables)
  */
 function tigon_dms_download_and_attach_images($product_id, $image_names, $title, $cart_data = array()) {
+    // WooCommerce placeholder image attachment ID (used when DMS has no images)
+    $placeholder_image_id = 70055;
+
     if (empty($image_names) || !is_array($image_names)) {
+        // No images from DMS — use WooCommerce placeholder image
+        $current_thumb = get_post_thumbnail_id($product_id);
+        if (!$current_thumb || (int) $current_thumb === $placeholder_image_id) {
+            set_post_thumbnail($product_id, $placeholder_image_id);
+            update_post_meta($product_id, '_product_image_gallery', '');
+        }
         return;
+    }
+
+    // Real images arrived — remove placeholder if it was the featured image
+    $current_thumb = get_post_thumbnail_id($product_id);
+    if ((int) $current_thumb === $placeholder_image_id) {
+        delete_post_thumbnail($product_id);
     }
 
     $file_source = tigon_dms_get_file_source();
@@ -620,21 +635,30 @@ function tigon_dms_create_woo_product($cart_id, $title, $price, $cart_data, $spe
         : '{make}-{model}-{cartColor}-seat-{seatColor}-{city}-{state}';
     $slug = tigon_dms_evaluate_template($slug_tpl, $vars, true);
 
+    // Evaluate product readiness: draft if required mappings are missing
+    $readiness = \Tigon\DmsConnect\Includes\Product_Readiness::evaluate($cart_data);
+    $post_status = $readiness['status'];
+
     $product_id = wp_insert_post(array(
         'post_title'     => sanitize_text_field($normalized_title),
         'post_name'      => $slug,
-        'post_status'    => 'publish',
+        'post_status'    => $post_status,
         'post_type'      => 'product',
         'post_content'   => '', // Content comes from DMS payload via template
         'comment_status' => 'open',
         'ping_status'    => 'closed',
         'post_author'    => 3,
     ));
-    
+
     if (is_wp_error($product_id) || !$product_id) {
         return false;
     }
-    
+
+    // Store readiness state so we can re-evaluate on subsequent syncs
+    if ($post_status === 'draft') {
+        update_post_meta($product_id, '_dms_readiness_missing', wp_json_encode($readiness['missing']));
+    }
+
     // Set product type to simple
     wp_set_object_terms($product_id, 'simple', 'product_type');
     
@@ -1026,14 +1050,26 @@ function tigon_dms_create_woo_product($cart_id, $title, $price, $cart_data, $spe
 function tigon_dms_update_woo_product($product_id, $title, $price, $cart_data, $specs = array(), $images = array(), $warranty = array()) {
     // Normalize title for consistency (e.g., "In" → "-")
     $normalized_title = tigon_dms_normalize_title($title);
-    
-    // Update post title, slug, and ensure published status
+
+    // Re-evaluate product readiness on every update.
+    // A previously-draft product will be promoted to publish once all mappings are present.
+    $readiness = \Tigon\DmsConnect\Includes\Product_Readiness::evaluate($cart_data);
+    $post_status = $readiness['status'];
+
+    // Update post title, slug, and status based on readiness
     wp_update_post(array(
         'ID'          => $product_id,
         'post_title'  => sanitize_text_field($normalized_title),
         'post_name'   => sanitize_title($normalized_title),
-        'post_status' => 'publish',
+        'post_status' => $post_status,
     ));
+
+    // Track/clear readiness meta
+    if ($post_status === 'draft') {
+        update_post_meta($product_id, '_dms_readiness_missing', wp_json_encode($readiness['missing']));
+    } else {
+        delete_post_meta($product_id, '_dms_readiness_missing');
+    }
     
     // Extract data from cart
     $make = $cart_data['cartType']['make'] ?? '';

@@ -226,15 +226,49 @@ public static function uninstall() {}
 
 The plugin creates custom database tables on activation but never cleans them up. Consider implementing `uninstall()` to drop `tigon_dms_config` and `tigon_dms_cart_lists` tables.
 
-### 18. Missing `.gitignore`
+### 18. ~~Missing `.gitignore`~~ — RESOLVED
 
-No `.gitignore` file exists. At minimum, it should exclude:
-```
-vendor/
-node_modules/
-*.log
-.env
-```
+~~No `.gitignore` file exists.~~
+
+**Fixed:** A comprehensive `.gitignore` has been added that excludes `node_modules/`, `.env` / `.env.*`, `*.log`, `error_log`, `debug.log`, OS files (`.DS_Store`, `Thumbs.db`), IDE/editor directories (`.idea/`, `.vscode/`), swap files, and build artifacts (`*.map`). `vendor/` is intentionally kept tracked as it contains only the Composer autoloader required for PSR-4 class loading in production.
+
+### 19. Placeholder Image for Products with No DMS Images — IMPLEMENTED
+
+Products arriving from the DMS with empty or null `imageUrls` previously had no featured image on the WooCommerce site. Now, when `imageUrls` is empty/null, the WooCommerce placeholder image (attachment ID **70055**) is automatically assigned as the featured image. When real images later arrive via a DMS payload update, the placeholder is automatically replaced with the actual product images.
+
+**Files changed:**
+- `dms-bridge-plugin.php` — `tigon_dms_download_and_attach_images()`: sets placeholder when no images, clears it when real images arrive
+- `includes/class-dms-sync.php` — `DMS_Sync::sync_product_images()`: sets placeholder during scheduled cron sync and selective sync
+- `src/Abstracts/Abstract_Cart.php` — `Abstract_Cart::fetch_images()`: sets placeholder for REST push and import controller paths
+- `src/Includes/Product_Media.php` — `Product_Media::delete_product_media()`: protects shared placeholder (ID 70055) from being permanently deleted during media cleanup
+
+**All sync paths covered:** REST API push, Sync Mapped Inventory (AJAX), Scheduled Cron Sync, Selective Sync, and Lazy WooCommerce product creation.
+
+### 20. Product Readiness Validation (Draft Until Fully Mapped) — IMPLEMENTED
+
+Products arriving from the DMS that cannot map to all required WooCommerce fields are now automatically set to **draft** status instead of being published with incomplete data. Once a subsequent sync provides the missing data, the product is automatically promoted to **publish**.
+
+**Required mappings (all must be present for publish):**
+- **SKU** — `vinNo`, `serialNo`, or enough data (make + model + color) for a generated fallback
+- **Price** — `retailPrice` must be a positive number
+- **Categories** — `cartType.make` must be non-empty
+- **Location** — `cartLocation.locationId` must resolve to a known store
+- **Manufacturers** — derived from `cartType.make` (must be non-empty)
+- **Vehicle Class** — `cartType.model` must be non-empty
+- **Inventory Status** — `isUsed` flag must be explicitly present
+- **Brands** — derived from `cartType.make` (must be non-empty)
+
+**Key behavior:** Products with all mappings but **no images** are still **published** (images are not a required mapping). Missing fields are tracked in `_dms_readiness_missing` postmeta for debugging.
+
+**Files changed:**
+- `src/Includes/Product_Readiness.php` — **NEW** central validation class with `evaluate()` method
+- `src/Abstracts/Abstract_Cart.php` — calls `Product_Readiness::evaluate()` in `convert()` to set `$this->published = 'draft'` when mappings are incomplete
+- `src/Admin/Database_Object.php` — added `_dms_readiness_missing` postmeta field and `dms_readiness_missing` constructor parameter
+- `dms-bridge-plugin.php` — `tigon_dms_create_woo_product()` and `tigon_dms_update_woo_product()` both evaluate readiness; updates re-evaluate so draft products get promoted to publish
+- `includes/class-dms-sync.php` — `detect_sold_products()` now includes draft products (not just published) so draft DMS products aren't mistakenly deleted as "sold"
+- `src/Core.php` — `ajax_publish_synced_batch()` skips products with `_dms_readiness_missing` meta to avoid force-publishing incomplete products
+
+**All sync paths covered:** REST API push, Sync Mapped Inventory (AJAX), Scheduled Cron Sync, Selective Sync, Lazy WooCommerce product creation, and Publish All batch action.
 
 ---
 
@@ -256,7 +290,7 @@ node_modules/
 | Code duplication | 4 areas | MEDIUM |
 | Monolithic entry file | 2,897 lines | MEDIUM |
 | Disabled caching | 1 | MEDIUM |
-| Missing .gitignore | 1 | LOW |
+| ~~Missing .gitignore~~ | ~~1~~ | ~~LOW~~ RESOLVED |
 | Constructor typo | 1 | LOW |
 
 ### Recommended Priority Order
@@ -268,6 +302,6 @@ node_modules/
 5. **Add output escaping** (`esc_html()`, `esc_attr()`, `esc_url()`) in admin templates
 6. **Fix the undefined `$converted` variable** in `delete_used_cart()`
 7. **Remove the `tigon-dms-connect/` duplicate** directory
-8. **Add `.gitignore`** and remove committed `node_modules/`
+8. ~~**Add `.gitignore`**~~ (DONE) and remove committed `node_modules/`
 9. **Refactor `dms-bridge-plugin.php`** — move logic into `src/` classes
 10. **Replace hardcoded IDs** with configurable settings

@@ -1427,6 +1427,13 @@ class Core
                 try {
                     // ── Publish via direct DB update (skip heavy hooks) ──
                     if ($status !== 'publish') {
+                        // Check if the product has missing required mappings
+                        $readiness_meta = get_post_meta($pid, '_dms_readiness_missing', true);
+                        if (!empty($readiness_meta)) {
+                            $errors[] = "#{$pid}: skipped (missing mappings)";
+                            continue;
+                        }
+
                         $updated = $wpdb->update(
                             $wpdb->posts,
                             ['post_status' => 'publish'],
