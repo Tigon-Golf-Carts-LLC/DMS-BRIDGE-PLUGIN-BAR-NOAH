@@ -232,6 +232,18 @@ The plugin creates custom database tables on activation but never cleans them up
 
 **Fixed:** A comprehensive `.gitignore` has been added that excludes `node_modules/`, `.env` / `.env.*`, `*.log`, `error_log`, `debug.log`, OS files (`.DS_Store`, `Thumbs.db`), IDE/editor directories (`.idea/`, `.vscode/`), swap files, and build artifacts (`*.map`). `vendor/` is intentionally kept tracked as it contains only the Composer autoloader required for PSR-4 class loading in production.
 
+### 19. Placeholder Image for Products with No DMS Images — IMPLEMENTED
+
+Products arriving from the DMS with empty or null `imageUrls` previously had no featured image on the WooCommerce site. Now, when `imageUrls` is empty/null, the WooCommerce placeholder image (attachment ID **70055**) is automatically assigned as the featured image. When real images later arrive via a DMS payload update, the placeholder is automatically replaced with the actual product images.
+
+**Files changed:**
+- `dms-bridge-plugin.php` — `tigon_dms_download_and_attach_images()`: sets placeholder when no images, clears it when real images arrive
+- `includes/class-dms-sync.php` — `DMS_Sync::sync_product_images()`: sets placeholder during scheduled cron sync and selective sync
+- `src/Abstracts/Abstract_Cart.php` — `Abstract_Cart::fetch_images()`: sets placeholder for REST push and import controller paths
+- `src/Includes/Product_Media.php` — `Product_Media::delete_product_media()`: protects shared placeholder (ID 70055) from being permanently deleted during media cleanup
+
+**All sync paths covered:** REST API push, Sync Mapped Inventory (AJAX), Scheduled Cron Sync, Selective Sync, and Lazy WooCommerce product creation.
+
 ---
 
 ## Summary
