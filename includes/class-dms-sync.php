@@ -239,8 +239,10 @@ class DMS_Sync
     /**
      * Detect WooCommerce products whose DMS cart IDs are no longer active.
      *
-     * Queries all published products with a _dms_cart_id meta and returns
-     * the product IDs whose cart ID is NOT in the active set.
+     * Queries all published and draft products with a _dms_cart_id meta and
+     * returns the product IDs whose cart ID is NOT in the active set.
+     * Draft products are included because they may be waiting for complete
+     * mappings but are still active DMS inventory.
      *
      * @param array $active_cart_ids Array of DMS cart IDs still in inventory
      * @return array Product IDs that are no longer in DMS
@@ -249,12 +251,12 @@ class DMS_Sync
     {
         global $wpdb;
 
-        // Get all published products that have a DMS cart ID
+        // Get all published and draft products that have a DMS cart ID
         $results = $wpdb->get_results(
             "SELECT p.ID, pm.meta_value AS cart_id
              FROM {$wpdb->posts} p
              INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id AND pm.meta_key = '_dms_cart_id'
-             WHERE p.post_type = 'product' AND p.post_status = 'publish'",
+             WHERE p.post_type = 'product' AND p.post_status IN ('publish', 'draft')",
             ARRAY_A
         );
 

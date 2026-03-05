@@ -4,6 +4,7 @@ namespace Tigon\DmsConnect\Abstracts;
 
 use Tigon\DmsConnect\Admin\Attributes;
 use Tigon\DmsConnect\Admin\Database_Object;
+use Tigon\DmsConnect\Includes\Product_Readiness;
 
 use WP_Error;
 
@@ -373,6 +374,13 @@ abstract class Abstract_Cart
 
         $this->field_overrides();
 
+        // Evaluate product readiness: set to draft if required mappings are missing.
+        // Products with all mappings but no images are still published.
+        $readiness = Product_Readiness::evaluate($this->cart);
+        if ($readiness['status'] === 'draft') {
+            $this->published = 'draft';
+        }
+
         // Apply user-configured field mappings from the admin UI.
         // These can override any property set above.
         $this->apply_custom_field_mappings();
@@ -537,6 +545,9 @@ abstract class Abstract_Cart
                 null,
 
             dms_cart_id: $this->cart['_id'] ?? null,
+            dms_readiness_missing: !empty($readiness['missing'])
+                ? wp_json_encode($readiness['missing'])
+                : null,
             monroney_sticker: $fields & MONRONEY_STICKER ?
                 $this->monroney_sticker :
                 null,

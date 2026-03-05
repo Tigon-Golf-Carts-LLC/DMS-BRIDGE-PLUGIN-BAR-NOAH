@@ -244,6 +244,32 @@ Products arriving from the DMS with empty or null `imageUrls` previously had no 
 
 **All sync paths covered:** REST API push, Sync Mapped Inventory (AJAX), Scheduled Cron Sync, Selective Sync, and Lazy WooCommerce product creation.
 
+### 20. Product Readiness Validation (Draft Until Fully Mapped) — IMPLEMENTED
+
+Products arriving from the DMS that cannot map to all required WooCommerce fields are now automatically set to **draft** status instead of being published with incomplete data. Once a subsequent sync provides the missing data, the product is automatically promoted to **publish**.
+
+**Required mappings (all must be present for publish):**
+- **SKU** — `vinNo`, `serialNo`, or enough data (make + model + color) for a generated fallback
+- **Price** — `retailPrice` must be a positive number
+- **Categories** — `cartType.make` must be non-empty
+- **Location** — `cartLocation.locationId` must resolve to a known store
+- **Manufacturers** — derived from `cartType.make` (must be non-empty)
+- **Vehicle Class** — `cartType.model` must be non-empty
+- **Inventory Status** — `isUsed` flag must be explicitly present
+- **Brands** — derived from `cartType.make` (must be non-empty)
+
+**Key behavior:** Products with all mappings but **no images** are still **published** (images are not a required mapping). Missing fields are tracked in `_dms_readiness_missing` postmeta for debugging.
+
+**Files changed:**
+- `src/Includes/Product_Readiness.php` — **NEW** central validation class with `evaluate()` method
+- `src/Abstracts/Abstract_Cart.php` — calls `Product_Readiness::evaluate()` in `convert()` to set `$this->published = 'draft'` when mappings are incomplete
+- `src/Admin/Database_Object.php` — added `_dms_readiness_missing` postmeta field and `dms_readiness_missing` constructor parameter
+- `dms-bridge-plugin.php` — `tigon_dms_create_woo_product()` and `tigon_dms_update_woo_product()` both evaluate readiness; updates re-evaluate so draft products get promoted to publish
+- `includes/class-dms-sync.php` — `detect_sold_products()` now includes draft products (not just published) so draft DMS products aren't mistakenly deleted as "sold"
+- `src/Core.php` — `ajax_publish_synced_batch()` skips products with `_dms_readiness_missing` meta to avoid force-publishing incomplete products
+
+**All sync paths covered:** REST API push, Sync Mapped Inventory (AJAX), Scheduled Cron Sync, Selective Sync, Lazy WooCommerce product creation, and Publish All batch action.
+
 ---
 
 ## Summary

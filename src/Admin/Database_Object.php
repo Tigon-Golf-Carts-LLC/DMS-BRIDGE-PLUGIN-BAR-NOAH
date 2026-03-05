@@ -79,6 +79,7 @@ class Database_Object
             '_wc_fb_visibility' => ['meta_key' => '_wc_fb_visibility'],
             // Tigon specific
             '_dms_cart_id' => ['meta_key' => '_dms_cart_id'],
+            '_dms_readiness_missing' => ['meta_key' => '_dms_readiness_missing'],
             'monroney_sticker' => ['meta_key' => 'monroney_sticker'],
             '_monroney_sticker' => ['meta_key' => '_monroney_sticker'],
             'tigonwm' => ['meta_key' => '_tigonwm'],
@@ -146,6 +147,7 @@ class Database_Object
         ?string $facebook_visibility = null,
 
         ?string $dms_cart_id = null,
+        ?string $dms_readiness_missing = null,
         ?string $monroney_sticker = null,
         ?string $monroney_container_id = null,
         ?string $tigonwm_text = null,
@@ -259,6 +261,12 @@ class Database_Object
         if (!empty($facebook_visibility)) $this->data['postmeta']['_wc_fb_visibility']['meta_value'] = $facebook_visibility;
         // Tigon specific
         if (!empty($dms_cart_id)) $this->data['postmeta']['_dms_cart_id']['meta_value'] = $dms_cart_id;
+        // Track missing readiness fields; clear when product is ready
+        if (!empty($dms_readiness_missing)) {
+            $this->data['postmeta']['_dms_readiness_missing']['meta_value'] = $dms_readiness_missing;
+        } else {
+            $this->data['postmeta']['_dms_readiness_missing']['meta_value'] = '';
+        }
         if (!empty($monroney_sticker)) $this->data['postmeta']['monroney_sticker']['meta_value'] = $monroney_sticker;
         if (!empty($monroney_container_id)) $this->data['postmeta']['_monroney_sticker']['meta_value'] = $monroney_container_id;
         if (!empty($tigonwm_text)) $this->data['postmeta']['tigonwm']['meta_value'] = $tigonwm_text;
