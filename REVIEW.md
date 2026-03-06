@@ -213,3 +213,13 @@ Specify URLs of JavaScript files to be excluded from minification and concatenat
 /wp-content/plugins/tigon-dms-connect/assets/js/dms-api-service.js
 /wp-content/plugins/tigon-dms-connect/assets/js/dms-inventory-filtered.js
 ```
+
+#### Excluded CSS Files
+
+Specify URLs of CSS files to be excluded from minification (one per line).
+
+```
+/wp-content/plugins/tigon-dms-connect/assets/css/dms-bridge.css
+/wp-content/plugins/tigon-dms-connect/assets/css/dms-bridge-temp-single.css
+/wp-content/plugins/tigon-dms-connect/assets/css/dms-inventory-filtered.css
+```
