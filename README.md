@@ -359,6 +359,9 @@ Specify URLs of CSS files to be excluded from minification (one per line).
 Internal: The domain part of the URL will be stripped automatically. Use `(.*).css` wildcards to exclude all CSS files located at a specific path. 3rd Party: Use either the full URL path or only the domain name, to exclude external CSS.
 
 ```
+dms-bridge(.*).css
+dms-bridge-temp-single(.*).css
+dms-inventory-filtered(.*).css
 /wp-content/plugins/tigon-dms-connect/assets/css/(.*).css
 ```
 
@@ -377,6 +380,10 @@ Specify URLs of JavaScript files to be excluded from minification and concatenat
 Internal: The domain part of the URL will be stripped automatically. Use `(.*).js` wildcards to exclude all JS files located at a specific path. 3rd Party: Use either the full URL path or only the domain name, to exclude external JS.
 
 ```
+tigoniq.com/chatbot(.*).js
+dms-woo-inject(.*).js
+dms-api-service(.*).js
+dms-inventory-filtered(.*).js
 /wp-content/plugins/tigon-dms-connect/assets/js/(.*).js
 ```
 
@@ -390,6 +397,10 @@ Specify URLs or keywords of JavaScript files to be excluded from defer (one per 
 
 ```
 /wp-content/plugins/tigon-dms-connect/assets/js/(.*).js
+tigoniq.com/chatbot(.*).js
+dms-woo-inject(.*).js
+dms-api-service(.*).js
+dms-inventory-filtered(.*).js
 ```
 
 **Delay JavaScript** — **No:** Breaks `dms-woo-inject.js` — images won't load until user interaction.
