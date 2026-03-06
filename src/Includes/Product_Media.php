@@ -38,7 +38,7 @@ class Product_Media
      * WooCommerce placeholder image attachment ID.
      * This shared image must never be deleted by product media cleanup.
      */
-    const PLACEHOLDER_IMAGE_ID = 70055;
+    const PLACEHOLDER_IMAGE_ID = 204304;
 
     public static function delete_product_media(int $product_id, bool $force_delete = true): void
     {

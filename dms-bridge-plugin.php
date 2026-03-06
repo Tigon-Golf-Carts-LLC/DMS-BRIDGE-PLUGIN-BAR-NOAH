@@ -425,7 +425,7 @@ function tigon_dms_get_used_inventory_term_taxonomy_id() {
  */
 function tigon_dms_download_and_attach_images($product_id, $image_names, $title, $cart_data = array()) {
     // WooCommerce placeholder image attachment ID (used when DMS has no images)
-    $placeholder_image_id = 70055;
+    $placeholder_image_id = 204304;
 
     if (empty($image_names) || !is_array($image_names)) {
         // No images from DMS — use WooCommerce placeholder image

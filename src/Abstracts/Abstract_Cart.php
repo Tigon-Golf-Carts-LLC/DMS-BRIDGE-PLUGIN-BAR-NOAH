@@ -694,7 +694,7 @@ abstract class Abstract_Cart
     protected function fetch_images()
     {
         // WooCommerce placeholder image attachment ID (used when DMS has no images)
-        $placeholder_image_id = 70055;
+        $placeholder_image_id = 204304;
 
         /*
          * Images

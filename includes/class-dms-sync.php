@@ -342,7 +342,7 @@ class DMS_Sync
     private static function sync_product_images($product_id, $cart_data)
     {
         // WooCommerce placeholder image attachment ID (used when DMS has no images)
-        $placeholder_image_id = 70055;
+        $placeholder_image_id = 204304;
 
         // Check if the DMS payload has real images (not resolved/fallback URLs)
         $raw_image_urls = $cart_data['imageUrls'] ?? array();

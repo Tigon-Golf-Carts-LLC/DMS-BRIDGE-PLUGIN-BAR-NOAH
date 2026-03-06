@@ -13,13 +13,13 @@ A comprehensive `.gitignore` has been added that excludes `node_modules/`, `.env
 
 ### 2. Placeholder Image for Products with No DMS Images
 
-Products arriving from the DMS with empty or null `imageUrls` are automatically assigned the WooCommerce placeholder image (attachment ID **70055**) as the featured image. When real images later arrive via a DMS payload update, the placeholder is automatically replaced with the actual product images.
+Products arriving from the DMS with empty or null `imageUrls` are automatically assigned the coming-soon placeholder image (attachment ID **204304** — `coming-soon.jpg`) as the featured image. When real images later arrive via a DMS payload update, the placeholder is automatically replaced with the actual product images.
 
 **Files changed:**
 - `dms-bridge-plugin.php` — `tigon_dms_download_and_attach_images()`: sets placeholder when no images, clears it when real images arrive
 - `includes/class-dms-sync.php` — `DMS_Sync::sync_product_images()`: sets placeholder during scheduled cron sync and selective sync
 - `src/Abstracts/Abstract_Cart.php` — `Abstract_Cart::fetch_images()`: sets placeholder for REST push and import controller paths
-- `src/Includes/Product_Media.php` — `Product_Media::delete_product_media()`: protects shared placeholder (ID 70055) from being permanently deleted during media cleanup
+- `src/Includes/Product_Media.php` — `Product_Media::delete_product_media()`: protects shared placeholder (ID 204304) from being permanently deleted during media cleanup
 
 **All sync paths covered:** REST API push, Sync Mapped Inventory (AJAX), Scheduled Cron Sync, Selective Sync, and Lazy WooCommerce product creation.
 
