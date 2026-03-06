@@ -3919,9 +3919,30 @@ function tigon_dms_enqueue_woo_inject_script() {
         return;
     }
     
-    // Extract image URLs
+    // Extract image URLs from DMS payload (S3 filenames)
     $image_urls = $cart_data['imageUrls'] ?? array();
-    
+
+    // Check if WooCommerce already has locally-downloaded images for this product.
+    // When local images exist, the JS gallery injection is skipped entirely so
+    // WooCommerce's native gallery renders the downloaded images without flicker.
+    $local_image_urls = array();
+    $thumbnail_id = get_post_thumbnail_id($post->ID);
+    if ($thumbnail_id) {
+        $thumb_url = wp_get_attachment_url($thumbnail_id);
+        if ($thumb_url) {
+            $local_image_urls[] = $thumb_url;
+        }
+    }
+    $gallery_ids = get_post_meta($post->ID, '_product_image_gallery', true);
+    if (!empty($gallery_ids)) {
+        foreach (explode(',', $gallery_ids) as $att_id) {
+            $att_url = wp_get_attachment_url((int) $att_id);
+            if ($att_url) {
+                $local_image_urls[] = $att_url;
+            }
+        }
+    }
+
     // Enqueue API service first (dependency for dms-woo-inject)
     wp_enqueue_script(
         'dms-api-service-js',
@@ -3942,8 +3963,9 @@ function tigon_dms_enqueue_woo_inject_script() {
     
     // Pass data to JavaScript
     wp_localize_script('dms-woo-inject', 'dmsWooData', array(
-        'cartId'    => $cart_id,
-        'imageUrls' => $image_urls,
+        'cartId'         => $cart_id,
+        'imageUrls'      => $image_urls,
+        'localImageUrls' => $local_image_urls,
     ));
 }
 add_action('wp_enqueue_scripts', 'tigon_dms_enqueue_woo_inject_script');
