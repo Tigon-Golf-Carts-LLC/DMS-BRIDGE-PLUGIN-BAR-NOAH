@@ -163,9 +163,12 @@ class Database_Object
         }, str_split($sku))), -14, 14);
         $gui = str_pad($gui, 14, '0', STR_PAD_LEFT);
 
-        // Get first image as main image
+        // Get first image as main image; fall back to WooCommerce placeholder (ID 70055)
         $images = $images??[];
         $featured_image = array_shift($images);
+        if (empty($featured_image)) {
+            $featured_image = 70055;
+        }
         $featured_image_url = wp_get_attachment_image_url($featured_image);
         $images_list = implode(',', $images);
 

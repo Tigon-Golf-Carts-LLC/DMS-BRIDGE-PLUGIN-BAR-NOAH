@@ -745,7 +745,11 @@ abstract class Abstract_Cart
             $i++;
         }
         unset($i);
-        //$alt_text = $this->make_with_symbol.' '.$this->cart['cartType']['model'].preg_replace('/[\|]*/', '', $this->images);
+
+        // If all image downloads failed, fall back to the WooCommerce placeholder
+        if (empty($this->images)) {
+            $this->images = array($placeholder_image_id);
+        }
     }
 
     protected function generate_image_name($i)
