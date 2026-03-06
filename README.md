@@ -359,6 +359,7 @@ tk_ai
 
 ## License
 
-Proprietary. All rights reserved.
+Proprietary. All rights reserved to &copy;TIGON Golf Carts.
 
-&copy; Jaslow Digital &mdash; [jaslowdigital.com](https://jaslowdigital.com)
+**Plugin Developer**
+Noah Jaslow &copy;Jaslow Digital &mdash; [jaslowdigital.com](https://jaslowdigital.com) &nbsp; PH: 215-789-1955
