@@ -425,7 +425,7 @@ function tigon_dms_get_used_inventory_term_taxonomy_id() {
  */
 function tigon_dms_download_and_attach_images($product_id, $image_names, $title, $cart_data = array()) {
     // WooCommerce placeholder image attachment ID (used when DMS has no images)
-    $placeholder_image_id = 70055;
+    $placeholder_image_id = 204304;
 
     if (empty($image_names) || !is_array($image_names)) {
         // No images from DMS — use WooCommerce placeholder image
@@ -2309,6 +2309,7 @@ function tigon_dms_assign_custom_taxonomies($product_id, $cart_data) {
     // Map taxonomy slugs to Attributes property names for O(1) lookups
     $taxonomy_map = array(
         'manufacturers'    => 'manufacturers_taxonomy',
+        'product_brand'    => 'brands_taxonomy',
         'models'           => 'models_taxonomy',
         'sound-systems'    => 'sound_systems_taxonomy',
         'added-features'   => 'added_features_taxonomy',
@@ -2356,6 +2357,28 @@ function tigon_dms_assign_custom_taxonomies($product_id, $cart_data) {
         $mfg_name = 'STAR EV®';
     }
     $assign('manufacturers', array($mfg_name));
+
+    // Brands taxonomy (product_brand) — matches manufacturer make, auto-create if missing
+    if (taxonomy_exists('product_brand')) {
+        $brand_name = $mfg_name;
+        $brand_prop = $attrs->brands_taxonomy ?? array();
+        if (isset($brand_prop[$brand_name])) {
+            wp_set_object_terms($product_id, array((int) $brand_prop[$brand_name]), 'product_brand', true);
+        } else {
+            $existing_brand = get_term_by('name', $brand_name, 'product_brand');
+            if (!$existing_brand) {
+                $existing_brand = get_term_by('slug', sanitize_title($brand_name), 'product_brand');
+            }
+            if ($existing_brand && !is_wp_error($existing_brand)) {
+                wp_set_object_terms($product_id, array((int) $existing_brand->term_id), 'product_brand', true);
+            } else {
+                $new_brand = wp_insert_term($brand_name, 'product_brand', array('slug' => sanitize_title($brand_name)));
+                if (!is_wp_error($new_brand)) {
+                    wp_set_object_terms($product_id, array((int) $new_brand['term_id']), 'product_brand', true);
+                }
+            }
+        }
+    }
 
     // Models taxonomy (with special case handling from Abstract_Cart)
     $model_upper = strtoupper($model);
@@ -3032,6 +3055,24 @@ function tigon_dms_set_product_fields_meta($product_id, $cart_data) {
             }
             if ($mfg_term_id) {
                 update_post_meta($product_id, '_yoast_wpseo_primary_manufacturers', $mfg_term_id);
+            }
+        }
+
+        // Primary product_brand
+        if (!empty($make) && taxonomy_exists('product_brand')) {
+            $brand_name = $mfg_name; // same resolved name as manufacturers
+            $brand_term_id = null;
+            if ($yoast_attrs && !empty($yoast_attrs->brands_taxonomy)) {
+                $brand_term_id = $yoast_attrs->brands_taxonomy[$brand_name] ?? null;
+            }
+            if (!$brand_term_id) {
+                $brand_term = get_term_by('name', $brand_name, 'product_brand');
+                if ($brand_term && !is_wp_error($brand_term)) {
+                    $brand_term_id = $brand_term->term_id;
+                }
+            }
+            if ($brand_term_id) {
+                update_post_meta($product_id, '_yoast_wpseo_primary_product_brand', $brand_term_id);
             }
         }
 

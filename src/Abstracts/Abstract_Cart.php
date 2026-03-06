@@ -694,7 +694,7 @@ abstract class Abstract_Cart
     protected function fetch_images()
     {
         // WooCommerce placeholder image attachment ID (used when DMS has no images)
-        $placeholder_image_id = 70055;
+        $placeholder_image_id = 204304;
 
         /*
          * Images
@@ -745,7 +745,11 @@ abstract class Abstract_Cart
             $i++;
         }
         unset($i);
-        //$alt_text = $this->make_with_symbol.' '.$this->cart['cartType']['model'].preg_replace('/[\|]*/', '', $this->images);
+
+        // If all image downloads failed, fall back to the WooCommerce placeholder
+        if (empty($this->images)) {
+            $this->images = array($placeholder_image_id);
+        }
     }
 
     protected function generate_image_name($i)
@@ -2746,21 +2750,37 @@ abstract class Abstract_Cart
         $this->primary_location = Attributes::$locations[$this->location_id]['city_id'];
 
         // Manufacturers
-        if (strtoupper($this->make_with_symbol) == 'SWIFT EV®') {
+        $mfg_name = strtoupper($this->make_with_symbol);
+        if ($mfg_name === 'SWIFT EV®') {
+            $mfg_name = 'SWIFT®';
+        } elseif ($mfg_name === 'STAR®') {
+            $mfg_name = 'STAR EV®';
+        }
+        if (isset($this->generated_attributes->manufacturers_taxonomy[$mfg_name])) {
             array_push(
                 $this->taxonomy_terms,
-                $this->generated_attributes->manufacturers_taxonomy['SWIFT®']
+                $this->generated_attributes->manufacturers_taxonomy[$mfg_name]
             );
-        } else if (strtoupper($this->make_with_symbol) == 'STAR®') {
+        }
+
+        // Brands (product_brand) — matches manufacturer make
+        $brand_name = $mfg_name;
+        if (isset($this->generated_attributes->brands_taxonomy[$brand_name])) {
             array_push(
                 $this->taxonomy_terms,
-                $this->generated_attributes->manufacturers_taxonomy['STAR EV®']
+                $this->generated_attributes->brands_taxonomy[$brand_name]
             );
         } else {
-            array_push(
-                $this->taxonomy_terms,
-                $this->generated_attributes->manufacturers_taxonomy[strtoupper($this->make_with_symbol)]
+            // Auto-create brand term if it doesn't exist
+            $new_brand = wp_insert_term(
+                $brand_name,
+                'product_brand',
+                ['slug' => sanitize_title($brand_name)]
             );
+            if (!is_wp_error($new_brand)) {
+                $this->generated_attributes->brands_taxonomy[$brand_name] = $new_brand['term_id'];
+                array_push($this->taxonomy_terms, $new_brand['term_id']);
+            }
         }
 
         // Models
