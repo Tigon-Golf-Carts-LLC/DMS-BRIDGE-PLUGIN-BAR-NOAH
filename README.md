@@ -124,6 +124,43 @@ The plugin registers the following endpoints for DMS-to-WordPress communication:
 
 All endpoints require `manage_options` capability (WordPress admin authentication).
 
+### REST API Authentication
+
+All REST endpoints require **HTTP Basic Auth** using a **WordPress Application Password**. The authenticated user must be a WordPress Administrator (`manage_options` capability).
+
+**Required HTTP Headers:**
+
+| Header | Value |
+|--------|-------|
+| `Authorization` | `Basic <base64(username:application_password)>` |
+| `Content-Type` | `application/json` |
+
+The `Authorization` value is the word `Basic` followed by a space and the base64-encoded string `username:application_password`.
+
+**Generating an Application Password:**
+
+1. Go to **WordPress Admin &rarr; Users &rarr; (admin user) &rarr; Edit**
+2. Scroll to the **Application Passwords** section
+3. Enter a name (e.g. `DMS Push`) and click **Add New Application Password**
+4. Copy the generated password &mdash; it is only shown once
+
+**Example cURL request:**
+
+```bash
+curl -X POST \
+  https://tigongolfcarts.com/wp-json/tigon-dms-connect/v1/push \
+  -H "Authorization: Basic dGlnb24tZG1zOmFiY2QgMTIzNCBlZmdoIDU2NzggaWprbCA5MDEy" \
+  -H "Content-Type: application/json" \
+  -d '{ "vin": "...", "year": "2024", "make": "ICON", "model": "i40" }'
+```
+
+**Key notes for the DMS integration:**
+
+- No custom tokens or API keys &mdash; standard WordPress Application Passwords via Basic Auth
+- The WordPress user **must** be an Administrator
+- Application Passwords bypass 2FA and cookie requirements &mdash; designed for external API clients
+- HTTPS is required (WordPress blocks Application Passwords over plain HTTP by default)
+
 ---
 
 ## Shortcodes
