@@ -227,8 +227,139 @@ TIGON-DMS-Connect/
 
 ---
 
+## CDN & Caching Configuration
+
+### CDN Exclusions
+
+Files that should **not** be served via CDN (one per line):
+
+```
+/wp-json/tigon-dms-connect/(.*)
+/wp-admin/admin-ajax.php
+/dms/cart/(.*)
+/wp-cron.php
+```
+
+### Never Cache URLs
+
+Dynamic pages that should never be cached:
+
+```
+/dms/cart/(.*)
+/wp-json/tigon-dms-connect/(.*)
+/wp-admin/admin-ajax.php
+/wp-cron.php
+/inventory/(.*)
+```
+
+### Always Purge URLs
+
+Purged from cache whenever any post or page is updated:
+
+```
+/inventory/(.*)
+/golf-cart-inventory/(.*)
+/hatfield-pa/(.*)
+/ocean-view-nj/(.*)
+/long-pond-pa/(.*)
+/dover-de/(.*)
+/scranton-pa/(.*)
+/raleigh-nc/(.*)
+/south-bend-in/(.*)
+/gloucester-va/(.*)
+/bayville-nj/(.*)
+/waretown-nj/(.*)
+/orangeburg-sc/(.*)
+/swanton-oh/(.*)
+/lecanto-fl/(.*)
+/golf-cart-services/(.*)
+/manufacturers/(.*)
+/brands/(.*)
+/product/(.*)
+/product-category/(.*)
+/shop/(.*)
+```
+
+### Cache Query Strings
+
+WooCommerce filter/sort parameters safe to cache:
+
+```
+pa_location
+pa_model
+pa_battery-type
+pa_drivetrain
+pa_brush-guard
+pa_cargo-rack
+pa_electric-bed-lift
+pa_electric-range
+pa_extended-top
+pa_fender-flares
+pa_led-accents
+pa_lift-kit
+pa_mileage
+pa_seats
+pa_speed
+pa_street-legal
+pa_fuel-type
+pa_gifted
+min_price
+max_price
+orderby
+product_cat
+product_tag
+product_brand
+manufacturers
+models
+```
+
+### Never Cache Cookies
+
+```
+wordpress_logged_in_
+wordpress_sec_
+wp-settings-
+wp-postpass_
+woocommerce_cart_hash
+woocommerce_items_in_cart
+wp_woocommerce_session_
+woocommerce_recently_viewed
+comment_author_
+tk_ai
+```
+
+### Never Cache User Agents
+
+```
+(.*)wp-cron(.*)
+(.*)WordPress(.*)
+(.*)DMS(.*)
+(.*)Jetstress(.*)
+(.*)check_http(.*)
+(.*)nagios(.*)
+(.*)Pingdom(.*)
+(.*)UptimeRobot(.*)
+(.*)StatusCake(.*)
+(.*)GTmetrix(.*)
+(.*)Google-Site-Verification(.*)
+```
+
+### JavaScript & CSS Optimization
+
+| Setting | Safe? | Notes |
+|---------|-------|-------|
+| Minify CSS | Yes | Safe — removes whitespace/comments |
+| Optimize CSS delivery (Remove Unused CSS) | Careful | Can break Elementor styling. Use "Load CSS Asynchronously" instead |
+| Minify JavaScript | Yes | Safe — removes whitespace/comments |
+| Combine JavaScript | **No** | Breaks plugin — scripts depend on specific load order and `wp_localize_script` data |
+| Load JavaScript Deferred | Careful | Test inventory pages + admin sync. Exclude: `/wp-content/plugins/tigon-dms-connect/assets/js/(.*)` |
+| Delay JavaScript | **No** | Breaks `dms-woo-inject.js` — images won't load until user interaction |
+
+---
+
 ## License
 
-Proprietary. All rights reserved.
+Proprietary. All rights reserved to &copy;[TIGON Golf Carts](https://tigongolfcarts.com).
 
-&copy; Jaslow Digital &mdash; [jaslowdigital.com](https://jaslowdigital.com)
+**Plugin Developer**
+Noah Jaslow &copy;Jaslow Digital &mdash; [jaslowdigital.com](https://jaslowdigital.com) &nbsp; PH: 215-789-1955
