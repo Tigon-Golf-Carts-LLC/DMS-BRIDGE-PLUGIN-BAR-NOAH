@@ -203,3 +203,13 @@ tk_ai
 | Combine JavaScript | **No** | Breaks plugin — scripts depend on specific load order and `wp_localize_script` data |
 | Load JavaScript Deferred | Careful | Test inventory pages + admin sync. Exclude: `/wp-content/plugins/tigon-dms-connect/assets/js/(.*)` |
 | Delay JavaScript | **No** | Breaks `dms-woo-inject.js` — images won't load until user interaction |
+
+#### Excluded JavaScript Files
+
+Specify URLs of JavaScript files to be excluded from minification and concatenation (one per line).
+
+```
+/wp-content/plugins/tigon-dms-connect/assets/js/dms-woo-inject.js
+/wp-content/plugins/tigon-dms-connect/assets/js/dms-api-service.js
+/wp-content/plugins/tigon-dms-connect/assets/js/dms-inventory-filtered.js
+```
