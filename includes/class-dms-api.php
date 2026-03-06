@@ -412,7 +412,14 @@ class DMS_API
             }
         }
 
-        // 3. Fallback to coming-soon placeholder
+        // 3. Fallback to WooCommerce placeholder image (configured in CMS), then coming-soon
+        if (function_exists('wc_placeholder_img_src')) {
+            $wc_placeholder = wc_placeholder_img_src('woocommerce_single');
+            if (!empty($wc_placeholder)) {
+                return array($wc_placeholder);
+            }
+        }
+
         return array(self::$coming_soon_image);
     }
 

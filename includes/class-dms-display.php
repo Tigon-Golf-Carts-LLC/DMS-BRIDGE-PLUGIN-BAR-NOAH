@@ -181,8 +181,12 @@ class DMS_Display {
         if ($image_url) {
             echo '<img src="' . esc_url($image_url) . '" alt="' . esc_attr($cart_title) . '">';
         } else {
-            $coming_soon_image = 'https://tigongolfcarts.com/wp-content/uploads/2024/11/TIGON-GOLF-CARTS-IMAGES-COMING-SOON.jpg';
-            echo '<img src="' . esc_url($coming_soon_image) . '" alt="Coming Soon">';
+            $placeholder_url = function_exists('wc_placeholder_img_src') ? wc_placeholder_img_src('woocommerce_thumbnail') : '';
+            if ($placeholder_url) {
+                echo '<img src="' . esc_url($placeholder_url) . '" alt="' . esc_attr($cart_title) . '">';
+            } else {
+                echo '<img src="' . esc_url(DMS_API::get_coming_soon_image()) . '" alt="Coming Soon">';
+            }
         }
         
         echo '<h3>' . esc_html($cart_title) . '</h3>';
@@ -372,9 +376,15 @@ class DMS_Display {
                     <?php endif; ?>
                 <?php else: ?>
                     <div class="dms-gallery-main">
-                        <div class="dms-cart-no-image-large">
-                            <span>No Image Available</span>
-                        </div>
+                        <?php
+                        $placeholder_url = function_exists('wc_placeholder_img_src') ? wc_placeholder_img_src('woocommerce_single') : '';
+                        if ($placeholder_url): ?>
+                            <img src="<?php echo esc_url($placeholder_url); ?>" alt="<?php echo esc_attr($make . ' ' . $model); ?>" id="dms-main-image">
+                        <?php else: ?>
+                            <div class="dms-cart-no-image-large">
+                                <span>No Image Available</span>
+                            </div>
+                        <?php endif; ?>
                     </div>
                 <?php endif; ?>
 
