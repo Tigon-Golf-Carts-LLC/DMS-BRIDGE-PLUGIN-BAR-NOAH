@@ -344,32 +344,55 @@ tk_ai
 (.*)Google-Site-Verification(.*)
 ```
 
-### JavaScript & CSS Optimization
+### CSS Files
 
-| Setting | Safe? | Notes |
-|---------|-------|-------|
-| Minify CSS | Yes | Safe — removes whitespace/comments |
-| Optimize CSS delivery (Remove Unused CSS) | Careful | Can break Elementor styling. Use "Load CSS Asynchronously" instead |
-| Minify JavaScript | Yes | Safe — removes whitespace/comments |
-| Combine JavaScript | **No** | Breaks plugin — scripts depend on specific load order and `wp_localize_script` data |
-| Load JavaScript Deferred | Careful | Test inventory pages + admin sync. Exclude: `/wp-content/plugins/tigon-dms-connect/assets/js/(.*)` |
-| Delay JavaScript | **No** | Breaks `dms-woo-inject.js` — images won't load until user interaction |
+**Minify CSS** removes whitespace and comments to reduce the file size.
 
-#### Excluded JavaScript Files
+**Optimize CSS delivery** eliminates render-blocking CSS on your website. Only one method can be selected. Remove Unused CSS is recommended for optimal performance.
 
-Specify URLs of JavaScript files to be excluded from minification and concatenation (one per line).
-
-```
-/wp-content/plugins/tigon-dms-connect/assets/js/(.*).js
-```
+> **Careful:** Can break Elementor styling. Use "Load CSS Asynchronously" instead.
 
 #### Excluded CSS Files
 
 Specify URLs of CSS files to be excluded from minification (one per line).
 
+Internal: The domain part of the URL will be stripped automatically. Use `(.*).css` wildcards to exclude all CSS files located at a specific path. 3rd Party: Use either the full URL path or only the domain name, to exclude external CSS.
+
 ```
 /wp-content/plugins/tigon-dms-connect/assets/css/(.*).css
 ```
+
+### JavaScript Files
+
+**Minify JavaScript** removes whitespace and comments to reduce the file size.
+
+**Combine JavaScript** files combines your site's internal, 3rd party and inline JS reducing HTTP requests. Not recommended if your site uses HTTP/2.
+
+> **No:** Breaks plugin — scripts depend on specific load order and `wp_localize_script` data.
+
+#### Excluded JavaScript Files
+
+Specify URLs of JavaScript files to be excluded from minification and concatenation (one per line).
+
+Internal: The domain part of the URL will be stripped automatically. Use `(.*).js` wildcards to exclude all JS files located at a specific path. 3rd Party: Use either the full URL path or only the domain name, to exclude external JS.
+
+```
+/wp-content/plugins/tigon-dms-connect/assets/js/(.*).js
+```
+
+**Load JavaScript deferred** eliminates render-blocking JS on your site and can improve load time.
+
+> **Careful:** Test inventory pages + admin sync.
+
+#### Excluded JavaScript Files (Deferred)
+
+Specify URLs or keywords of JavaScript files to be excluded from defer (one per line).
+
+```
+/wp-content/plugins/tigon-dms-connect/assets/js/(.*).js
+```
+
+**Delay JavaScript** — **No:** Breaks `dms-woo-inject.js` — images won't load until user interaction.
 
 ---
 
