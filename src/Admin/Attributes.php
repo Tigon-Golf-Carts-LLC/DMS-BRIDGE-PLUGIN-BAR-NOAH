@@ -263,6 +263,7 @@ class Attributes
     public $drivetrains_taxonomy = [];
     public $rims_taxonomy = [];
     public $inventory_status_taxonomy = [];
+    public $brands_taxonomy = [];
     public $custom_options = [];
 
     public function __construct()
@@ -279,6 +280,7 @@ class Attributes
         $this->drivetrains_taxonomy = Attributes::ai_get_drivetrains();
         $this->rims_taxonomy = Attributes::ai_get_rims();
         $this->inventory_status_taxonomy = Attributes::ai_get_inventory_statuses();
+        $this->brands_taxonomy = Attributes::ai_get_brands();
         $this->custom_options = Attributes::ai_get_custom_options();
     }
 
@@ -375,6 +377,29 @@ class Attributes
             $manufacturers_taxonomy[strtoupper($term->name)] = $term->term_id;
         }
         return $manufacturers_taxonomy;
+    }
+
+    /**
+     * Gets all terms in the product_brand taxonomy, and returns them as an associative array
+     * @return array
+     */
+    private static function ai_get_brands()
+    {
+        $brands_taxonomy = array();
+        if (!taxonomy_exists('product_brand')) {
+            return $brands_taxonomy;
+        }
+        $brands = get_terms([
+            'taxonomy' => 'product_brand',
+            'hide_empty' => false
+        ]);
+        if (is_wp_error($brands)) {
+            return $brands_taxonomy;
+        }
+        foreach($brands as $term) {
+            $brands_taxonomy[strtoupper($term->name)] = $term->term_id;
+        }
+        return $brands_taxonomy;
     }
 
     /**
