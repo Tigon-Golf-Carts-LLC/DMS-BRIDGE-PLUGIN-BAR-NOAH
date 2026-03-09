@@ -4465,6 +4465,35 @@ function tigon_dms_loop_add_to_cart_link($link, $product) {
 add_filter('woocommerce_loop_add_to_cart_link', 'tigon_dms_loop_add_to_cart_link', 10, 2);
 
 /**
+ * Prevent duplicate Description tabs on single product pages.
+ *
+ * Some themes / Elementor configurations register the description tab more
+ * than once. This filter runs late (priority 99) and ensures only one
+ * description tab callback exists.
+ */
+function tigon_dms_deduplicate_description_tab($tabs) {
+    // Nothing to deduplicate if there is no description tab at all
+    if (!isset($tabs['description'])) {
+        return $tabs;
+    }
+
+    // Count how many tabs use the same panel id / callback
+    $desc_count = 0;
+    foreach ($tabs as $key => $tab) {
+        if ($key === 'description' || (isset($tab['callback']) && $tab['callback'] === 'woocommerce_product_description_tab')) {
+            $desc_count++;
+            // Keep only the first occurrence keyed 'description'; remove extras
+            if ($desc_count > 1) {
+                unset($tabs[$key]);
+            }
+        }
+    }
+
+    return $tabs;
+}
+add_filter('woocommerce_product_tabs', 'tigon_dms_deduplicate_description_tab', 99);
+
+/**
  * ============================================================================
  * BACKGROUND INVENTORY SYNC
  * ============================================================================
