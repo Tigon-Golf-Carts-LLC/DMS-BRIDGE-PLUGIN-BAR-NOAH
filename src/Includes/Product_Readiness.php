@@ -8,7 +8,7 @@ use Tigon\DmsConnect\Admin\Attributes;
  * Determines whether a DMS cart has all required mappings to be published.
  *
  * Required fields: SKU, Price, Categories (make), Location, Manufacturers,
- * Vehicle Class, Inventory Status, Brands.
+ * Models, Vehicle Class, Drivetrain, Inventory Status, Brands.
  *
  * Products missing any required mapping are set to "draft" until a subsequent
  * sync provides the missing data.  Products with all mappings but no images
@@ -60,22 +60,35 @@ class Product_Readiness
             }
         }
 
-        // 6. Vehicle Class — always derivable when we have basic cart data,
-        //    but model is needed for a meaningful classification
+        // 6. Models — needs model name for taxonomy assignment
         $model = $cart_data['cartType']['model'] ?? '';
         if (empty(trim($model))) {
-            $missing[] = 'Vehicle Class (cartType.model is empty)';
+            $missing[] = 'Models (cartType.model is empty)';
         }
 
-        // 7. Inventory Status — derived from isUsed + isRental flags;
+        // 7. Vehicle Class — always derivable when we have basic cart data,
+        //    but model is needed for a meaningful classification
+        if (empty(trim($model))) {
+            if (!in_array('Models (cartType.model is empty)', $missing)) {
+                $missing[] = 'Vehicle Class (cartType.model is empty)';
+            }
+        }
+
+        // 8. Drivetrain — derived from cartAttributes.driveTrain, defaults to 2X4
+        //    Always derivable, but flag if cartAttributes is entirely missing
+        if (!isset($cart_data['cartAttributes'])) {
+            $missing[] = 'Drivetrain (cartAttributes is missing)';
+        }
+
+        // 9. Inventory Status — derived from isUsed + isRental flags;
         //    these are booleans so they always exist, but isUsed must be explicitly set
         if (!array_key_exists('isUsed', $cart_data)) {
             $missing[] = 'Inventory Status (isUsed flag is missing)';
         }
 
-        // 8. Brands — derived from make (same source as Manufacturers)
-        //    Already covered by the make check above; only add if make is empty
-        //    and not yet flagged
+        // 10. Brands — derived from make (same source as Manufacturers)
+        //     Already covered by the make check above; only add if make is empty
+        //     and not yet flagged
         if (empty(trim($make)) && !in_array('Categories (cartType.make is empty)', $missing)) {
             $missing[] = 'Brands (cartType.make is empty)';
         }

@@ -670,20 +670,41 @@ class Core
                 continue;
             }
 
-            // Deduplicate new carts by make/model/color/seat/location
+            // Deduplicate new carts by unique identifiers (_id, vinNo, serialNo)
+            // instead of make/model/color/seat/location — multiple carts of the
+            // same model/color are distinct inventory items with unique IDs.
             if (!$is_used) {
-                $loc_id = $cart['cartLocation']['locationId'] ?? '';
-                $dedup_key = implode('|', [
-                    $cart['cartType']['make'] ?? '',
-                    $cart['cartType']['model'] ?? '',
-                    $cart['cartAttributes']['cartColor'] ?? '',
-                    $cart['cartAttributes']['seatColor'] ?? '',
-                    $loc_id,
-                ]);
-                if (isset($seen_new[$dedup_key])) {
+                $dominated = false;
+
+                // Primary dedup: DMS cart _id (unique per cart)
+                if (!empty($cart_id)) {
+                    if (isset($seen_new['id:' . $cart_id])) {
+                        $dominated = true;
+                    }
+                    $seen_new['id:' . $cart_id] = true;
+                }
+
+                // Secondary dedup: vinNo (matches CMS SKU priority 1)
+                $vin_val = trim($cart['vinNo'] ?? '');
+                if (!$dominated && $vin_val !== '') {
+                    if (isset($seen_new['vin:' . $vin_val])) {
+                        $dominated = true;
+                    }
+                    $seen_new['vin:' . $vin_val] = true;
+                }
+
+                // Tertiary dedup: serialNo (matches CMS SKU priority 2)
+                $serial_val = trim($cart['serialNo'] ?? '');
+                if (!$dominated && $serial_val !== '') {
+                    if (isset($seen_new['sn:' . $serial_val])) {
+                        $dominated = true;
+                    }
+                    $seen_new['sn:' . $serial_val] = true;
+                }
+
+                if ($dominated) {
                     continue;
                 }
-                $seen_new[$dedup_key] = true;
             }
 
             $stats['total']++;
@@ -927,22 +948,43 @@ class Core
                     continue;
                 }
 
-                // Deduplicate new carts (persisted across pages via meta)
+                // Deduplicate new carts by unique identifiers (_id, vinNo, serialNo)
+                // instead of make/model/color/seat/location — multiple carts of the
+                // same model/color are distinct inventory items with unique IDs.
                 if (!$is_used) {
-                    $loc_id = $cart['cartLocation']['locationId'] ?? '';
-                    $dedup_key = implode('|', [
-                        $cart['cartType']['make'] ?? '',
-                        $cart['cartType']['model'] ?? '',
-                        $cart['cartAttributes']['cartColor'] ?? '',
-                        $cart['cartAttributes']['seatColor'] ?? '',
-                        $loc_id,
-                    ]);
-                    if (isset($seen_new[$dedup_key])) {
+                    $dominated = false;
+
+                    // Primary dedup: DMS cart _id (unique per cart)
+                    if (!empty($cart_id)) {
+                        if (isset($seen_new['id:' . $cart_id])) {
+                            $dominated = true;
+                        }
+                        $seen_new['id:' . $cart_id] = true;
+                    }
+
+                    // Secondary dedup: vinNo (matches CMS SKU priority 1)
+                    $vin_val = trim($cart['vinNo'] ?? '');
+                    if (!$dominated && $vin_val !== '') {
+                        if (isset($seen_new['vin:' . $vin_val])) {
+                            $dominated = true;
+                        }
+                        $seen_new['vin:' . $vin_val] = true;
+                    }
+
+                    // Tertiary dedup: serialNo (matches CMS SKU priority 2)
+                    $serial_val = trim($cart['serialNo'] ?? '');
+                    if (!$dominated && $serial_val !== '') {
+                        if (isset($seen_new['sn:' . $serial_val])) {
+                            $dominated = true;
+                        }
+                        $seen_new['sn:' . $serial_val] = true;
+                    }
+
+                    if ($dominated) {
                         $stats['skipped']++;
-                        $stats['skip_details'][] = "{$cart_label}: Skipped — duplicate new cart (same make/model/color/seat/location)";
+                        $stats['skip_details'][] = "{$cart_label}: Skipped — duplicate new cart (same _id/vinNo/serialNo)";
                         continue;
                     }
-                    $seen_new[$dedup_key] = true;
                 }
 
                 // Stage in local table

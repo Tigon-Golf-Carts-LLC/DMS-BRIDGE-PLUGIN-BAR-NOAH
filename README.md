@@ -124,6 +124,43 @@ The plugin registers the following endpoints for DMS-to-WordPress communication:
 
 All endpoints require `manage_options` capability (WordPress admin authentication).
 
+### REST API Authentication
+
+All REST endpoints require **HTTP Basic Auth** using a **WordPress Application Password**. The authenticated user must be a WordPress Administrator (`manage_options` capability).
+
+**Required HTTP Headers:**
+
+| Header | Value |
+|--------|-------|
+| `Authorization` | `Basic <base64(username:application_password)>` |
+| `Content-Type` | `application/json` |
+
+The `Authorization` value is the word `Basic` followed by a space and the base64-encoded string `username:application_password`.
+
+**Generating an Application Password:**
+
+1. Go to **WordPress Admin &rarr; Users &rarr; (admin user) &rarr; Edit**
+2. Scroll to the **Application Passwords** section
+3. Enter a name (e.g. `DMS Push`) and click **Add New Application Password**
+4. Copy the generated password &mdash; it is only shown once
+
+**Example cURL request:**
+
+```bash
+curl -X POST \
+  https://tigongolfcarts.com/wp-json/tigon-dms-connect/v1/push \
+  -H "Authorization: Basic dGlnb24tZG1zOmFiY2QgMTIzNCBlZmdoIDU2NzggaWprbCA5MDEy" \
+  -H "Content-Type: application/json" \
+  -d '{ "vin": "...", "year": "2024", "make": "ICON", "model": "i40" }'
+```
+
+**Key notes for the DMS integration:**
+
+- No custom tokens or API keys &mdash; standard WordPress Application Passwords via Basic Auth
+- The WordPress user **must** be an Administrator
+- Application Passwords bypass 2FA and cookie requirements &mdash; designed for external API clients
+- HTTPS is required (WordPress blocks Application Passwords over plain HTTP by default)
+
 ---
 
 ## Shortcodes
@@ -344,16 +381,66 @@ tk_ai
 (.*)Google-Site-Verification(.*)
 ```
 
-### JavaScript & CSS Optimization
+### CSS Files
 
-| Setting | Safe? | Notes |
-|---------|-------|-------|
-| Minify CSS | Yes | Safe — removes whitespace/comments |
-| Optimize CSS delivery (Remove Unused CSS) | Careful | Can break Elementor styling. Use "Load CSS Asynchronously" instead |
-| Minify JavaScript | Yes | Safe — removes whitespace/comments |
-| Combine JavaScript | **No** | Breaks plugin — scripts depend on specific load order and `wp_localize_script` data |
-| Load JavaScript Deferred | Careful | Test inventory pages + admin sync. Exclude: `/wp-content/plugins/tigon-dms-connect/assets/js/(.*)` |
-| Delay JavaScript | **No** | Breaks `dms-woo-inject.js` — images won't load until user interaction |
+**Minify CSS** removes whitespace and comments to reduce the file size.
+
+**Optimize CSS delivery** eliminates render-blocking CSS on your website. Only one method can be selected. Remove Unused CSS is recommended for optimal performance.
+
+> **Careful:** Can break Elementor styling. Use "Load CSS Asynchronously" instead.
+
+#### Excluded CSS Files
+
+Specify URLs of CSS files to be excluded from minification (one per line).
+
+Internal: The domain part of the URL will be stripped automatically. Use `(.*).css` wildcards to exclude all CSS files located at a specific path. 3rd Party: Use either the full URL path or only the domain name, to exclude external CSS.
+
+```
+dms-bridge(.*).css
+dms-bridge-temp-single(.*).css
+dms-inventory-filtered(.*).css
+/wp-content/plugins/tigon-dms-connect/assets/css/(.*).css
+```
+
+### JavaScript Files
+
+**Minify JavaScript** removes whitespace and comments to reduce the file size.
+
+**Combine JavaScript** files combines your site's internal, 3rd party and inline JS reducing HTTP requests. Not recommended if your site uses HTTP/2.
+
+> **No:** Breaks plugin — scripts depend on specific load order and `wp_localize_script` data.
+
+#### Excluded JavaScript Files
+
+Specify URLs of JavaScript files to be excluded from minification and concatenation (one per line).
+
+Internal: The domain part of the URL will be stripped automatically. Use `(.*).js` wildcards to exclude all JS files located at a specific path. 3rd Party: Use either the full URL path or only the domain name, to exclude external JS.
+
+```
+tigoniq.com/chatbot(.*).js
+dms-woo-inject(.*).js
+dms-api-service(.*).js
+dms-inventory-filtered(.*).js
+/wp-content/plugins/tigon-dms-connect/assets/js/(.*).js
+```
+
+**Load JavaScript deferred** eliminates render-blocking JS on your site and can improve load time.
+
+> **Careful:** Test inventory pages + admin sync.
+
+#### Excluded JavaScript Files (Deferred)
+
+Specify URLs or keywords of JavaScript files to be excluded from defer (one per line).
+
+```
+/wp-content/plugins/tigon-dms-connect/assets/js/(.*).js
+tigoniq.com/chatbot(.*).js
+dms-woo-inject(.*).js
+dms-api-service(.*).js
+dms-inventory-filtered(.*).js
+```
+
+**Delay JavaScript** — **No:** Breaks `dms-woo-inject.js` — images won't load until user interaction.
 
 ---
 

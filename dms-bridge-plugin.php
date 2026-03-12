@@ -2319,7 +2319,7 @@ function tigon_dms_assign_custom_taxonomies($product_id, $cart_data) {
         'rims'             => 'rims_taxonomy',
     );
 
-    // Helper: safely assign terms using Attributes cache or DB fallback
+    // Helper: safely assign terms using Attributes cache or DB fallback, auto-creating if missing
     $assign = function($taxonomy, $term_names) use ($product_id, $attrs, $taxonomy_map) {
         if (!taxonomy_exists($taxonomy)) {
             return;
@@ -2328,10 +2328,12 @@ function tigon_dms_assign_custom_taxonomies($product_id, $cart_data) {
         foreach ((array) $term_names as $name) {
             if (empty($name)) continue;
 
+            $upper = strtoupper($name);
+
             // Fast path: use Attributes pre-loaded taxonomy map
             $prop = $taxonomy_map[$taxonomy] ?? null;
-            if ($attrs && $prop && isset($attrs->$prop[strtoupper($name)])) {
-                $ids[] = (int) $attrs->$prop[strtoupper($name)];
+            if ($attrs && $prop && isset($attrs->$prop[$upper])) {
+                $ids[] = (int) $attrs->$prop[$upper];
                 continue;
             }
 
@@ -2342,6 +2344,22 @@ function tigon_dms_assign_custom_taxonomies($product_id, $cart_data) {
             }
             if ($term && !is_wp_error($term)) {
                 $ids[] = (int) $term->term_id;
+                // Cache for subsequent calls in same batch
+                if ($attrs && $prop) {
+                    $attrs->$prop[$upper] = $term->term_id;
+                }
+                continue;
+            }
+
+            // Auto-create the term if it doesn't exist
+            $new_term = wp_insert_term($name, $taxonomy, array('slug' => sanitize_title($name)));
+            if (!is_wp_error($new_term)) {
+                $ids[] = (int) $new_term['term_id'];
+                if ($attrs && $prop) {
+                    $attrs->$prop[$upper] = $new_term['term_id'];
+                }
+            } else {
+                error_log('[DMS Connect] Failed to create term "' . $name . '" in taxonomy "' . $taxonomy . '": ' . $new_term->get_error_message());
             }
         }
         if (!empty($ids)) {
@@ -2479,21 +2497,21 @@ function tigon_dms_assign_custom_taxonomies($product_id, $cart_data) {
         $assign('added-features', $added_features);
     }
 
-    // Vehicle Class taxonomy
-    $vc = array('GOLF CART');
-    if ($is_electric) {
-        $vc[] = 'ZERO EMISSION VEHICLES (ZEVS)';
-        if ($is_street_legal) {
-            $vc[] = 'LOW SPEED VEHICLE (LSVS)';
-            $vc[] = 'MEDIUM SPEED VEHICLE (MSVS)';
-            $vc[] = 'NEIGHBORHOOD ELECTRIC VEHICLES (NEVS)';
-        }
-    }
+    // Vehicle Class taxonomy — must match Abstract_Cart::attach_taxonomies()
+    $vc = array('GOLF CART', 'PERSONAL TRANSPORTATION VEHICLES (PTVS)');
     if ($is_street_legal) {
-        $vc[] = 'PERSONAL TRANSPORTATION VEHICLES (PTVS)';
+        $vc[] = 'LOW SPEED VEHICLE (LSVS)';
+        $vc[] = 'MEDIUM SPEED VEHICLE (MSVS)';
     }
-    if ($has_utility) {
+    if ($is_electric) {
+        $vc[] = 'NEIGHBORHOOD ELECTRIC VEHICLES (NEVS)';
+        $vc[] = 'ZERO EMISSION VEHICLES (ZEVS)';
+    }
+    if (!empty($cart_data['cartAttributes']['hasBed'])) {
         $vc[] = 'UTILITY TASK VEHICLE (UTVS)';
+    }
+    if (!$is_lifted) {
+        $vc[] = 'NON-LIFTED';
     }
     $assign('vehicle-class', $vc);
 
@@ -2508,18 +2526,61 @@ function tigon_dms_assign_custom_taxonomies($product_id, $cart_data) {
     // Drivetrain taxonomy
     $assign('drivetrain', array(strtoupper($drive_train)));
 
-    // Location taxonomy (city and state term IDs from Attributes)
+    // Location taxonomy (city and state term IDs from Attributes, auto-create when missing)
     if (!empty($store_id) && class_exists('\Tigon\DmsConnect\Admin\Attributes')) {
-        $loc = \Tigon\DmsConnect\Admin\Attributes::$locations[$store_id] ?? null;
-        if ($loc) {
+        $loc = \Tigon\DmsConnect\Admin\Attributes::get_location($store_id);
+        if (!$loc) {
+            $loc = \Tigon\DmsConnect\Admin\Attributes::$locations['T1'] ?? null;
+        }
+        if ($loc && taxonomy_exists('location')) {
             $location_ids = array();
-            if (!empty($loc['city_id'])) {
-                $location_ids[] = (int) $loc['city_id'];
+
+            // State term — auto-create if state_id is null
+            $state_id = $loc['state_id'] ?? null;
+            if (empty($state_id) && !empty($loc['state'])) {
+                $state_name = $loc['state'];
+                $existing_state = get_term_by('name', $state_name, 'location');
+                if ($existing_state && !is_wp_error($existing_state)) {
+                    $state_id = $existing_state->term_id;
+                } else {
+                    $new_state = wp_insert_term($state_name, 'location', array('slug' => sanitize_title($state_name)));
+                    if (!is_wp_error($new_state)) {
+                        $state_id = $new_state['term_id'];
+                    }
+                }
+                if ($state_id) {
+                    \Tigon\DmsConnect\Admin\Attributes::$locations[$store_id]['state_id'] = $state_id;
+                }
             }
-            if (!empty($loc['state_id'])) {
-                $location_ids[] = (int) $loc['state_id'];
+            if (!empty($state_id)) {
+                $location_ids[] = (int) $state_id;
             }
-            if (!empty($location_ids) && taxonomy_exists('location')) {
+
+            // City term — auto-create if city_id is null
+            $city_id = $loc['city_id'] ?? null;
+            if (empty($city_id) && !empty($loc['city'])) {
+                $city_name = $loc['city'];
+                $existing_city = get_term_by('name', $city_name, 'location');
+                if ($existing_city && !is_wp_error($existing_city)) {
+                    $city_id = $existing_city->term_id;
+                } else {
+                    $new_city = wp_insert_term($city_name, 'location', array(
+                        'slug'   => sanitize_title($city_name),
+                        'parent' => $state_id ?: 0,
+                    ));
+                    if (!is_wp_error($new_city)) {
+                        $city_id = $new_city['term_id'];
+                    }
+                }
+                if ($city_id) {
+                    \Tigon\DmsConnect\Admin\Attributes::$locations[$store_id]['city_id'] = $city_id;
+                }
+            }
+            if (!empty($city_id)) {
+                $location_ids[] = (int) $city_id;
+            }
+
+            if (!empty($location_ids)) {
                 wp_set_object_terms($product_id, $location_ids, 'location', true);
             }
         }
@@ -4402,6 +4463,35 @@ function tigon_dms_loop_add_to_cart_link($link, $product) {
     return $link;
 }
 add_filter('woocommerce_loop_add_to_cart_link', 'tigon_dms_loop_add_to_cart_link', 10, 2);
+
+/**
+ * Prevent duplicate Description tabs on single product pages.
+ *
+ * Some themes / Elementor configurations register the description tab more
+ * than once. This filter runs late (priority 99) and ensures only one
+ * description tab callback exists.
+ */
+function tigon_dms_deduplicate_description_tab($tabs) {
+    // Nothing to deduplicate if there is no description tab at all
+    if (!isset($tabs['description'])) {
+        return $tabs;
+    }
+
+    // Count how many tabs use the same panel id / callback
+    $desc_count = 0;
+    foreach ($tabs as $key => $tab) {
+        if ($key === 'description' || (isset($tab['callback']) && $tab['callback'] === 'woocommerce_product_description_tab')) {
+            $desc_count++;
+            // Keep only the first occurrence keyed 'description'; remove extras
+            if ($desc_count > 1) {
+                unset($tabs[$key]);
+            }
+        }
+    }
+
+    return $tabs;
+}
+add_filter('woocommerce_product_tabs', 'tigon_dms_deduplicate_description_tab', 99);
 
 /**
  * ============================================================================
