@@ -55,6 +55,340 @@ require_once TIGON_DMS_PLUGIN_DIR . 'vendor/autoload.php';
 
 /**
  * ============================================================================
+ * SEO & STRUCTURED DATA FIXES
+ * Fixes Google Search Console errors for Product structured data (JSON-LD):
+ * - Invalid floating point number in "price"
+ * - Missing field "image"
+ * - Missing field "hasMerchantReturnPolicy"
+ * - Missing field "shippingDetails"
+ * - Missing field "priceValidUntil"
+ * - Ensures all DMS product images are indexable by search engines
+ * ============================================================================
+ */
+
+/**
+ * Filter WooCommerce Product structured data to fix Google validation errors.
+ *
+ * Hooks into woocommerce_structured_data_product to ensure:
+ * 1. Price is a valid decimal string (e.g. "7995.00" not 7995)
+ * 2. Image field is always present
+ * 3. Return policy and shipping details are included
+ * 4. priceValidUntil is set for offers
+ */
+function tigon_dms_fix_product_structured_data($markup) {
+    // 1. Fix price format — must be a valid decimal string like "7995.00"
+    if (isset($markup['offers']) && is_array($markup['offers'])) {
+        // Single offer
+        if (isset($markup['offers']['@type'])) {
+            $markup['offers'] = tigon_dms_fix_offer_schema($markup['offers']);
+        } else {
+            // Array of offers
+            foreach ($markup['offers'] as &$offer) {
+                if (is_array($offer)) {
+                    $offer = tigon_dms_fix_offer_schema($offer);
+                }
+            }
+            unset($offer);
+        }
+    }
+
+    // 2. Ensure image field is present
+    if (empty($markup['image'])) {
+        global $post;
+        $product_id = isset($post->ID) ? $post->ID : 0;
+        if ($product_id) {
+            $image_url = get_the_post_thumbnail_url($product_id, 'full');
+            if ($image_url) {
+                $markup['image'] = $image_url;
+            } else {
+                // Use the WooCommerce placeholder if no featured image
+                $placeholder = function_exists('wc_placeholder_img_src') ? wc_placeholder_img_src('full') : '';
+                if ($placeholder) {
+                    $markup['image'] = $placeholder;
+                }
+            }
+        }
+    }
+
+    // 3. Ensure brand is set
+    if (empty($markup['brand'])) {
+        global $post;
+        $product_id = isset($post->ID) ? $post->ID : 0;
+        if ($product_id) {
+            $brand = get_post_meta($product_id, '_wc_gla_brand', true);
+            if (!empty($brand)) {
+                $markup['brand'] = array(
+                    '@type' => 'Brand',
+                    'name'  => $brand,
+                );
+            }
+        }
+    }
+
+    return $markup;
+}
+add_filter('woocommerce_structured_data_product', 'tigon_dms_fix_product_structured_data', 99);
+
+/**
+ * Fix a single offer in structured data.
+ *
+ * - Formats price as a proper decimal string
+ * - Sets priceCurrency to USD
+ * - Adds priceValidUntil (1 year from now)
+ * - Adds hasMerchantReturnPolicy
+ * - Adds shippingDetails
+ * - Fixes availability to a valid schema.org enum
+ */
+function tigon_dms_fix_offer_schema($offer) {
+    // Fix price format: must be decimal string like "7995.00", not int/float
+    if (isset($offer['price'])) {
+        $price_val = $offer['price'];
+        if (is_numeric($price_val) && floatval($price_val) > 0) {
+            $offer['price'] = number_format(floatval($price_val), 2, '.', '');
+        }
+    }
+
+    // Ensure priceCurrency is set
+    if (empty($offer['priceCurrency'])) {
+        $offer['priceCurrency'] = 'USD';
+    }
+
+    // Add priceValidUntil (1 year from now) if not set
+    if (empty($offer['priceValidUntil'])) {
+        $offer['priceValidUntil'] = date('Y-m-d', strtotime('+1 year'));
+    }
+
+    // Fix availability to valid schema.org URL
+    if (isset($offer['availability'])) {
+        $avail = $offer['availability'];
+        // Normalize to schema.org URL format
+        if (strpos($avail, 'http') !== 0) {
+            $avail_map = array(
+                'instock'     => 'https://schema.org/InStock',
+                'outofstock'  => 'https://schema.org/OutOfStock',
+                'onbackorder' => 'https://schema.org/BackOrder',
+                'preorder'    => 'https://schema.org/PreOrder',
+            );
+            $normalized = strtolower(str_replace(array(' ', '-', '_'), '', $avail));
+            if (isset($avail_map[$normalized])) {
+                $offer['availability'] = $avail_map[$normalized];
+            } else {
+                $offer['availability'] = 'https://schema.org/InStock';
+            }
+        }
+    } else {
+        $offer['availability'] = 'https://schema.org/InStock';
+    }
+
+    // Add hasMerchantReturnPolicy
+    if (empty($offer['hasMerchantReturnPolicy'])) {
+        $offer['hasMerchantReturnPolicy'] = array(
+            '@type'                => 'MerchantReturnPolicy',
+            'applicableCountry'    => 'US',
+            'returnPolicyCategory' => 'https://schema.org/MerchantReturnNotPermitted',
+        );
+    }
+
+    // Add shippingDetails
+    if (empty($offer['shippingDetails'])) {
+        $offer['shippingDetails'] = array(
+            '@type'            => 'OfferShippingDetails',
+            'shippingRate'     => array(
+                '@type'    => 'MonetaryAmount',
+                'value'    => '0',
+                'currency' => 'USD',
+            ),
+            'shippingDestination' => array(
+                '@type'          => 'DefinedRegion',
+                'addressCountry' => 'US',
+            ),
+            'deliveryTime'     => array(
+                '@type'            => 'ShippingDeliveryTime',
+                'handlingTime'     => array(
+                    '@type'    => 'QuantitativeValue',
+                    'minValue' => 1,
+                    'maxValue' => 5,
+                    'unitCode' => 'DAY',
+                ),
+                'transitTime'      => array(
+                    '@type'    => 'QuantitativeValue',
+                    'minValue' => 3,
+                    'maxValue' => 14,
+                    'unitCode' => 'DAY',
+                ),
+            ),
+        );
+    }
+
+    return $offer;
+}
+
+/**
+ * Filter Yoast SEO schema to enhance Product graph piece.
+ *
+ * Adds missing fields that Yoast doesn't include by default:
+ * - image (if missing)
+ * - offers.hasMerchantReturnPolicy
+ * - offers.shippingDetails
+ * - offers.priceValidUntil
+ */
+function tigon_dms_fix_yoast_product_schema($data) {
+    if (!is_array($data) || empty($data['@graph'])) {
+        return $data;
+    }
+
+    foreach ($data['@graph'] as &$piece) {
+        if (!isset($piece['@type'])) {
+            continue;
+        }
+
+        $type = $piece['@type'];
+        $is_product = ($type === 'Product')
+            || (is_array($type) && in_array('Product', $type, true));
+
+        if (!$is_product) {
+            continue;
+        }
+
+        // Ensure image is set
+        if (empty($piece['image'])) {
+            global $post;
+            if (isset($post->ID)) {
+                $img_url = get_the_post_thumbnail_url($post->ID, 'full');
+                if ($img_url) {
+                    $piece['image'] = $img_url;
+                }
+            }
+        }
+
+        // Fix offers
+        if (isset($piece['offers']) && is_array($piece['offers'])) {
+            if (isset($piece['offers']['@type'])) {
+                $piece['offers'] = tigon_dms_fix_offer_schema($piece['offers']);
+            } elseif (isset($piece['offers'][0])) {
+                foreach ($piece['offers'] as &$yoast_offer) {
+                    if (is_array($yoast_offer)) {
+                        $yoast_offer = tigon_dms_fix_offer_schema($yoast_offer);
+                    }
+                }
+                unset($yoast_offer);
+            }
+        }
+
+        // Add brand if missing
+        if (empty($piece['brand'])) {
+            global $post;
+            if (isset($post->ID)) {
+                $brand = get_post_meta($post->ID, '_wc_gla_brand', true);
+                if (!empty($brand)) {
+                    $piece['brand'] = array(
+                        '@type' => 'Brand',
+                        'name'  => $brand,
+                    );
+                }
+            }
+        }
+    }
+    unset($piece);
+
+    return $data;
+}
+add_filter('wpseo_schema_graph', 'tigon_dms_fix_yoast_product_schema', 99);
+
+/**
+ * Ensure DMS product images are not blocked from search engine indexing.
+ *
+ * Adds image objects to Yoast's sitemap for WooCommerce products
+ * that have DMS images attached.
+ */
+function tigon_dms_add_images_to_sitemap($images, $post_id) {
+    $post = get_post($post_id);
+    if (!$post || $post->post_type !== 'product') {
+        return $images;
+    }
+
+    // Add featured image if not already included
+    $featured_id = get_post_thumbnail_id($post_id);
+    if ($featured_id) {
+        $featured_url = wp_get_attachment_image_url($featured_id, 'full');
+        $featured_alt = get_post_meta($featured_id, '_wp_attachment_image_alt', true);
+        $featured_title = get_the_title($featured_id);
+
+        if ($featured_url) {
+            $already_included = false;
+            foreach ($images as $img) {
+                if (isset($img['src']) && $img['src'] === $featured_url) {
+                    $already_included = true;
+                    break;
+                }
+            }
+            if (!$already_included) {
+                $images[] = array(
+                    'src'   => $featured_url,
+                    'title' => $featured_title ?: get_the_title($post_id),
+                    'alt'   => $featured_alt ?: get_the_title($post_id),
+                );
+            }
+        }
+    }
+
+    // Add gallery images
+    $gallery_ids_str = get_post_meta($post_id, '_product_image_gallery', true);
+    if (!empty($gallery_ids_str)) {
+        $gallery_ids = array_filter(array_map('intval', explode(',', $gallery_ids_str)));
+        foreach ($gallery_ids as $gal_id) {
+            $gal_url = wp_get_attachment_image_url($gal_id, 'full');
+            if (!$gal_url) {
+                continue;
+            }
+            $already_included = false;
+            foreach ($images as $img) {
+                if (isset($img['src']) && $img['src'] === $gal_url) {
+                    $already_included = true;
+                    break;
+                }
+            }
+            if (!$already_included) {
+                $gal_alt = get_post_meta($gal_id, '_wp_attachment_image_alt', true);
+                $gal_title = get_the_title($gal_id);
+                $images[] = array(
+                    'src'   => $gal_url,
+                    'title' => $gal_title ?: get_the_title($post_id),
+                    'alt'   => $gal_alt ?: get_the_title($post_id),
+                );
+            }
+        }
+    }
+
+    return $images;
+}
+add_filter('wpseo_sitemap_urlimages', 'tigon_dms_add_images_to_sitemap', 10, 2);
+
+/**
+ * Ensure DMS product images and attachment pages are indexable.
+ *
+ * Prevents any accidental noindex on product image attachment pages
+ * so Google Image Search can discover them.
+ */
+function tigon_dms_allow_image_indexing($robots) {
+    if (is_attachment()) {
+        $parent_id = wp_get_post_parent_id(get_the_ID());
+        if ($parent_id) {
+            $parent = get_post($parent_id);
+            if ($parent && $parent->post_type === 'product') {
+                // Allow indexing for product image attachments
+                $robots['index']  = true;
+                $robots['follow'] = true;
+                unset($robots['noindex']);
+            }
+        }
+    }
+    return $robots;
+}
+add_filter('wp_robots', 'tigon_dms_allow_image_indexing', 99);
+
+/**
+ * ============================================================================
  * LAZY WOOCOMMERCE PRODUCT CREATION
  * Route: /dms/cart/{id} → Creates/updates WooCommerce product → Redirects
  * ============================================================================
@@ -959,21 +1293,24 @@ function tigon_dms_create_woo_product($cart_id, $title, $price, $cart_data, $spe
     }
 
     // Price fields for WooCommerce compatibility (only set if valid price)
+    // Prices must be stored as decimal strings (e.g. "7995.00") for valid structured data
     if (!empty($price) && floatval($price) > 0) {
-        update_post_meta($product_id, '_regular_price', floatval($price));
-        update_post_meta($product_id, '_price', floatval($price));
+        $formatted_price = number_format(floatval($price), 2, '.', '');
+        update_post_meta($product_id, '_regular_price', $formatted_price);
+        update_post_meta($product_id, '_price', $formatted_price);
 
         // Sale price
         $sale_price = $cart_data['salePrice'] ?? '';
         if (!empty($sale_price) && floatval($sale_price) > 0 && floatval($sale_price) < floatval($price)) {
-            update_post_meta($product_id, '_sale_price', floatval($sale_price));
-            update_post_meta($product_id, '_price', floatval($sale_price));
+            $formatted_sale = number_format(floatval($sale_price), 2, '.', '');
+            update_post_meta($product_id, '_sale_price', $formatted_sale);
+            update_post_meta($product_id, '_price', $formatted_sale);
         }
     } else {
         // Log warning for products with no valid price
         error_log('DMS Sync: Product ' . $product_id . ' (cart ' . $cart_id . ') has no valid retailPrice: ' . var_export($price, true));
     }
-    
+
     // Enable shipping (not virtual)
     update_post_meta($product_id, '_virtual', 'no');
     update_post_meta($product_id, '_downloadable', 'no');
@@ -1077,15 +1414,18 @@ function tigon_dms_update_woo_product($product_id, $title, $price, $cart_data, $
     $store_id = $cart_data['cartLocation']['locationId'] ?? '';
 
     // Update price (only if retailPrice is valid)
+    // Prices must be stored as decimal strings (e.g. "7995.00") for valid structured data
     if (!empty($price) && floatval($price) > 0) {
-        update_post_meta($product_id, '_regular_price', floatval($price));
-        update_post_meta($product_id, '_price', floatval($price));
+        $formatted_price = number_format(floatval($price), 2, '.', '');
+        update_post_meta($product_id, '_regular_price', $formatted_price);
+        update_post_meta($product_id, '_price', $formatted_price);
 
         // Sale price
         $sale_price = $cart_data['salePrice'] ?? '';
         if (!empty($sale_price) && floatval($sale_price) > 0 && floatval($sale_price) < floatval($price)) {
-            update_post_meta($product_id, '_sale_price', floatval($sale_price));
-            update_post_meta($product_id, '_price', floatval($sale_price));
+            $formatted_sale = number_format(floatval($sale_price), 2, '.', '');
+            update_post_meta($product_id, '_sale_price', $formatted_sale);
+            update_post_meta($product_id, '_price', $formatted_sale);
         } else {
             delete_post_meta($product_id, '_sale_price');
         }

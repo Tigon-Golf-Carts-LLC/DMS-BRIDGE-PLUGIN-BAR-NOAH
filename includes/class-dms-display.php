@@ -365,12 +365,14 @@ class DMS_Display {
             <div class="dms-cart-gallery">
                 <?php if (!empty($gallery_images)): ?>
                     <div class="dms-gallery-main">
-                        <img src="<?php echo esc_url($gallery_images[0]); ?>" alt="<?php echo esc_attr($make . ' ' . $model); ?>" id="dms-main-image">
+                        <img src="<?php echo esc_url($gallery_images[0]); ?>" alt="<?php echo esc_attr($make . ' ' . $model . ' ' . $color . ' golf cart in ' . $location_string); ?>" id="dms-main-image">
                     </div>
                     <?php if (count($gallery_images) > 1): ?>
                         <div class="dms-gallery-thumbnails">
-                            <?php foreach ($gallery_images as $index => $img_url): ?>
-                                <img src="<?php echo esc_url($img_url); ?>" alt="Thumbnail <?php echo $index + 1; ?>" class="dms-gallery-thumb <?php echo $index === 0 ? 'active' : ''; ?>" onclick="document.getElementById('dms-main-image').src = '<?php echo esc_js($img_url); ?>'; document.querySelectorAll('.dms-gallery-thumb').forEach(t => t.classList.remove('active')); this.classList.add('active');">
+                            <?php foreach ($gallery_images as $index => $img_url):
+                                $thumb_alt = esc_attr($make . ' ' . $model . ' ' . $color . ' golf cart image ' . ($index + 1));
+                            ?>
+                                <img src="<?php echo esc_url($img_url); ?>" alt="<?php echo $thumb_alt; ?>" class="dms-gallery-thumb <?php echo $index === 0 ? 'active' : ''; ?>" onclick="document.getElementById('dms-main-image').src = '<?php echo esc_js($img_url); ?>'; document.querySelectorAll('.dms-gallery-thumb').forEach(t => t.classList.remove('active')); this.classList.add('active');">
                             <?php endforeach; ?>
                         </div>
                     <?php endif; ?>
@@ -505,7 +507,7 @@ class DMS_Display {
                 <a href="#warranty" class="dms-warranty-btn">Learn More</a>
             </div>
 
-            <!-- SEO Description (hidden visually, but in DOM) -->
+            <!-- SEO Description -->
             <div class="dms-seo-description" style="position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden;">
                 <p>
                     <?php
@@ -514,7 +516,7 @@ class DMS_Display {
                     if (!empty($model)) $seo_parts[] = $model;
                     if (!empty($year)) $seo_parts[] = $year;
                     if (!empty($color)) $seo_parts[] = $color;
-                    
+
                     $seo_text = implode(' ', $seo_parts);
                     if (!empty($location_string)) {
                         $seo_text .= ' in ' . $location_string;
@@ -525,11 +527,84 @@ class DMS_Display {
                     if (!empty($cart['notes'])) {
                         $seo_text .= '. ' . $cart['notes'];
                     }
-                    
+
                     echo esc_html($seo_text);
                     ?>
                 </p>
             </div>
+
+            <?php
+            // Product JSON-LD structured data for Google rich results
+            $schema_image = !empty($gallery_images) ? $gallery_images[0] : '';
+            $schema_price = ($retail_price > 0) ? number_format(floatval($retail_price), 2, '.', '') : '0.00';
+            $schema_availability = $is_in_stock ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock';
+            $schema_condition = !empty($cart['isUsed']) ? 'https://schema.org/UsedCondition' : 'https://schema.org/NewCondition';
+            $schema_sku = $cart['vinNo'] ?? ($cart['serialNo'] ?? '');
+
+            $product_schema = array(
+                '@context'    => 'https://schema.org',
+                '@type'       => 'Product',
+                'name'        => $make . ' ' . $model . ' ' . $year,
+                'description' => $seo_text,
+                'brand'       => array(
+                    '@type' => 'Brand',
+                    'name'  => $make,
+                ),
+                'color'       => $color,
+                'offers'      => array(
+                    '@type'                   => 'Offer',
+                    'url'                     => home_url('/dms/cart/' . $cart_id . '/'),
+                    'priceCurrency'           => 'USD',
+                    'price'                   => $schema_price,
+                    'priceValidUntil'         => date('Y-m-d', strtotime('+1 year')),
+                    'availability'            => $schema_availability,
+                    'itemCondition'           => $schema_condition,
+                    'hasMerchantReturnPolicy' => array(
+                        '@type'                => 'MerchantReturnPolicy',
+                        'applicableCountry'    => 'US',
+                        'returnPolicyCategory' => 'https://schema.org/MerchantReturnNotPermitted',
+                    ),
+                    'shippingDetails'         => array(
+                        '@type'               => 'OfferShippingDetails',
+                        'shippingRate'        => array(
+                            '@type'    => 'MonetaryAmount',
+                            'value'    => '0',
+                            'currency' => 'USD',
+                        ),
+                        'shippingDestination' => array(
+                            '@type'          => 'DefinedRegion',
+                            'addressCountry' => 'US',
+                        ),
+                        'deliveryTime'        => array(
+                            '@type'        => 'ShippingDeliveryTime',
+                            'handlingTime' => array(
+                                '@type'    => 'QuantitativeValue',
+                                'minValue' => 1,
+                                'maxValue' => 5,
+                                'unitCode' => 'DAY',
+                            ),
+                            'transitTime'  => array(
+                                '@type'    => 'QuantitativeValue',
+                                'minValue' => 3,
+                                'maxValue' => 14,
+                                'unitCode' => 'DAY',
+                            ),
+                        ),
+                    ),
+                ),
+            );
+
+            // Add image(s) to schema
+            if (!empty($gallery_images)) {
+                $product_schema['image'] = $gallery_images;
+            }
+
+            // Add SKU if available
+            if (!empty($schema_sku)) {
+                $product_schema['sku'] = $schema_sku;
+            }
+            ?>
+            <script type="application/ld+json"><?php echo wp_json_encode($product_schema, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT); ?></script>
         </div>
         <?php
     }
