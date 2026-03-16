@@ -124,11 +124,19 @@ class DMS_Sync
                     continue;
                 }
 
-                // Skip carts with DELETE in serialNo or vinNo (mirrors Core.php:506-512)
+                // DELETE in serial/VIN — delete existing product + assets, then skip
                 $serial = strtoupper($cart_data['serialNo'] ?? '');
                 $vin    = strtoupper($cart_data['vinNo'] ?? '');
                 if (str_contains($serial, 'DELETE') || str_contains($vin, 'DELETE')) {
-                    $stats['skipped']++;
+                    $existing_pid = function_exists('tigon_dms_get_product_by_cart_id')
+                        ? tigon_dms_get_product_by_cart_id($cart_id)
+                        : false;
+                    if ($existing_pid) {
+                        \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
+                        $stats['sold']++;
+                    } else {
+                        $stats['skipped']++;
+                    }
                     continue;
                 }
 

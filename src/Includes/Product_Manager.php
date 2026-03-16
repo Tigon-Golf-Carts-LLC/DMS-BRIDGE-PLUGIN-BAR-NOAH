@@ -97,6 +97,32 @@ class Product_Manager
     }
 
     /**
+     * Get the specific reason(s) why a cart is not eligible for the website.
+     *
+     * Returns a human-readable string listing every failed condition.
+     * If the cart IS eligible, returns an empty string.
+     *
+     * @param array $cart_data DMS cart payload.
+     * @return string Reason string, e.g. "isInStock=false, isInBoneyard=true".
+     */
+    public static function get_ineligibility_reason(array $cart_data): string
+    {
+        $reasons = [];
+
+        if (empty($cart_data['isInStock'])) {
+            $reasons[] = 'isInStock=false';
+        }
+        if (!empty($cart_data['isInBoneyard'])) {
+            $reasons[] = 'isInBoneyard=true';
+        }
+        if (empty($cart_data['advertising']['needOnWebsite'])) {
+            $reasons[] = 'needOnWebsite=false';
+        }
+
+        return implode(', ', $reasons);
+    }
+
+    /**
      * Process a DMS cart: create/update if eligible, delete if not.
      *
      * This is the main entry point for sync operations. It checks
