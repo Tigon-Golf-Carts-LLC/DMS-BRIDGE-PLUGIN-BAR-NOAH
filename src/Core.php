@@ -519,10 +519,19 @@ class Core
             $loc_name   = \DMS_API::get_city_by_store_id($loc_id);
             \Tigon\DmsConnect\Admin\CartModel::upsert_from_api($cart, $loc_name, '', $loc_id);
 
-            // Skip carts marked DELETE
+            // DELETE in serial/VIN — delete existing product + assets, then skip
             $serial = strtoupper($cart['serialNo'] ?? '');
             $vin = strtoupper($cart['vinNo'] ?? '');
             if (str_contains($serial, 'DELETE') || str_contains($vin, 'DELETE')) {
+                $cart_del_id = $cart['_id'] ?? '';
+                if ($cart_del_id) {
+                    $existing_pid = function_exists('tigon_dms_get_product_by_cart_id')
+                        ? tigon_dms_get_product_by_cart_id($cart_del_id)
+                        : false;
+                    if ($existing_pid) {
+                        \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
+                    }
+                }
                 $stats['skipped']++;
                 continue;
             }
@@ -667,6 +676,12 @@ class Core
             $serial = strtoupper($cart['serialNo'] ?? '');
             $vin    = strtoupper($cart['vinNo'] ?? '');
             if (str_contains($serial, 'DELETE') || str_contains($vin, 'DELETE')) {
+                $existing_pid = function_exists('tigon_dms_get_product_by_cart_id')
+                    ? tigon_dms_get_product_by_cart_id($cart_id)
+                    : false;
+                if ($existing_pid) {
+                    \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
+                }
                 continue;
             }
 
@@ -843,7 +858,7 @@ class Core
         }
 
         ignore_user_abort(true);
-        set_time_limit(90);
+        set_time_limit(270);
 
         try {
             $sync_id = sanitize_text_field($_POST['sync_id'] ?? '');
@@ -928,23 +943,32 @@ class Core
 
                 // Eligibility check — delete product if ineligible
                 if (!\Tigon\DmsConnect\Includes\Product_Manager::should_be_on_website($cart)) {
+                    $reason = \Tigon\DmsConnect\Includes\Product_Manager::get_ineligibility_reason($cart);
                     $existing_pid = function_exists('tigon_dms_get_product_by_cart_id')
                         ? tigon_dms_get_product_by_cart_id($cart_id)
                         : false;
                     if ($existing_pid) {
                         \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
-                        $stats['skip_details'][] = "{$cart_label}: Deleted — not eligible for website";
+                        $stats['skip_details'][] = "{$cart_label}: Deleted — not eligible ({$reason})";
                     } else {
                         $stats['skipped']++;
-                        $stats['skip_details'][] = "{$cart_label}: Skipped — not eligible for website";
+                        $stats['skip_details'][] = "{$cart_label}: Skipped — not eligible ({$reason})";
                     }
                     continue;
                 }
                 $serial_upper = strtoupper($cart['serialNo'] ?? '');
                 $vin    = strtoupper($cart['vinNo'] ?? '');
                 if (str_contains($serial_upper, 'DELETE') || str_contains($vin, 'DELETE')) {
-                    $stats['skipped']++;
-                    $stats['skip_details'][] = "{$cart_label}: Skipped — serial/VIN contains DELETE";
+                    $existing_pid = function_exists('tigon_dms_get_product_by_cart_id')
+                        ? tigon_dms_get_product_by_cart_id($cart_id)
+                        : false;
+                    if ($existing_pid) {
+                        \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
+                        $stats['skip_details'][] = "{$cart_label}: Deleted — serial/VIN contains DELETE (product + assets removed)";
+                    } else {
+                        $stats['skipped']++;
+                        $stats['skip_details'][] = "{$cart_label}: Skipped — serial/VIN contains DELETE (no existing product to remove)";
+                    }
                     continue;
                 }
 
@@ -1132,13 +1156,22 @@ class Core
         }
         unset($c);
 
-        // Deduplicate new carts
+        // Deduplicate new carts and delete products flagged DELETE
         $seen_new = [];
         $filtered_new = [];
         foreach ($new_carts as $cart) {
             $serial = strtoupper($cart['serialNo'] ?? '');
             $vin = strtoupper($cart['vinNo'] ?? '');
             if (str_contains($serial, 'DELETE') || str_contains($vin, 'DELETE')) {
+                $cart_del_id = $cart['_id'] ?? '';
+                if ($cart_del_id) {
+                    $existing_pid = function_exists('tigon_dms_get_product_by_cart_id')
+                        ? tigon_dms_get_product_by_cart_id($cart_del_id)
+                        : false;
+                    if ($existing_pid) {
+                        \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
+                    }
+                }
                 continue;
             }
             $location_id = $cart['cartLocation']['locationId'] ?? '';
@@ -1196,7 +1229,7 @@ class Core
 
         try {
         ignore_user_abort(true);
-        set_time_limit(90);
+        set_time_limit(270);
 
         $sync_id = sanitize_text_field($_POST['sync_id'] ?? '');
 

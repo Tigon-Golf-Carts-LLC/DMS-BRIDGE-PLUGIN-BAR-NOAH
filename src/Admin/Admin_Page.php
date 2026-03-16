@@ -1143,7 +1143,7 @@ class Admin_Page
                     url: ajaxurl,
                     type: "POST",
                     data: { action: "tigon_dms_sync_selective_init", nonce: selectiveNonce, sync_type: syncType },
-                    timeout: 60000,
+                    timeout: 120000,
                     success: function(initResp) {
                         if (!initResp.success) {
                             $spinner.removeClass("is-active");
@@ -1157,7 +1157,7 @@ class Admin_Page
                         var batchSize = initResp.data.batch_size || 5;
                         var cumulative = { created: 0, updated: 0, skipped: 0, errors: 0, error_details: [], skip_details: [] };
                         var retries = 0;
-                        var maxRetries = 2;
+                        var maxRetries = 3;
 
                         $btn.text("Syncing " + labels[syncType] + "...");
                         showProgress($results, total);
@@ -1176,7 +1176,7 @@ class Admin_Page
                                 url: ajaxurl,
                                 type: "POST",
                                 data: { action: "tigon_dms_sync_selective_batch", nonce: selectiveNonce, sync_id: syncId },
-                                timeout: 95000,
+                                timeout: 280000,
                                 success: function(batchResp) {
                                     retries = 0; // reset on success
                                     if (!batchResp.success) {
@@ -1249,7 +1249,7 @@ class Admin_Page
                     url: ajaxurl,
                     type: "POST",
                     data: { action: "tigon_dms_sync_mapped_init", nonce: mappedNonce },
-                    timeout: 95000,
+                    timeout: 280000,
                     success: function(initResp) {
                         if (!initResp.success) {
                             $spinner.removeClass("is-active");
@@ -1263,7 +1263,7 @@ class Admin_Page
                         var batchSize = initResp.data.batch_size || 3;
                         var cumulative = { created: 0, updated: 0, skipped: 0, errors: 0, error_details: [], skip_details: [] };
                         var retries = 0;
-                        var maxRetries = 2;
+                        var maxRetries = 3;
                         var processed = 0;
 
                         // Append init-phase errors
@@ -1288,7 +1288,7 @@ class Admin_Page
                                 url: ajaxurl,
                                 type: "POST",
                                 data: { action: "tigon_dms_sync_mapped_batch", nonce: mappedNonce, sync_id: syncId },
-                                timeout: 95000,
+                                timeout: 280000,
                                 success: function(batchResp) {
                                     retries = 0;
                                     if (!batchResp.success) {
