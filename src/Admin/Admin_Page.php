@@ -930,6 +930,7 @@ class Admin_Page
         $selective_nonce = wp_create_nonce('tigon_dms_sync_selective_nonce');
         $mapped_nonce = wp_create_nonce('tigon_dms_sync_mapped_nonce');
         $publish_nonce = wp_create_nonce('tigon_dms_publish_synced_nonce');
+        $bulk_delete_nonce = wp_create_nonce('tigon_dms_bulk_delete_nonce');
 
         self::page_header();
 
@@ -1030,6 +1031,52 @@ class Admin_Page
                     <div id="dms-publish-results" style="display:none; width:100%;"></div>
                 </div>
             </div>
+
+            <!-- ====== BULK DELETE BY DATE RANGE ====== -->
+            <div class="action-box-group" style="grid-template-columns:1fr; grid-template-rows:auto;">
+                <div class="action-box primary" style="flex-direction:column; gap:1rem; align-items:flex-start; border-left:4px solid #dc3545;">
+                    <h2 style="margin:0; color:#dc3545;">Bulk Delete Products by Date Range</h2>
+                    <p>Permanently delete DMS-synced WooCommerce products created within a date range. <strong>This removes the product, all images, gallery photos, and Monroney stickers.</strong> Optionally filter by Inventory Status. This action cannot be undone.</p>
+
+                    <div style="display:flex; flex-wrap:wrap; gap:1rem; align-items:flex-end; width:100%;">
+                        <div style="display:flex; flex-direction:column; gap:0.25rem;">
+                            <label for="dms-delete-date-from" style="font-weight:600; font-size:0.85rem;">From Date</label>
+                            <input type="date" id="dms-delete-date-from" style="padding:0.4rem 0.6rem; border:1px solid #8c8f94; border-radius:4px;" />
+                        </div>
+                        <div style="display:flex; flex-direction:column; gap:0.25rem;">
+                            <label for="dms-delete-date-to" style="font-weight:600; font-size:0.85rem;">To Date</label>
+                            <input type="date" id="dms-delete-date-to" style="padding:0.4rem 0.6rem; border:1px solid #8c8f94; border-radius:4px;" />
+                        </div>
+                        <div style="display:flex; flex-direction:column; gap:0.25rem;">
+                            <label for="dms-delete-inv-status" style="font-weight:600; font-size:0.85rem;">Inventory Status <span style="font-weight:400; color:#666;">(optional)</span></label>
+                            <select id="dms-delete-inv-status" style="padding:0.4rem 0.6rem; border:1px solid #8c8f94; border-radius:4px; min-width:220px;">
+                                <option value="">All Statuses</option>';
+
+        // Populate inventory status options dynamically
+        $inv_terms = get_terms(['taxonomy' => 'inventory-status', 'hide_empty' => false, 'orderby' => 'name']);
+        if (!is_wp_error($inv_terms) && !empty($inv_terms)) {
+            foreach ($inv_terms as $term) {
+                echo '<option value="' . esc_attr($term->term_id) . '">' . esc_html($term->name) . ' (' . intval($term->count) . ')</option>';
+            }
+        }
+
+        echo '
+                            </select>
+                        </div>
+                    </div>
+
+                    <div style="display:flex; align-items:center; gap:0.75rem; margin-top:0.5rem;">
+                        <button type="button" id="dms-bulk-delete-preview-btn" class="button" style="height:auto; min-width:auto; padding:0.6rem 2rem; font-size:14px;">
+                            Preview Products to Delete
+                        </button>
+                        <button type="button" id="dms-bulk-delete-btn" class="button" style="height:auto; min-width:auto; background-color:#dc3545; border-color:#dc3545; color:#fff; padding:0.6rem 2rem; font-size:14px; display:none;">
+                            Delete All Matched Products
+                        </button>
+                        <span id="dms-bulk-delete-spinner" class="spinner" style="float:none; margin-top:0;"></span>
+                    </div>
+                    <div id="dms-bulk-delete-results" style="display:none; width:100%;"></div>
+                </div>
+            </div>
         </div>
 
         <style>
@@ -1048,6 +1095,7 @@ class Admin_Page
             var selectiveNonce = ' . wp_json_encode($selective_nonce) . ';
             var mappedNonce = ' . wp_json_encode($mapped_nonce) . ';
             var publishNonce = ' . wp_json_encode($publish_nonce) . ';
+            var bulkDeleteNonce = ' . wp_json_encode($bulk_delete_nonce) . ';
 
             // Highlight selected radio option
             $("input[name=sync_type]").on("change", function() {
@@ -1486,6 +1534,234 @@ class Admin_Page
                         html += "<li>" + $("<span>").text(e).html() + "</li>";
                     });
                     if (stats.errors.length > 50) html += "<li><em>...and " + (stats.errors.length - 50) + " more</em></li>";
+                    html += "</ul></details>";
+                }
+                html += "</div>";
+                $results.html(html).show();
+            }
+
+            // ─── Bulk Delete by Date Range ───────────────────────────────
+            var $delPreviewBtn = $("#dms-bulk-delete-preview-btn");
+            var $delBtn = $("#dms-bulk-delete-btn");
+            var $delSpinner = $("#dms-bulk-delete-spinner");
+            var $delResults = $("#dms-bulk-delete-results");
+
+            $delPreviewBtn.on("click", function() {
+                var dateFrom = $("#dms-delete-date-from").val();
+                var dateTo = $("#dms-delete-date-to").val();
+                var invStatus = $("#dms-delete-inv-status").val();
+
+                if (!dateFrom || !dateTo) {
+                    alert("Please select both a From Date and a To Date.");
+                    return;
+                }
+                if (dateFrom > dateTo) {
+                    alert("From Date must be on or before To Date.");
+                    return;
+                }
+
+                $delPreviewBtn.prop("disabled", true).text("Scanning...");
+                $delBtn.hide();
+                $delSpinner.addClass("is-active");
+                $delResults.hide();
+
+                $.ajax({
+                    url: ajaxurl,
+                    type: "POST",
+                    data: {
+                        action: "tigon_dms_bulk_delete_init",
+                        nonce: bulkDeleteNonce,
+                        date_from: dateFrom,
+                        date_to: dateTo,
+                        inventory_status: invStatus,
+                        preview_only: "1"
+                    },
+                    timeout: 120000,
+                    success: function(resp) {
+                        $delSpinner.removeClass("is-active");
+                        $delPreviewBtn.prop("disabled", false).text("Preview Products to Delete");
+                        if (!resp.success) {
+                            showError($delResults, resp.data || "Preview failed");
+                            return;
+                        }
+                        var d = resp.data;
+                        var statusLabel = $("#dms-delete-inv-status option:selected").text();
+                        if (!invStatus) statusLabel = "All Statuses";
+
+                        var html = \'<div style="background:#fff3cd;border:1px solid #ffc107;padding:1rem;border-radius:6px;margin-top:0.5rem;">\';
+                        html += \'<h3 style="margin:0 0 0.5rem 0; color:#856404;">Preview: \' + d.total + \' products found</h3>\';
+                        html += \'<ul style="list-style:disc;padding-left:1.5rem;">\';
+                        html += "<li><strong>Date range:</strong> " + $("<span>").text(dateFrom).html() + " to " + $("<span>").text(dateTo).html() + "</li>";
+                        html += "<li><strong>Inventory status:</strong> " + $("<span>").text(statusLabel).html() + "</li>";
+                        html += "<li><strong>Products to delete:</strong> " + d.total + "</li>";
+                        html += "</ul>";
+                        if (d.sample && d.sample.length > 0) {
+                            html += \'<details style="margin-top:0.5rem;"><summary style="cursor:pointer;font-weight:600;color:#856404;">Sample products (\' + Math.min(d.sample.length, 25) + \' of \' + d.total + ")</summary>";
+                            html += \'<ul style="list-style:disc;padding-left:1.5rem;font-size:0.85rem;max-height:250px;overflow-y:auto;">\';
+                            d.sample.slice(0, 25).forEach(function(p) {
+                                html += "<li>" + $("<span>").text(p).html() + "</li>";
+                            });
+                            if (d.total > 25) html += "<li><em>...and " + (d.total - 25) + " more</em></li>";
+                            html += "</ul></details>";
+                        }
+                        html += "</div>";
+                        $delResults.html(html).show();
+
+                        if (d.total > 0) {
+                            $delBtn.show().text("Delete All " + d.total + " Products");
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        $delSpinner.removeClass("is-active");
+                        $delPreviewBtn.prop("disabled", false).text("Preview Products to Delete");
+                        showError($delResults, "Preview request failed: " + (error || status));
+                    }
+                });
+            });
+
+            $delBtn.on("click", function() {
+                var dateFrom = $("#dms-delete-date-from").val();
+                var dateTo = $("#dms-delete-date-to").val();
+                var invStatus = $("#dms-delete-inv-status").val();
+                var total = parseInt($delBtn.text().replace(/\D/g, ""), 10) || 0;
+                var statusLabel = invStatus ? $("#dms-delete-inv-status option:selected").text() : "All Statuses";
+
+                if (!confirm("WARNING: You are about to permanently delete " + total + " products and ALL their images, gallery photos, and Monroney stickers.\\n\\nDate range: " + dateFrom + " to " + dateTo + "\\nInventory status: " + statusLabel + "\\n\\nThis CANNOT be undone. Continue?")) {
+                    return;
+                }
+
+                $delBtn.prop("disabled", true).text("Deleting...");
+                $delPreviewBtn.prop("disabled", true);
+                $delSpinner.addClass("is-active");
+
+                // Step 1: Init
+                $.ajax({
+                    url: ajaxurl,
+                    type: "POST",
+                    data: {
+                        action: "tigon_dms_bulk_delete_init",
+                        nonce: bulkDeleteNonce,
+                        date_from: dateFrom,
+                        date_to: dateTo,
+                        inventory_status: invStatus
+                    },
+                    timeout: 120000,
+                    success: function(initResp) {
+                        if (!initResp.success) {
+                            $delSpinner.removeClass("is-active");
+                            $delBtn.prop("disabled", false).show();
+                            $delPreviewBtn.prop("disabled", false);
+                            showError($delResults, initResp.data || "Failed to initialize delete");
+                            return;
+                        }
+
+                        var syncId = initResp.data.sync_id;
+                        var totalProducts = initResp.data.total;
+                        var batchSize = initResp.data.batch_size || 3;
+                        var cumulative = { deleted: 0, errors: 0, error_details: [], delete_details: [] };
+                        var retries = 0;
+                        var maxRetries = 3;
+
+                        showProgress($delResults, totalProducts);
+                        $delResults.find(".sync-progress-status").text("Deleting " + totalProducts + " products, " + batchSize + " at a time...");
+                        $delResults.find(".sync-live-stats").html(
+                            \'<span class="errors" style="color:#dc3545;">Deleted: <em>0</em></span> \' +
+                            \'<span class="skipped" style="color:#856404;">Errors: <em>0</em></span>\'
+                        );
+
+                        function processBatch() {
+                            $.ajax({
+                                url: ajaxurl,
+                                type: "POST",
+                                data: { action: "tigon_dms_bulk_delete_batch", nonce: bulkDeleteNonce, sync_id: syncId },
+                                timeout: 280000,
+                                success: function(batchResp) {
+                                    retries = 0;
+                                    if (!batchResp.success) {
+                                        cumulative.errors++;
+                                        cumulative.error_details.push(batchResp.data || "unknown batch error");
+                                        $delSpinner.removeClass("is-active");
+                                        $delBtn.hide();
+                                        $delPreviewBtn.prop("disabled", false).text("Preview Products to Delete");
+                                        showBulkDeleteResults($delResults, cumulative, totalProducts);
+                                        return;
+                                    }
+
+                                    var d = batchResp.data;
+                                    cumulative.deleted += (d.deleted || 0);
+                                    cumulative.errors += (d.errors || 0);
+                                    cumulative.error_details = cumulative.error_details.concat(d.error_details || []);
+                                    cumulative.delete_details = cumulative.delete_details.concat(d.delete_details || []);
+
+                                    var processed = d.processed || 0;
+                                    var pct = totalProducts > 0 ? Math.min(Math.round((processed / totalProducts) * 100), 100) : 0;
+                                    $delResults.find(".sync-progress-bar").css("width", pct + "%");
+                                    $delResults.find(".sync-progress-text").text(processed + " / " + totalProducts + " (" + pct + "%)");
+                                    $delResults.find(".sync-progress-status").text("Deleting... " + processed + " of " + totalProducts);
+                                    $delResults.find(".errors em").text(cumulative.deleted);
+                                    $delResults.find(".skipped em").text(cumulative.errors);
+
+                                    if (d.done) {
+                                        $delSpinner.removeClass("is-active");
+                                        $delBtn.hide();
+                                        $delPreviewBtn.prop("disabled", false).text("Preview Products to Delete");
+                                        showBulkDeleteResults($delResults, cumulative, totalProducts);
+                                    } else {
+                                        processBatch();
+                                    }
+                                },
+                                error: function(xhr, status, error) {
+                                    retries++;
+                                    if (retries <= maxRetries) {
+                                        cumulative.error_details.push("Network error (attempt " + retries + "): " + (error || status) + " [HTTP " + (xhr ? xhr.status : "?") + "] — retrying in " + (retries * 2) + "s...");
+                                        setTimeout(processBatch, retries * 2000);
+                                    } else {
+                                        cumulative.errors++;
+                                        cumulative.error_details.push("Failed after " + maxRetries + " retries: " + (error || status));
+                                        $delSpinner.removeClass("is-active");
+                                        $delBtn.hide();
+                                        $delPreviewBtn.prop("disabled", false).text("Preview Products to Delete");
+                                        showBulkDeleteResults($delResults, cumulative, totalProducts);
+                                    }
+                                }
+                            });
+                        }
+
+                        processBatch();
+                    },
+                    error: function(xhr, status, error) {
+                        $delSpinner.removeClass("is-active");
+                        $delBtn.prop("disabled", false).show();
+                        $delPreviewBtn.prop("disabled", false).text("Preview Products to Delete");
+                        showError($delResults, "Failed to initialize delete: " + (error || status));
+                    }
+                });
+            });
+
+            function showBulkDeleteResults($results, stats, total) {
+                var html = \'<div style="background:#f8d7da;border:1px solid #f5c6cb;padding:1rem;border-radius:6px;">\';
+                html += \'<h3 style="margin:0 0 0.5rem 0; color:#721c24;">Bulk Delete Complete</h3>\';
+                html += \'<ul style="list-style:disc;padding-left:1.5rem;">\';
+                html += "<li><strong>Total matched:</strong> " + total + "</li>";
+                html += "<li><strong>Deleted:</strong> " + stats.deleted + " (product + all images + Monroney stickers)</li>";
+                if (stats.errors > 0) html += "<li><strong>Errors:</strong> " + stats.errors + "</li>";
+                html += "</ul>";
+                if (stats.delete_details && stats.delete_details.length > 0) {
+                    html += \'<details style="margin-top:0.5rem;"><summary style="cursor:pointer;font-weight:600;color:#721c24;">Deleted products (\' + stats.delete_details.length + ")</summary>";
+                    html += \'<ul style="list-style:disc;padding-left:1.5rem;font-size:0.85rem;max-height:300px;overflow-y:auto;">\';
+                    stats.delete_details.slice(0, 100).forEach(function(e) {
+                        html += "<li>" + $("<span>").text(e).html() + "</li>";
+                    });
+                    if (stats.delete_details.length > 100) html += "<li><em>...and " + (stats.delete_details.length - 100) + " more</em></li>";
+                    html += "</ul></details>";
+                }
+                if (stats.error_details && stats.error_details.length > 0) {
+                    html += \'<details style="margin-top:0.5rem;"><summary style="cursor:pointer;font-weight:600;color:#dc3545;">Error details (\' + stats.error_details.length + ")</summary>";
+                    html += \'<ul style="list-style:disc;padding-left:1.5rem;font-size:0.85rem;max-height:300px;overflow-y:auto;">\';
+                    stats.error_details.slice(0, 50).forEach(function(e) {
+                        html += "<li>" + $("<span>").text(e).html() + "</li>";
+                    });
+                    if (stats.error_details.length > 50) html += "<li><em>...and " + (stats.error_details.length - 50) + " more</em></li>";
                     html += "</ul></details>";
                 }
                 html += "</div>";

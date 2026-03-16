@@ -49,6 +49,8 @@ class Core
         add_action('wp_ajax_tigon_dms_sync_mapped_batch', 'Tigon\DmsConnect\Core::ajax_sync_mapped_batch');
         add_action('wp_ajax_tigon_dms_publish_synced_init', 'Tigon\DmsConnect\Core::ajax_publish_synced_init');
         add_action('wp_ajax_tigon_dms_publish_synced_batch', 'Tigon\DmsConnect\Core::ajax_publish_synced_batch');
+        add_action('wp_ajax_tigon_dms_bulk_delete_init', 'Tigon\DmsConnect\Core::ajax_bulk_delete_init');
+        add_action('wp_ajax_tigon_dms_bulk_delete_batch', 'Tigon\DmsConnect\Core::ajax_bulk_delete_batch');
 
         // Field mapping AJAX handlers
         add_action('wp_ajax_tigon_dms_get_field_mappings', 'Tigon\DmsConnect\Core::ajax_get_field_mappings');
@@ -1594,6 +1596,203 @@ class Core
             ]);
         } catch (\Throwable $e) {
             wp_send_json_error('Publish batch error: ' . $e->getMessage());
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    //  Bulk Delete by Date Range + Inventory Status
+    // ─────────────────────────────────────────────────────────────────
+
+    const BULK_DELETE_BATCH_SIZE = 3;
+
+    /**
+     * AJAX: Init (or preview) — find DMS-synced products in a date range,
+     * optionally filtered by inventory-status taxonomy.
+     *
+     * When preview_only=1 is sent, returns a count + sample list without
+     * creating a transient or preparing for deletion.
+     */
+    public static function ajax_bulk_delete_init()
+    {
+        check_ajax_referer('tigon_dms_bulk_delete_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
+        global $wpdb;
+
+        try {
+            $date_from = sanitize_text_field($_POST['date_from'] ?? '');
+            $date_to   = sanitize_text_field($_POST['date_to'] ?? '');
+            $inv_status = sanitize_text_field($_POST['inventory_status'] ?? '');
+            $preview   = !empty($_POST['preview_only']);
+
+            if (empty($date_from) || empty($date_to)) {
+                wp_send_json_error('Both From Date and To Date are required.');
+                return;
+            }
+
+            // Build the query — DMS products in the date range
+            $sql = "SELECT DISTINCT p.ID
+                    FROM {$wpdb->posts} p
+                    INNER JOIN {$wpdb->postmeta} pm
+                       ON p.ID = pm.post_id AND pm.meta_key = '_dms_cart_id'";
+
+            // Optional inventory-status taxonomy filter
+            if (!empty($inv_status)) {
+                $sql .= " INNER JOIN {$wpdb->term_relationships} tr
+                             ON p.ID = tr.object_id
+                          INNER JOIN {$wpdb->term_taxonomy} tt
+                             ON tr.term_taxonomy_id = tt.term_taxonomy_id
+                                AND tt.taxonomy = 'inventory-status'
+                                AND tt.term_id = " . intval($inv_status);
+            }
+
+            $sql .= $wpdb->prepare(
+                " WHERE p.post_type = 'product'
+                    AND p.post_date >= %s
+                    AND p.post_date <= %s",
+                $date_from . ' 00:00:00',
+                $date_to . ' 23:59:59'
+            );
+
+            $product_ids = $wpdb->get_col($sql);
+
+            if (empty($product_ids)) {
+                wp_send_json_success([
+                    'total'  => 0,
+                    'done'   => true,
+                    'sample' => [],
+                    'message' => 'No products found matching the criteria.',
+                ]);
+                return;
+            }
+
+            $product_ids = array_map('intval', $product_ids);
+
+            // Build sample list for preview (title + date)
+            $sample = [];
+            $sample_ids = array_slice($product_ids, 0, 25);
+            if (!empty($sample_ids)) {
+                $ids_in = implode(',', $sample_ids);
+                $rows = $wpdb->get_results(
+                    "SELECT ID, post_title, post_date FROM {$wpdb->posts} WHERE ID IN ({$ids_in}) ORDER BY post_date DESC"
+                );
+                foreach ($rows as $row) {
+                    $sample[] = $row->post_title . ' (created ' . date('M j, Y', strtotime($row->post_date)) . ', ID:' . $row->ID . ')';
+                }
+            }
+
+            if ($preview) {
+                wp_send_json_success([
+                    'total'  => count($product_ids),
+                    'sample' => $sample,
+                ]);
+                return;
+            }
+
+            // Not preview — create transient for batch deletion
+            $sync_id = 'dms_del_' . wp_generate_password(16, false);
+            set_transient($sync_id, [
+                'ids'    => $product_ids,
+                'offset' => 0,
+            ], HOUR_IN_SECONDS);
+
+            wp_send_json_success([
+                'sync_id'    => $sync_id,
+                'total'      => count($product_ids),
+                'batch_size' => self::BULK_DELETE_BATCH_SIZE,
+                'sample'     => $sample,
+            ]);
+        } catch (\Throwable $e) {
+            wp_send_json_error('Bulk delete init error: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * AJAX: Batch — delete products 3 at a time.
+     *
+     * Uses Product_Media::delete_product() which removes:
+     * - Featured image
+     * - Gallery images
+     * - Monroney sticker PDF
+     * - Any other media attachments
+     * - WooCommerce lookup table row
+     * - The product post itself (permanent, bypasses trash)
+     */
+    public static function ajax_bulk_delete_batch()
+    {
+        check_ajax_referer('tigon_dms_bulk_delete_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
+        ignore_user_abort(true);
+        set_time_limit(270);
+
+        try {
+            $sync_id = sanitize_text_field($_POST['sync_id'] ?? '');
+            $meta = get_transient($sync_id);
+            if (!is_array($meta) || !isset($meta['ids'])) {
+                wp_send_json_error('Session expired or invalid. Please start again.');
+                return;
+            }
+
+            $ids    = $meta['ids'];
+            $offset = $meta['offset'] ?? 0;
+            $batch  = array_slice($ids, $offset, self::BULK_DELETE_BATCH_SIZE);
+
+            $deleted = 0;
+            $errors  = 0;
+            $error_details  = [];
+            $delete_details = [];
+
+            foreach ($batch as $pid) {
+                $title = get_the_title($pid);
+                $label = $title ? "{$title} (ID:{$pid})" : "ID:{$pid}";
+
+                try {
+                    $result = \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $pid);
+                    if ($result) {
+                        $deleted++;
+                        $delete_details[] = "{$label}: Deleted (product + images + Monroney sticker)";
+                    } else {
+                        $errors++;
+                        $error_details[] = "{$label}: Product not found or already deleted";
+                    }
+                } catch (\Throwable $e) {
+                    $errors++;
+                    $error_details[] = "{$label}: " . $e->getMessage();
+                }
+            }
+
+            $new_offset = $offset + count($batch);
+            $done = $new_offset >= count($ids);
+
+            if ($done) {
+                delete_transient($sync_id);
+                if (function_exists('wc_update_product_lookup_tables')) {
+                    wc_update_product_lookup_tables();
+                }
+                if (class_exists('DMS_API')) {
+                    \DMS_API::clear_caches();
+                }
+            } else {
+                $meta['offset'] = $new_offset;
+                set_transient($sync_id, $meta, HOUR_IN_SECONDS);
+            }
+
+            wp_send_json_success([
+                'deleted'        => $deleted,
+                'errors'         => $errors,
+                'error_details'  => $error_details,
+                'delete_details' => $delete_details,
+                'processed'      => $new_offset,
+                'total'          => count($ids),
+                'done'           => $done,
+            ]);
+        } catch (\Throwable $e) {
+            wp_send_json_error('Bulk delete batch error: ' . $e->getMessage());
         }
     }
 
