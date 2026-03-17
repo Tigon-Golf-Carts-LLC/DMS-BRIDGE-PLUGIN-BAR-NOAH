@@ -395,6 +395,75 @@ add_filter('wp_robots', 'tigon_dms_allow_image_indexing', 99);
  */
 
 /**
+ * Register all custom taxonomies used by the DMS product sync.
+ *
+ * These taxonomies may also be registered by other plugins (e.g., the theme or
+ * a custom taxonomy plugin).  Calling register_taxonomy() for an already-registered
+ * taxonomy is safe — WordPress silently returns the existing taxonomy object.
+ * Registering them here ensures they are always available during WP-Cron
+ * background syncs and admin-triggered syncs regardless of plugin load order.
+ */
+function tigon_dms_register_product_taxonomies() {
+    $taxonomies = array(
+        'manufacturers' => array(
+            'label'        => 'Manufacturers',
+            'hierarchical' => false,
+        ),
+        'models' => array(
+            'label'        => 'Models',
+            'hierarchical' => false,
+        ),
+        'location' => array(
+            'label'        => 'Location',
+            'hierarchical' => true,
+        ),
+        'sound-systems' => array(
+            'label'        => 'Sound Systems',
+            'hierarchical' => false,
+        ),
+        'added-features' => array(
+            'label'        => 'Added Features',
+            'hierarchical' => false,
+        ),
+        'vehicle-class' => array(
+            'label'        => 'Vehicle Class',
+            'hierarchical' => false,
+        ),
+        'drivetrain' => array(
+            'label'        => 'Drivetrain',
+            'hierarchical' => false,
+        ),
+        'inventory-status' => array(
+            'label'        => 'Inventory Status',
+            'hierarchical' => false,
+        ),
+        'rims' => array(
+            'label'        => 'Rims',
+            'hierarchical' => false,
+        ),
+        'product-brand' => array(
+            'label'        => 'Brands',
+            'hierarchical' => false,
+        ),
+    );
+
+    foreach ($taxonomies as $slug => $args) {
+        if (!taxonomy_exists($slug)) {
+            register_taxonomy($slug, 'product', array(
+                'label'             => $args['label'],
+                'hierarchical'      => $args['hierarchical'],
+                'public'            => true,
+                'show_ui'           => true,
+                'show_in_rest'      => true,
+                'show_admin_column' => true,
+                'rewrite'           => array('slug' => $slug),
+            ));
+        }
+    }
+}
+add_action('init', 'tigon_dms_register_product_taxonomies', 5);
+
+/**
  * Add rewrite rule for /dms/cart/{id}
  */
 function tigon_dms_add_cart_route() {
@@ -2649,7 +2718,7 @@ function tigon_dms_assign_custom_taxonomies($product_id, $cart_data) {
     // Map taxonomy slugs to Attributes property names for O(1) lookups
     $taxonomy_map = array(
         'manufacturers'    => 'manufacturers_taxonomy',
-        'product_brand'    => 'brands_taxonomy',
+        'product-brand'    => 'brands_taxonomy',
         'models'           => 'models_taxonomy',
         'sound-systems'    => 'sound_systems_taxonomy',
         'added-features'   => 'added_features_taxonomy',
@@ -2662,6 +2731,7 @@ function tigon_dms_assign_custom_taxonomies($product_id, $cart_data) {
     // Helper: safely assign terms using Attributes cache or DB fallback, auto-creating if missing
     $assign = function($taxonomy, $term_names) use ($product_id, $attrs, $taxonomy_map) {
         if (!taxonomy_exists($taxonomy)) {
+            error_log('[DMS Connect] Taxonomy "' . $taxonomy . '" does not exist — skipping term assignment for product ' . $product_id);
             return;
         }
         $ids = array();
@@ -2716,27 +2786,8 @@ function tigon_dms_assign_custom_taxonomies($product_id, $cart_data) {
     }
     $assign('manufacturers', array($mfg_name));
 
-    // Brands taxonomy (product_brand) — matches manufacturer make, auto-create if missing
-    if (taxonomy_exists('product_brand')) {
-        $brand_name = $mfg_name;
-        $brand_prop = $attrs->brands_taxonomy ?? array();
-        if (isset($brand_prop[$brand_name])) {
-            wp_set_object_terms($product_id, array((int) $brand_prop[$brand_name]), 'product_brand', true);
-        } else {
-            $existing_brand = get_term_by('name', $brand_name, 'product_brand');
-            if (!$existing_brand) {
-                $existing_brand = get_term_by('slug', sanitize_title($brand_name), 'product_brand');
-            }
-            if ($existing_brand && !is_wp_error($existing_brand)) {
-                wp_set_object_terms($product_id, array((int) $existing_brand->term_id), 'product_brand', true);
-            } else {
-                $new_brand = wp_insert_term($brand_name, 'product_brand', array('slug' => sanitize_title($brand_name)));
-                if (!is_wp_error($new_brand)) {
-                    wp_set_object_terms($product_id, array((int) $new_brand['term_id']), 'product_brand', true);
-                }
-            }
-        }
-    }
+    // Brands taxonomy (product-brand) — matches manufacturer make, auto-create if missing
+    $assign('product-brand', array($mfg_name));
 
     // Models taxonomy (with special case handling from Abstract_Cart)
     $model_upper = strtoupper($model);
@@ -2852,6 +2903,9 @@ function tigon_dms_assign_custom_taxonomies($product_id, $cart_data) {
     }
     if (!$is_lifted) {
         $vc[] = 'NON-LIFTED';
+    }
+    if ($is_rental) {
+        $vc[] = 'RENTALS';
     }
     $assign('vehicle-class', $vc);
 
@@ -3459,21 +3513,21 @@ function tigon_dms_set_product_fields_meta($product_id, $cart_data) {
             }
         }
 
-        // Primary product_brand
-        if (!empty($make) && taxonomy_exists('product_brand')) {
+        // Primary product-brand
+        if (!empty($make) && taxonomy_exists('product-brand')) {
             $brand_name = $mfg_name; // same resolved name as manufacturers
             $brand_term_id = null;
             if ($yoast_attrs && !empty($yoast_attrs->brands_taxonomy)) {
                 $brand_term_id = $yoast_attrs->brands_taxonomy[$brand_name] ?? null;
             }
             if (!$brand_term_id) {
-                $brand_term = get_term_by('name', $brand_name, 'product_brand');
+                $brand_term = get_term_by('name', $brand_name, 'product-brand');
                 if ($brand_term && !is_wp_error($brand_term)) {
                     $brand_term_id = $brand_term->term_id;
                 }
             }
             if ($brand_term_id) {
-                update_post_meta($product_id, '_yoast_wpseo_primary_product_brand', $brand_term_id);
+                update_post_meta($product_id, '_yoast_wpseo_primary_product-brand', $brand_term_id);
             }
         }
 
@@ -5035,6 +5089,6 @@ function tigon_dms_admin_sync_trigger()
     
     exit;
 }
-// Hook early on both admin_init and init (fallback) for better compatibility
-add_action('admin_init', 'tigon_dms_admin_sync_trigger', 1);
-add_action('init', 'tigon_dms_admin_sync_trigger', 1);
+// Hook after all taxonomies are registered (priority 99) so custom taxonomies are available
+add_action('admin_init', 'tigon_dms_admin_sync_trigger', 99);
+add_action('init', 'tigon_dms_admin_sync_trigger', 99);

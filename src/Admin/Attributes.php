@@ -386,11 +386,11 @@ class Attributes
     private static function ai_get_brands()
     {
         $brands_taxonomy = array();
-        if (!taxonomy_exists('product_brand')) {
+        if (!taxonomy_exists('product-brand')) {
             return $brands_taxonomy;
         }
         $brands = get_terms([
-            'taxonomy' => 'product_brand',
+            'taxonomy' => 'product-brand',
             'hide_empty' => false
         ]);
         if (is_wp_error($brands)) {
