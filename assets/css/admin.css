@@ -293,8 +293,7 @@
 
     border-top: 1px solid var(--nav-color);
 
-    cursor:pointer;
-    user-select: none;
+    cursor: pointer;
 }
 
 .checkbox-list {

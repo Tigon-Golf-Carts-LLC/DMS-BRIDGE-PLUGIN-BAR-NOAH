@@ -264,6 +264,7 @@ class Attributes
     public $rims_taxonomy = [];
     public $inventory_status_taxonomy = [];
     public $brands_taxonomy = [];
+    public $fb_product_set_taxonomy = [];
     public $custom_options = [];
 
     public function __construct()
@@ -281,6 +282,7 @@ class Attributes
         $this->rims_taxonomy = Attributes::ai_get_rims();
         $this->inventory_status_taxonomy = Attributes::ai_get_inventory_statuses();
         $this->brands_taxonomy = Attributes::ai_get_brands();
+        $this->fb_product_set_taxonomy = Attributes::ai_get_fb_product_sets();
         $this->custom_options = Attributes::ai_get_custom_options();
     }
 
@@ -386,11 +388,11 @@ class Attributes
     private static function ai_get_brands()
     {
         $brands_taxonomy = array();
-        if (!taxonomy_exists('product_brand')) {
+        if (!taxonomy_exists('product-brand')) {
             return $brands_taxonomy;
         }
         $brands = get_terms([
-            'taxonomy' => 'product_brand',
+            'taxonomy' => 'product-brand',
             'hide_empty' => false
         ]);
         if (is_wp_error($brands)) {
@@ -400,6 +402,29 @@ class Attributes
             $brands_taxonomy[strtoupper($term->name)] = $term->term_id;
         }
         return $brands_taxonomy;
+    }
+
+    /**
+     * Gets all terms in the fb_product_set taxonomy, and returns them as an associative array
+     * @return array
+     */
+    private static function ai_get_fb_product_sets()
+    {
+        $fb_taxonomy = array();
+        if (!taxonomy_exists('fb_product_set')) {
+            return $fb_taxonomy;
+        }
+        $terms = get_terms([
+            'taxonomy' => 'fb_product_set',
+            'hide_empty' => false
+        ]);
+        if (is_wp_error($terms)) {
+            return $fb_taxonomy;
+        }
+        foreach ($terms as $term) {
+            $fb_taxonomy[strtoupper($term->name)] = $term->term_id;
+        }
+        return $fb_taxonomy;
     }
 
     /**

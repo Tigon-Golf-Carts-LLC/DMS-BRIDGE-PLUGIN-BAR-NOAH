@@ -481,6 +481,8 @@ class Field_Mapping
                 'drivetrain',
                 'inventory-status',
                 'rims',
+                'product-brand',
+                'fb_product_set',
                 'pa_make',
                 'pa_model',
                 'pa_color',

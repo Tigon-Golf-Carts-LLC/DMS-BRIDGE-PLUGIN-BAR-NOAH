@@ -2856,13 +2856,13 @@ abstract class Abstract_Cart
             $this->taxonomy_terms[] = $mfg_term_id;
         }
 
-        // Brands (product_brand) — auto-create when missing
+        // Brands (product-brand) — auto-create when missing
         $brand_name = $mfg_name;
-        if (taxonomy_exists('product_brand')) {
+        if (taxonomy_exists('product-brand')) {
             $brand_term_id = $this->resolve_or_create_taxonomy_term(
                 $this->generated_attributes->brands_taxonomy,
                 $brand_name,
-                'product_brand'
+                'product-brand'
             );
             if ($brand_term_id) {
                 $this->taxonomy_terms[] = $brand_term_id;
