@@ -445,6 +445,10 @@ function tigon_dms_register_product_taxonomies() {
             'label'        => 'Brands',
             'hierarchical' => false,
         ),
+        'fb_product_set' => array(
+            'label'        => 'Facebook Product Sets',
+            'hierarchical' => false,
+        ),
     );
 
     foreach ($taxonomies as $slug => $args) {
@@ -2726,6 +2730,7 @@ function tigon_dms_assign_custom_taxonomies($product_id, $cart_data) {
         'inventory-status' => 'inventory_status_taxonomy',
         'drivetrain'       => 'drivetrains_taxonomy',
         'rims'             => 'rims_taxonomy',
+        'fb_product_set'   => 'fb_product_set_taxonomy',
     );
 
     // Helper: safely assign terms using Attributes cache or DB fallback, auto-creating if missing
@@ -2809,6 +2814,129 @@ function tigon_dms_assign_custom_taxonomies($product_id, $cart_data) {
         $model_name = strtoupper($make_symbol . ' ' . $model);
     }
     $assign('models', array($model_name));
+
+    // Facebook Product Set taxonomy — assigns make-level + model-level terms
+    // Existing terms use varying make-level naming: "DENAGO®", "CLUB CAR® Golf Carts", "Swift Golf Carts"
+    // We check for existing terms in multiple name variants before auto-creating.
+    if (taxonomy_exists('fb_product_set')) {
+        $fb_terms = array();
+
+        // --- Make-level term ---
+        // Try multiple name variants against cache and DB to find existing make-level term
+        $fb_make_id = null;
+        $fb_make_prop = $attrs->fb_product_set_taxonomy ?? array();
+
+        // Variant 1: Just the make symbol (e.g., "DENAGO®", "EVOLUTION®")
+        $fb_make_v1 = $mfg_name;
+        // Variant 2: Make symbol + " Golf Carts" (e.g., "CLUB CAR® Golf Carts")
+        $fb_make_v2 = $mfg_name . ' Golf Carts';
+        // Variant 3: Make name without symbol + " Golf Carts" (e.g., "Swift Golf Carts", "Yamaha Golf Carts")
+        $fb_make_v3 = ucwords(strtolower(str_replace('®', '', $mfg_name))) . ' Golf Carts';
+
+        // Fast cache lookup
+        foreach (array($fb_make_v1, $fb_make_v2, $fb_make_v3) as $variant) {
+            $upper = strtoupper($variant);
+            if (isset($fb_make_prop[$upper])) {
+                $fb_make_id = (int) $fb_make_prop[$upper];
+                break;
+            }
+        }
+
+        // Slow DB lookup if cache missed
+        if (!$fb_make_id) {
+            foreach (array($fb_make_v1, $fb_make_v2, $fb_make_v3) as $variant) {
+                $t = get_term_by('name', $variant, 'fb_product_set');
+                if (!$t) {
+                    $t = get_term_by('slug', sanitize_title($variant), 'fb_product_set');
+                }
+                if ($t && !is_wp_error($t)) {
+                    $fb_make_id = (int) $t->term_id;
+                    break;
+                }
+            }
+        }
+
+        // Auto-create make-level term if none found (use just the make symbol)
+        if (!$fb_make_id) {
+            $new_fb = wp_insert_term($fb_make_v1, 'fb_product_set', array('slug' => sanitize_title($fb_make_v1)));
+            if (!is_wp_error($new_fb)) {
+                $fb_make_id = (int) $new_fb['term_id'];
+                // Cache for subsequent products in same batch
+                if ($attrs && isset($attrs->fb_product_set_taxonomy)) {
+                    $attrs->fb_product_set_taxonomy[strtoupper($fb_make_v1)] = $fb_make_id;
+                }
+            }
+        }
+
+        if ($fb_make_id) {
+            $fb_terms[] = $fb_make_id;
+        }
+
+        // --- Model-level term (reuses $model_name from models taxonomy) ---
+        if (!empty($model)) {
+            $fb_model_name = $model_name; // Same as models taxonomy (e.g., "DENAGO® NOMAD XL")
+            $fb_model_upper = strtoupper($fb_model_name);
+
+            $fb_model_id = null;
+            if (isset($fb_make_prop[$fb_model_upper])) {
+                $fb_model_id = (int) $fb_make_prop[$fb_model_upper];
+            }
+            if (!$fb_model_id) {
+                $t = get_term_by('name', $fb_model_name, 'fb_product_set');
+                if (!$t) {
+                    $t = get_term_by('slug', sanitize_title($fb_model_name), 'fb_product_set');
+                }
+                if ($t && !is_wp_error($t)) {
+                    $fb_model_id = (int) $t->term_id;
+                }
+            }
+            if (!$fb_model_id) {
+                $new_fb_model = wp_insert_term($fb_model_name, 'fb_product_set', array('slug' => sanitize_title($fb_model_name)));
+                if (!is_wp_error($new_fb_model)) {
+                    $fb_model_id = (int) $new_fb_model['term_id'];
+                    if ($attrs && isset($attrs->fb_product_set_taxonomy)) {
+                        $attrs->fb_product_set_taxonomy[$fb_model_upper] = $fb_model_id;
+                    }
+                }
+            }
+            if ($fb_model_id) {
+                $fb_terms[] = $fb_model_id;
+            }
+        }
+
+        // Also add condition-based terms: "New Golf Carts" or "Used Golf Carts"
+        $condition_fb = $is_used ? 'Used Golf Carts' : 'New Golf Carts';
+        $condition_upper = strtoupper($condition_fb);
+        $condition_id = null;
+        if (isset($fb_make_prop[$condition_upper])) {
+            $condition_id = (int) $fb_make_prop[$condition_upper];
+        }
+        if (!$condition_id) {
+            $t = get_term_by('name', $condition_fb, 'fb_product_set');
+            if (!$t) {
+                $t = get_term_by('slug', sanitize_title($condition_fb), 'fb_product_set');
+            }
+            if ($t && !is_wp_error($t)) {
+                $condition_id = (int) $t->term_id;
+            }
+        }
+        if (!$condition_id) {
+            $new_cond = wp_insert_term($condition_fb, 'fb_product_set', array('slug' => sanitize_title($condition_fb)));
+            if (!is_wp_error($new_cond)) {
+                $condition_id = (int) $new_cond['term_id'];
+                if ($attrs && isset($attrs->fb_product_set_taxonomy)) {
+                    $attrs->fb_product_set_taxonomy[$condition_upper] = $condition_id;
+                }
+            }
+        }
+        if ($condition_id) {
+            $fb_terms[] = $condition_id;
+        }
+
+        if (!empty($fb_terms)) {
+            wp_set_object_terms($product_id, $fb_terms, 'fb_product_set', true);
+        }
+    }
 
     // Sound Systems taxonomy — based on hasSoundSystem + optional soundSystem override
     if ($has_sound) {
