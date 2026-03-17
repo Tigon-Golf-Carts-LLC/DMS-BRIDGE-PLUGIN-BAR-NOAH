@@ -235,9 +235,11 @@ class Admin_Page
         .dbo-card .num{font-size:1.8rem;font-weight:800;color:var(--main-color);line-height:1.1;}
         .dbo-card .lbl{font-size:0.78rem;color:#666;margin-top:0.3rem;}
         .dbo-section{margin-bottom:1rem;}
-        .dbo-section-hd{display:flex;align-items:center;gap:0.5rem;cursor:pointer;padding:0.6rem 0.75rem;
-                        background:#fff;border:1px solid #ddd;border-radius:0.4rem;margin-bottom:0.5rem;user-select:none;
+        .dbo-section-hd{display:flex;align-items:center;gap:0.5rem;padding:0.6rem 0.75rem;
+                        background:#fff;border:1px solid #ddd;border-radius:0.4rem;margin-bottom:0.5rem;
                         transition:background 0.15s;}
+        .dbo-section-hd .arrow{cursor:pointer;user-select:none;padding:0.25rem 0.4rem;border-radius:3px;}
+        .dbo-section-hd .arrow:hover{background:rgba(0,0,0,0.08);}
         .dbo-section-hd:hover{background:#f5f5f5;}
         .dbo-section-hd .arrow{transition:transform 0.2s;font-size:0.75rem;}
         .dbo-section-hd.open .arrow{transform:rotate(90deg);}
@@ -336,7 +338,7 @@ class Admin_Page
             }
             $group_total = count($fields);
 
-            echo '<div class="dbo-section feed-section"><div class="dbo-section-hd open" onclick="this.classList.toggle(\'open\')">';
+            echo '<div class="dbo-section feed-section"><div class="dbo-section-hd open">';
             echo '<span class="arrow">&#9654;</span>';
             echo '<h3>' . esc_html($group_label) . '</h3>';
             echo '<span class="dbo-badge teal">' . esc_html($group_total) . ' fields</span>';
@@ -578,7 +580,7 @@ class Admin_Page
             elseif ($pg_name === 'Pinterest for WC') $badge = 'purple';
 
             $open = ($pg_name === 'WooCommerce Core' || $pg_name === 'DMS Bridge') ? ' open' : '';
-            echo '<div class="dbo-section target-section"><div class="dbo-section-hd' . $open . '" onclick="this.classList.toggle(\'open\')">';
+            echo '<div class="dbo-section target-section"><div class="dbo-section-hd' . $open . '">';
             echo '<span class="arrow">&#9654;</span>';
             echo '<h3>Post Meta: ' . esc_html($pg_name) . '</h3>';
             echo '<span class="dbo-badge ' . $badge . '">' . count($pg_targets) . '</span>';
@@ -594,7 +596,7 @@ class Admin_Page
         }
 
         // Post Field targets
-        echo '<div class="dbo-section target-section"><div class="dbo-section-hd" onclick="this.classList.toggle(\'open\')">';
+        echo '<div class="dbo-section target-section"><div class="dbo-section-hd">';
         echo '<span class="arrow">&#9654;</span><h3>Post Fields</h3>';
         echo '<span class="dbo-badge teal">' . count($woo_targets['post']) . '</span>';
         echo '</div><div class="dbo-section-bd">';
@@ -607,7 +609,7 @@ class Admin_Page
         echo '</tbody></table></div></div></div>';
 
         // Taxonomy targets
-        echo '<div class="dbo-section target-section"><div class="dbo-section-hd" onclick="this.classList.toggle(\'open\')">';
+        echo '<div class="dbo-section target-section"><div class="dbo-section-hd">';
         echo '<span class="arrow">&#9654;</span><h3>Taxonomies</h3>';
         echo '<span class="dbo-badge purple">' . count($woo_targets['taxonomy']) . '</span>';
         echo '</div><div class="dbo-section-bd">';
@@ -896,6 +898,21 @@ class Admin_Page
                 $("#tigon-transform-cfg").val("");
                 $("#tigon-is-enabled").prop("checked", true);
                 $("#tigon-sort-order").val(0);
+            });
+            // Section toggle: arrow click always toggles, header click toggles only if no text selected
+            document.addEventListener("click", function(e){
+                var arrow = e.target.closest(".dbo-section-hd .arrow");
+                if(arrow){
+                    var hd = arrow.closest(".dbo-section-hd");
+                    if(hd) hd.classList.toggle("open");
+                    return;
+                }
+                var hd = e.target.closest(".dbo-section-hd");
+                if(hd){
+                    var sel = window.getSelection();
+                    if(sel && sel.toString().length > 0) return;
+                    hd.classList.toggle("open");
+                }
             });
         })(jQuery);
         </script>
@@ -2442,9 +2459,11 @@ class Admin_Page
         .dbo-card .num{font-size:2rem;font-weight:800;color:var(--main-color);line-height:1.1;}
         .dbo-card .lbl{font-size:0.8rem;color:#666;margin-top:0.3rem;}
         .dbo-section{margin-bottom:1.5rem;}
-        .dbo-section-hd{display:flex;align-items:center;gap:0.5rem;cursor:pointer;padding:0.6rem 0.75rem;
-                        background:#fff;border:1px solid #ddd;border-radius:0.4rem;margin-bottom:0.5rem;user-select:none;
+        .dbo-section-hd{display:flex;align-items:center;gap:0.5rem;padding:0.6rem 0.75rem;
+                        background:#fff;border:1px solid #ddd;border-radius:0.4rem;margin-bottom:0.5rem;
                         transition:background 0.15s;}
+        .dbo-section-hd .arrow{cursor:pointer;user-select:none;padding:0.25rem 0.4rem;border-radius:3px;}
+        .dbo-section-hd .arrow:hover{background:rgba(0,0,0,0.08);}
         .dbo-section-hd:hover{background:#f5f5f5;}
         .dbo-section-hd .arrow{transition:transform 0.2s;font-size:0.75rem;}
         .dbo-section-hd.open .arrow{transform:rotate(90deg);}
@@ -2551,7 +2570,7 @@ class Admin_Page
         echo '</div>';
 
         // Product Attributes
-        echo '<div class="dbo-section"><div class="dbo-section-hd open" onclick="this.classList.toggle(\'open\')"><span class="arrow">&#9654;</span><h3>Product Attributes (' . count($wc_attributes) . ')</h3></div><div class="dbo-section-bd">';
+        echo '<div class="dbo-section"><div class="dbo-section-hd open"><span class="arrow">&#9654;</span><h3>Product Attributes (' . count($wc_attributes) . ')</h3></div><div class="dbo-section-bd">';
         echo '<input type="text" class="dbo-search" data-filter="wc-attr-table" placeholder="Search attributes...">';
         echo '<div class="dbo-scroll" style="max-height:350px;"><table class="dbo-table" id="wc-attr-table"><thead><tr><th>ID</th><th>Name</th><th>Slug</th><th>Type</th><th>Terms</th></tr></thead><tbody>';
         foreach ($wc_attributes as $attr) {
@@ -2564,7 +2583,7 @@ class Admin_Page
 
         // WC Meta Keys
         $wc_metas = $meta_groups['WooCommerce Core'];
-        echo '<div class="dbo-section"><div class="dbo-section-hd" onclick="this.classList.toggle(\'open\')"><span class="arrow">&#9654;</span><h3>WooCommerce Product Meta Keys (' . count($wc_metas) . ')</h3></div><div class="dbo-section-bd">';
+        echo '<div class="dbo-section"><div class="dbo-section-hd"><span class="arrow">&#9654;</span><h3>WooCommerce Product Meta Keys (' . count($wc_metas) . ')</h3></div><div class="dbo-section-bd">';
         echo '<div class="dbo-scroll" style="max-height:300px;"><table class="dbo-table"><thead><tr><th>Meta Key</th><th>Products Using</th></tr></thead><tbody>';
         foreach ($wc_metas as $m) {
             echo '<tr><td><code>' . esc_html($m['key']) . '</code></td><td>' . esc_html(number_format($m['count'])) . '</td></tr>';
@@ -2572,7 +2591,7 @@ class Admin_Page
         echo '</tbody></table></div></div></div>';
 
         // WC Database Tables
-        echo '<div class="dbo-section"><div class="dbo-section-hd" onclick="this.classList.toggle(\'open\')"><span class="arrow">&#9654;</span><h3>WooCommerce Tables (' . count($wc_tables) . ')</h3></div><div class="dbo-section-bd">';
+        echo '<div class="dbo-section"><div class="dbo-section-hd"><span class="arrow">&#9654;</span><h3>WooCommerce Tables (' . count($wc_tables) . ')</h3></div><div class="dbo-section-bd">';
         echo '<div class="dbo-scroll" style="max-height:300px;"><table class="dbo-table"><thead><tr><th>Table</th><th>Rows (approx)</th><th>Size</th></tr></thead><tbody>';
         foreach ($wc_tables as $t) {
             echo '<tr><td><code>' . esc_html($t['name']) . '</code></td><td>' . esc_html(number_format($t['rows'])) . '</td><td class="dbo-size">' . esc_html(size_format($t['size'])) . '</td></tr>';
@@ -2639,7 +2658,7 @@ class Admin_Page
             $is_attr   = strpos($tax_slug, 'pa_') === 0;
 
             echo '<div class="dbo-section tagid-section" data-tax="' . esc_attr($tax_slug) . '" data-is-custom="' . ($is_custom ? '1' : '0') . '" data-is-attr="' . ($is_attr ? '1' : '0') . '">';
-            echo '<div class="dbo-section-hd" onclick="this.classList.toggle(\'open\')">';
+            echo '<div class="dbo-section-hd">';
             echo '<span class="arrow">&#9654;</span>';
             echo '<h3>' . esc_html($tax_label) . ' <code style="font-size:0.75rem;font-weight:400;color:#888;">' . esc_html($tax_slug) . '</code></h3>';
             echo '<span class="dbo-badge ' . ($is_attr ? 'purple' : ($is_custom ? 'teal' : 'blue')) . '">' . esc_html($term_count) . ' terms</span>';
@@ -2689,7 +2708,7 @@ class Admin_Page
             elseif ($group_name === 'WCPA Product Addons')   $badge_class = 'orange';
 
             $open_class = ($group_name === 'DMS Bridge' || $group_name === 'WooCommerce Core') ? ' open' : '';
-            echo '<div class="dbo-section" data-meta-group="' . esc_attr($group_name) . '"><div class="dbo-section-hd' . $open_class . '" onclick="this.classList.toggle(\'open\')">';
+            echo '<div class="dbo-section" data-meta-group="' . esc_attr($group_name) . '"><div class="dbo-section-hd' . $open_class . '">';
             echo '<span class="arrow">&#9654;</span>';
             echo '<h3>' . esc_html($group_name) . '</h3>';
             echo '<span class="dbo-badge ' . $badge_class . '">' . esc_html(count($items)) . ' keys</span>';
@@ -2708,7 +2727,7 @@ class Admin_Page
         echo '<input type="text" class="dbo-search" data-filter="tables-all" placeholder="Search tables...">';
 
         // DMS Tables
-        echo '<div class="dbo-section"><div class="dbo-section-hd open" onclick="this.classList.toggle(\'open\')"><span class="arrow">&#9654;</span><h3>DMS Bridge Tables</h3><span class="dbo-badge teal">' . esc_html(count($dms_tables)) . '</span></div><div class="dbo-section-bd">';
+        echo '<div class="dbo-section"><div class="dbo-section-hd open"><span class="arrow">&#9654;</span><h3>DMS Bridge Tables</h3><span class="dbo-badge teal">' . esc_html(count($dms_tables)) . '</span></div><div class="dbo-section-bd">';
         echo '<div class="dbo-scroll" style="max-height:280px;"><table class="dbo-table"><thead><tr><th>Table Name</th><th>Rows (approx)</th><th>Size</th></tr></thead><tbody>';
         foreach ($dms_tables as $t) {
             echo '<tr class="table-row"><td><code>' . esc_html($t['name']) . '</code></td><td>' . esc_html(number_format($t['rows'])) . '</td><td class="dbo-size">' . esc_html(size_format($t['size'])) . '</td></tr>';
@@ -2717,7 +2736,7 @@ class Admin_Page
         echo '</tbody></table></div></div></div>';
 
         // WC Tables
-        echo '<div class="dbo-section"><div class="dbo-section-hd" onclick="this.classList.toggle(\'open\')"><span class="arrow">&#9654;</span><h3>WooCommerce Tables</h3><span class="dbo-badge purple">' . esc_html(count($wc_tables)) . '</span></div><div class="dbo-section-bd">';
+        echo '<div class="dbo-section"><div class="dbo-section-hd"><span class="arrow">&#9654;</span><h3>WooCommerce Tables</h3><span class="dbo-badge purple">' . esc_html(count($wc_tables)) . '</span></div><div class="dbo-section-bd">';
         echo '<div class="dbo-scroll" style="max-height:280px;"><table class="dbo-table"><thead><tr><th>Table Name</th><th>Rows (approx)</th><th>Size</th></tr></thead><tbody>';
         foreach ($wc_tables as $t) {
             echo '<tr class="table-row"><td><code>' . esc_html($t['name']) . '</code></td><td>' . esc_html(number_format($t['rows'])) . '</td><td class="dbo-size">' . esc_html(size_format($t['size'])) . '</td></tr>';
@@ -2725,7 +2744,7 @@ class Admin_Page
         echo '</tbody></table></div></div></div>';
 
         // WordPress Core Tables
-        echo '<div class="dbo-section"><div class="dbo-section-hd" onclick="this.classList.toggle(\'open\')"><span class="arrow">&#9654;</span><h3>WordPress Core Tables</h3><span class="dbo-badge blue">' . esc_html(count($wp_tables)) . '</span></div><div class="dbo-section-bd">';
+        echo '<div class="dbo-section"><div class="dbo-section-hd"><span class="arrow">&#9654;</span><h3>WordPress Core Tables</h3><span class="dbo-badge blue">' . esc_html(count($wp_tables)) . '</span></div><div class="dbo-section-bd">';
         echo '<div class="dbo-scroll" style="max-height:280px;"><table class="dbo-table"><thead><tr><th>Table Name</th><th>Rows (approx)</th><th>Size</th></tr></thead><tbody>';
         foreach ($wp_tables as $t) {
             echo '<tr class="table-row"><td><code>' . esc_html($t['name']) . '</code></td><td>' . esc_html(number_format($t['rows'])) . '</td><td class="dbo-size">' . esc_html(size_format($t['size'])) . '</td></tr>';
@@ -2734,7 +2753,7 @@ class Admin_Page
 
         // Other Tables
         if (!empty($other_tables)) {
-            echo '<div class="dbo-section"><div class="dbo-section-hd" onclick="this.classList.toggle(\'open\')"><span class="arrow">&#9654;</span><h3>Other Tables</h3><span class="dbo-badge gray">' . esc_html(count($other_tables)) . '</span></div><div class="dbo-section-bd">';
+            echo '<div class="dbo-section"><div class="dbo-section-hd"><span class="arrow">&#9654;</span><h3>Other Tables</h3><span class="dbo-badge gray">' . esc_html(count($other_tables)) . '</span></div><div class="dbo-section-bd">';
             echo '<div class="dbo-scroll" style="max-height:280px;"><table class="dbo-table"><thead><tr><th>Table Name</th><th>Rows (approx)</th><th>Size</th></tr></thead><tbody>';
             foreach ($other_tables as $t) {
                 echo '<tr class="table-row"><td><code>' . esc_html($t['name']) . '</code></td><td>' . esc_html(number_format($t['rows'])) . '</td><td class="dbo-size">' . esc_html(size_format($t['size'])) . '</td></tr>';
@@ -2743,7 +2762,7 @@ class Admin_Page
         }
 
         // DMS Options
-        echo '<div class="dbo-section"><div class="dbo-section-hd" onclick="this.classList.toggle(\'open\')"><span class="arrow">&#9654;</span><h3>DMS wp_options Entries</h3><span class="dbo-badge teal">' . esc_html(count($dms_options)) . '</span></div><div class="dbo-section-bd">';
+        echo '<div class="dbo-section"><div class="dbo-section-hd"><span class="arrow">&#9654;</span><h3>DMS wp_options Entries</h3><span class="dbo-badge teal">' . esc_html(count($dms_options)) . '</span></div><div class="dbo-section-bd">';
         echo '<div class="dbo-scroll" style="max-height:250px;"><table class="dbo-table"><thead><tr><th>Option Name</th><th>Preview</th><th>Size</th></tr></thead><tbody>';
         foreach ($dms_options as $opt) {
             $preview = esc_html($opt['val_preview']);
@@ -2788,7 +2807,7 @@ class Admin_Page
         echo '</div>';
 
         // All active plugins list
-        echo '<div class="dbo-section"><div class="dbo-section-hd" onclick="this.classList.toggle(\'open\')"><span class="arrow">&#9654;</span><h3>All Active Plugins (' . count($active_plugins) . ')</h3></div><div class="dbo-section-bd">';
+        echo '<div class="dbo-section"><div class="dbo-section-hd"><span class="arrow">&#9654;</span><h3>All Active Plugins (' . count($active_plugins) . ')</h3></div><div class="dbo-section-bd">';
         echo '<div class="dbo-scroll" style="max-height:300px;"><table class="dbo-table"><thead><tr><th>#</th><th>Plugin Path</th></tr></thead><tbody>';
         $i = 1;
         foreach ($active_plugins as $p) {
@@ -2871,7 +2890,7 @@ class Admin_Page
 
             // All meta for this product
             $all_meta = get_post_meta($selected_id);
-            echo '<div class="dbo-section" style="margin-top:0.75rem;"><div class="dbo-section-hd open" onclick="this.classList.toggle(\'open\')"><span class="arrow">&#9654;</span><h3>All Post Meta (' . count($all_meta) . ' keys)</h3></div><div class="dbo-section-bd">';
+            echo '<div class="dbo-section" style="margin-top:0.75rem;"><div class="dbo-section-hd open"><span class="arrow">&#9654;</span><h3>All Post Meta (' . count($all_meta) . ' keys)</h3></div><div class="dbo-section-bd">';
             echo '<div class="dbo-scroll" style="max-height:250px;"><table class="dbo-table"><thead><tr><th>Meta Key</th><th>Value</th></tr></thead><tbody>';
             ksort($all_meta);
             foreach ($all_meta as $mk => $mv) {
@@ -3017,6 +3036,21 @@ class Admin_Page
                     });
                 });
             }
+            // ── Section toggle: arrow click always toggles, header click toggles only if no text selected ──
+            document.addEventListener("click", function(e){
+                var arrow = e.target.closest(".dbo-section-hd .arrow");
+                if(arrow){
+                    var hd = arrow.closest(".dbo-section-hd");
+                    if(hd) hd.classList.toggle("open");
+                    return;
+                }
+                var hd = e.target.closest(".dbo-section-hd");
+                if(hd){
+                    var sel = window.getSelection();
+                    if(sel && sel.toString().length > 0) return; // user is selecting text, don\'t toggle
+                    hd.classList.toggle("open");
+                }
+            });
         })();
         </script>';
     }
