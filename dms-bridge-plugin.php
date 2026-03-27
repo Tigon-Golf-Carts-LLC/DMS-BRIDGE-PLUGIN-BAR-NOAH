@@ -731,7 +731,7 @@ function tigon_dms_get_showcase_locations() {
         'tigon_pocono'    => ['landing_slug' => 'tigon-pocono',       'archive_slug' => 'tigon-pocono-archive'],
         'tigon_dover'     => ['landing_slug' => 'tigon-dover',        'archive_slug' => 'tigon-dover-archive'],
         'tigon_scranton'  => ['landing_slug' => 'tigon-scranton',     'archive_slug' => 'tigon-scranton-archive'],
-        'tigon_rio_grande'=> ['landing_slug' => 'tigon-rio-grande',   'archive_slug' => 'tigon-rio-grande-archive'],
+        'tigon_rio_grande'=> ['landing_slug' => 'rio-grande',          'archive_slug' => 'location/rio-grande'],
     ];
 
     $locations = [];
