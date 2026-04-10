@@ -954,15 +954,17 @@ function tigon_dms_ensure_woo_product($cart_data, $cart_id) {
     $images = tigon_dms_parse_cart_images($cart_data);
     $warranty = tigon_dms_parse_cart_warranty($cart_data);
     
-    // Check if product already exists
-    $existing_product_id = tigon_dms_get_product_by_cart_id($cart_id);
-    
+    // ── Find existing product (pid → cart_id → SKU/vinNo) ──────
+    $existing_product_id = tigon_dms_find_existing_product($cart_id, $cart_data);
+
     if ($existing_product_id) {
+        // Ensure _dms_cart_id meta is set so future syncs find it faster
+        update_post_meta($existing_product_id, '_dms_cart_id', sanitize_text_field($cart_id));
         // Update existing product
         return tigon_dms_update_woo_product($existing_product_id, $title, $retail_price, $cart_data, $specs, $images, $warranty);
     }
-    
-    // Create new product
+
+    // Create new product only when no existing match was found
     return tigon_dms_create_woo_product($cart_id, $title, $retail_price, $cart_data, $specs, $images, $warranty);
 }
 
@@ -1014,6 +1016,50 @@ function tigon_dms_get_product_by_cart_id($cart_id) {
     );
     
     return $product_id ? (int) $product_id : false;
+}
+
+/**
+ * Find an existing WooCommerce product using a three-layer lookup:
+ *   1. pid from DMS cart payload (previously reported back)
+ *   2. _dms_cart_id post-meta
+ *   3. WooCommerce SKU matching vinNo or serialNo
+ *
+ * @param string $cart_id   DMS cart _id
+ * @param array  $cart_data Full DMS cart payload
+ * @return int|false Product ID or false if not found
+ */
+function tigon_dms_find_existing_product($cart_id, $cart_data = array()) {
+    // Layer 1: pid from DMS
+    if (!empty($cart_data['pid'])) {
+        $product = wc_get_product($cart_data['pid']);
+        if ($product !== false) {
+            return (int) $cart_data['pid'];
+        }
+    }
+
+    // Layer 2: _dms_cart_id meta
+    $found = tigon_dms_get_product_by_cart_id($cart_id);
+    if ($found) {
+        return $found;
+    }
+
+    // Layer 3: SKU (vinNo > serialNo)
+    if (function_exists('wc_get_product_id_by_sku')) {
+        $lookup_sku = '';
+        if (!empty($cart_data['vinNo'])) {
+            $lookup_sku = $cart_data['vinNo'];
+        } elseif (!empty($cart_data['serialNo'])) {
+            $lookup_sku = $cart_data['serialNo'];
+        }
+        if ($lookup_sku !== '') {
+            $sku_product_id = wc_get_product_id_by_sku($lookup_sku);
+            if ($sku_product_id) {
+                return (int) $sku_product_id;
+            }
+        }
+    }
+
+    return false;
 }
 
 /**

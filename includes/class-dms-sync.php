@@ -112,9 +112,9 @@ class DMS_Sync
                 // Check eligibility using centralized logic
                 if (!\Tigon\DmsConnect\Includes\Product_Manager::should_be_on_website($cart_data)) {
                     // Cart is ineligible — delete existing product if one exists
-                    $existing_pid = function_exists('tigon_dms_get_product_by_cart_id')
-                        ? tigon_dms_get_product_by_cart_id($cart_id)
-                        : false;
+                    $existing_pid = function_exists('tigon_dms_find_existing_product')
+                        ? tigon_dms_find_existing_product($cart_id, $cart_data)
+                        : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_id) : false);
                     if ($existing_pid) {
                         \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
                         $stats['sold']++;
@@ -128,9 +128,9 @@ class DMS_Sync
                 $serial = strtoupper($cart_data['serialNo'] ?? '');
                 $vin    = strtoupper($cart_data['vinNo'] ?? '');
                 if (str_contains($serial, 'DELETE') || str_contains($vin, 'DELETE')) {
-                    $existing_pid = function_exists('tigon_dms_get_product_by_cart_id')
-                        ? tigon_dms_get_product_by_cart_id($cart_id)
-                        : false;
+                    $existing_pid = function_exists('tigon_dms_find_existing_product')
+                        ? tigon_dms_find_existing_product($cart_id, $cart_data)
+                        : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_id) : false);
                     if ($existing_pid) {
                         \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
                         $stats['sold']++;
