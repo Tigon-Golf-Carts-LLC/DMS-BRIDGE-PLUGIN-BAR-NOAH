@@ -948,6 +948,7 @@ class Admin_Page
         $mapped_nonce = wp_create_nonce('tigon_dms_sync_mapped_nonce');
         $publish_nonce = wp_create_nonce('tigon_dms_publish_synced_nonce');
         $bulk_delete_nonce = wp_create_nonce('tigon_dms_bulk_delete_nonce');
+        $dup_sku_nonce = wp_create_nonce('tigon_dms_dup_sku_cleanup_nonce');
 
         self::page_header();
 
@@ -1094,6 +1095,29 @@ class Admin_Page
                     <div id="dms-bulk-delete-results" style="display:none; width:100%;"></div>
                 </div>
             </div>
+
+            <!-- ====== DUPLICATE SKU CLEANUP ====== -->
+            <div class="action-box-group" style="grid-template-columns:1fr; grid-template-rows:auto;">
+                <div class="action-box" style="display:flex; flex-direction:column; gap:0.75rem; width:100%;">
+                    <h2 style="margin:0; font-size:1.15rem; color:var(--main-color);">Duplicate SKU Cleanup</h2>
+                    <p style="margin:0; font-size:0.9rem; color:#555;">
+                        Scan all WooCommerce products for duplicate SKUs. For each group of duplicates, the product with the
+                        <strong>cleanest URL</strong> (no <code>-2</code>, <code>-3</code> suffix) is kept and all others are permanently deleted.
+                        DMS metadata is transferred to the keeper before deletion.
+                    </p>
+
+                    <div style="display:flex; align-items:center; gap:0.75rem;">
+                        <button type="button" id="dms-dup-sku-scan-btn" class="button button-primary" style="height:auto; min-width:auto; padding:0.6rem 2rem; font-size:14px;">
+                            Scan for Duplicate SKUs
+                        </button>
+                        <button type="button" id="dms-dup-sku-cleanup-btn" class="button" style="height:auto; min-width:auto; background-color:#dc3545; border-color:#dc3545; color:#fff; padding:0.6rem 2rem; font-size:14px; display:none;">
+                            Delete All Duplicates
+                        </button>
+                        <span id="dms-dup-sku-spinner" class="spinner" style="float:none; margin-top:0;"></span>
+                    </div>
+                    <div id="dms-dup-sku-results" style="display:none; width:100%;"></div>
+                </div>
+            </div>
         </div>
 
         <style>
@@ -1113,6 +1137,7 @@ class Admin_Page
             var mappedNonce = ' . wp_json_encode($mapped_nonce) . ';
             var publishNonce = ' . wp_json_encode($publish_nonce) . ';
             var bulkDeleteNonce = ' . wp_json_encode($bulk_delete_nonce) . ';
+            var dupSkuNonce = ' . wp_json_encode($dup_sku_nonce) . ';
 
             // Highlight selected radio option
             $("input[name=sync_type]").on("change", function() {
@@ -1770,6 +1795,182 @@ class Admin_Page
                         html += "<li>" + $("<span>").text(e).html() + "</li>";
                     });
                     if (stats.delete_details.length > 100) html += "<li><em>...and " + (stats.delete_details.length - 100) + " more</em></li>";
+                    html += "</ul></details>";
+                }
+                if (stats.error_details && stats.error_details.length > 0) {
+                    html += \'<details style="margin-top:0.5rem;"><summary style="cursor:pointer;font-weight:600;color:#dc3545;">Error details (\' + stats.error_details.length + ")</summary>";
+                    html += \'<ul style="list-style:disc;padding-left:1.5rem;font-size:0.85rem;max-height:300px;overflow-y:auto;">\';
+                    stats.error_details.slice(0, 50).forEach(function(e) {
+                        html += "<li>" + $("<span>").text(e).html() + "</li>";
+                    });
+                    if (stats.error_details.length > 50) html += "<li><em>...and " + (stats.error_details.length - 50) + " more</em></li>";
+                    html += "</ul></details>";
+                }
+                html += "</div>";
+                $results.html(html).show();
+            }
+
+            // ─── Duplicate SKU Cleanup ───────────────────────────────────
+            var $dupScanBtn = $("#dms-dup-sku-scan-btn");
+            var $dupCleanBtn = $("#dms-dup-sku-cleanup-btn");
+            var $dupSpinner = $("#dms-dup-sku-spinner");
+            var $dupResults = $("#dms-dup-sku-results");
+            var dupSyncId = "";
+
+            $dupScanBtn.on("click", function() {
+                $dupScanBtn.prop("disabled", true).text("Scanning...");
+                $dupCleanBtn.hide();
+                $dupSpinner.addClass("is-active");
+                $dupResults.hide();
+
+                $.ajax({
+                    url: ajaxurl,
+                    type: "POST",
+                    data: { action: "tigon_dms_dup_sku_scan", nonce: dupSkuNonce },
+                    timeout: 120000,
+                    success: function(resp) {
+                        $dupSpinner.removeClass("is-active");
+                        $dupScanBtn.prop("disabled", false).text("Scan for Duplicate SKUs");
+
+                        if (!resp.success) {
+                            showError($dupResults, resp.data || "Scan failed");
+                            return;
+                        }
+
+                        var d = resp.data;
+                        if (d.done && d.total_skus === 0) {
+                            var html = \'<div style="background:#d4edda;border:1px solid #c3e6cb;padding:1rem;border-radius:6px;margin-top:0.5rem;">\';
+                            html += \'<h3 style="margin:0;color:#155724;">No Duplicates Found</h3>\';
+                            html += \'<p style="margin:0.5rem 0 0;">\' + d.message + "</p></div>";
+                            $dupResults.html(html).show();
+                            return;
+                        }
+
+                        dupSyncId = d.sync_id;
+
+                        var html = \'<div style="background:#fff3cd;border:1px solid #ffc107;padding:1rem;border-radius:6px;margin-top:0.5rem;">\';
+                        html += \'<h3 style="margin:0 0 0.5rem 0;color:#856404;">Scan Results: \' + d.total_skus + \' duplicate SKUs found</h3>\';
+                        html += \'<ul style="list-style:disc;padding-left:1.5rem;">\';
+                        html += "<li><strong>SKU groups with duplicates:</strong> " + d.total_skus + "</li>";
+                        html += "<li><strong>Total duplicate products to delete:</strong> " + d.total_duplicates + "</li>";
+                        html += "<li><strong>Products kept (best URL):</strong> " + d.total_skus + "</li>";
+                        html += "</ul>";
+                        if (d.groups && d.groups.length > 0) {
+                            html += \'<details style="margin-top:0.5rem;"><summary style="cursor:pointer;font-weight:600;color:#856404;">Preview (\' + d.groups.length + \' of \' + d.total_skus + " groups)</summary>";
+                            html += \'<ul style="list-style:disc;padding-left:1.5rem;font-size:0.85rem;max-height:300px;overflow-y:auto;">\';
+                            d.groups.forEach(function(g) {
+                                html += "<li>" + $("<span>").text(g).html() + "</li>";
+                            });
+                            if (d.total_skus > d.groups.length) html += "<li><em>...and " + (d.total_skus - d.groups.length) + " more groups</em></li>";
+                            html += "</ul></details>";
+                        }
+                        html += "</div>";
+                        $dupResults.html(html).show();
+
+                        if (d.total_duplicates > 0) {
+                            $dupCleanBtn.show().text("Delete All " + d.total_duplicates + " Duplicates");
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        $dupSpinner.removeClass("is-active");
+                        $dupScanBtn.prop("disabled", false).text("Scan for Duplicate SKUs");
+                        showError($dupResults, "Scan request failed: " + (error || status));
+                    }
+                });
+            });
+
+            $dupCleanBtn.on("click", function() {
+                var total = parseInt($dupCleanBtn.text().replace(/\D/g, ""), 10) || 0;
+                if (!confirm("WARNING: You are about to permanently delete " + total + " duplicate products and ALL their images.\\n\\nFor each SKU group, the product with the cleanest URL (no -2, -3 suffix) will be KEPT. All others will be deleted.\\n\\nThis CANNOT be undone. Continue?")) {
+                    return;
+                }
+
+                $dupCleanBtn.prop("disabled", true).text("Cleaning up...");
+                $dupScanBtn.prop("disabled", true);
+                $dupSpinner.addClass("is-active");
+
+                showProgress($dupResults, total);
+                $dupResults.find(".sync-progress-status").text("Deleting " + total + " duplicate products...");
+                $dupResults.find(".sync-live-stats").html(
+                    \'<span class="created" style="color:#28a745;">Deleted: <em>0</em></span> \' +
+                    \'<span class="errors" style="color:#dc3545;">Errors: <em>0</em></span>\'
+                );
+
+                var cumulative = { deleted: 0, errors: 0, details: [], error_details: [] };
+                var retries = 0;
+                var maxRetries = 3;
+
+                function processCleanupBatch() {
+                    $.ajax({
+                        url: ajaxurl,
+                        type: "POST",
+                        data: { action: "tigon_dms_dup_sku_cleanup_batch", nonce: dupSkuNonce, sync_id: dupSyncId },
+                        timeout: 280000,
+                        success: function(batchResp) {
+                            retries = 0;
+                            if (!batchResp.success) {
+                                cumulative.errors++;
+                                cumulative.error_details.push(batchResp.data || "unknown batch error");
+                            }
+
+                            var d = batchResp.data || {};
+                            cumulative.deleted += (d.deleted || 0);
+                            cumulative.errors += (d.errors || 0);
+                            cumulative.details = cumulative.details.concat(d.details || []);
+                            cumulative.error_details = cumulative.error_details.concat(d.error_details || []);
+
+                            var processed = d.processed || 0;
+                            var pct = total > 0 ? Math.min(Math.round((processed / total) * 100), 100) : 0;
+                            $dupResults.find(".sync-progress-bar").css("width", pct + "%");
+                            $dupResults.find(".sync-progress-text").text(processed + " / " + total + " (" + pct + "%)");
+                            $dupResults.find(".sync-progress-status").text("Cleaning up... " + processed + " of " + total);
+                            $dupResults.find(".created em").text(cumulative.deleted);
+                            $dupResults.find(".errors em").text(cumulative.errors);
+
+                            if (d.done) {
+                                $dupSpinner.removeClass("is-active");
+                                $dupCleanBtn.hide();
+                                $dupScanBtn.prop("disabled", false).text("Scan for Duplicate SKUs");
+                                showDupCleanupResults($dupResults, cumulative, total);
+                            } else {
+                                processCleanupBatch();
+                            }
+                        },
+                        error: function(xhr, status, error) {
+                            retries++;
+                            if (retries <= maxRetries) {
+                                cumulative.error_details.push("Network error (attempt " + retries + "): " + (error || status) + " — retrying in " + (retries * 2) + "s...");
+                                setTimeout(processCleanupBatch, retries * 2000);
+                            } else {
+                                cumulative.errors++;
+                                cumulative.error_details.push("Failed after " + maxRetries + " retries: " + (error || status));
+                                $dupSpinner.removeClass("is-active");
+                                $dupCleanBtn.hide();
+                                $dupScanBtn.prop("disabled", false).text("Scan for Duplicate SKUs");
+                                showDupCleanupResults($dupResults, cumulative, total);
+                            }
+                        }
+                    });
+                }
+
+                processCleanupBatch();
+            });
+
+            function showDupCleanupResults($results, stats, total) {
+                var html = \'<div style="background:#d4edda;border:1px solid #c3e6cb;padding:1rem;border-radius:6px;">\';
+                html += \'<h3 style="margin:0 0 0.5rem 0;color:#155724;">Duplicate SKU Cleanup Complete</h3>\';
+                html += \'<ul style="list-style:disc;padding-left:1.5rem;">\';
+                html += "<li><strong>Total duplicates found:</strong> " + total + "</li>";
+                html += "<li><strong>Deleted:</strong> " + stats.deleted + " (product + all images)</li>";
+                if (stats.errors > 0) html += "<li><strong>Errors:</strong> " + stats.errors + "</li>";
+                html += "</ul>";
+                if (stats.details && stats.details.length > 0) {
+                    html += \'<details style="margin-top:0.5rem;"><summary style="cursor:pointer;font-weight:600;color:#155724;">Deleted products (\' + stats.details.length + ")</summary>";
+                    html += \'<ul style="list-style:disc;padding-left:1.5rem;font-size:0.85rem;max-height:300px;overflow-y:auto;">\';
+                    stats.details.slice(0, 100).forEach(function(e) {
+                        html += "<li>" + $("<span>").text(e).html() + "</li>";
+                    });
+                    if (stats.details.length > 100) html += "<li><em>...and " + (stats.details.length - 100) + " more</em></li>";
                     html += "</ul></details>";
                 }
                 if (stats.error_details && stats.error_details.length > 0) {

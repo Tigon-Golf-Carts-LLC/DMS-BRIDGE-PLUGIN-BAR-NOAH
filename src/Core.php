@@ -51,6 +51,8 @@ class Core
         add_action('wp_ajax_tigon_dms_publish_synced_batch', 'Tigon\DmsConnect\Core::ajax_publish_synced_batch');
         add_action('wp_ajax_tigon_dms_bulk_delete_init', 'Tigon\DmsConnect\Core::ajax_bulk_delete_init');
         add_action('wp_ajax_tigon_dms_bulk_delete_batch', 'Tigon\DmsConnect\Core::ajax_bulk_delete_batch');
+        add_action('wp_ajax_tigon_dms_dup_sku_scan', 'Tigon\DmsConnect\Core::ajax_dup_sku_scan');
+        add_action('wp_ajax_tigon_dms_dup_sku_cleanup_batch', 'Tigon\DmsConnect\Core::ajax_dup_sku_cleanup_batch');
 
         // Field mapping AJAX handlers
         add_action('wp_ajax_tigon_dms_get_field_mappings', 'Tigon\DmsConnect\Core::ajax_get_field_mappings');
@@ -527,9 +529,9 @@ class Core
             if (str_contains($serial, 'DELETE') || str_contains($vin, 'DELETE')) {
                 $cart_del_id = $cart['_id'] ?? '';
                 if ($cart_del_id) {
-                    $existing_pid = function_exists('tigon_dms_get_product_by_cart_id')
-                        ? tigon_dms_get_product_by_cart_id($cart_del_id)
-                        : false;
+                    $existing_pid = function_exists('tigon_dms_find_existing_product')
+                        ? tigon_dms_find_existing_product($cart_del_id, $cart)
+                        : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_del_id) : false);
                     if ($existing_pid) {
                         \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
                     }
@@ -667,9 +669,9 @@ class Core
             // Cart eligibility — delete product if cart is ineligible
             // ---------------------------------------------------------
             if (!\Tigon\DmsConnect\Includes\Product_Manager::should_be_on_website($cart)) {
-                $existing_pid = function_exists('tigon_dms_get_product_by_cart_id')
-                    ? tigon_dms_get_product_by_cart_id($cart_id)
-                    : false;
+                $existing_pid = function_exists('tigon_dms_find_existing_product')
+                    ? tigon_dms_find_existing_product($cart_id, $cart)
+                    : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_id) : false);
                 if ($existing_pid) {
                     \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
                 }
@@ -678,9 +680,9 @@ class Core
             $serial = strtoupper($cart['serialNo'] ?? '');
             $vin    = strtoupper($cart['vinNo'] ?? '');
             if (str_contains($serial, 'DELETE') || str_contains($vin, 'DELETE')) {
-                $existing_pid = function_exists('tigon_dms_get_product_by_cart_id')
-                    ? tigon_dms_get_product_by_cart_id($cart_id)
-                    : false;
+                $existing_pid = function_exists('tigon_dms_find_existing_product')
+                    ? tigon_dms_find_existing_product($cart_id, $cart)
+                    : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_id) : false);
                 if ($existing_pid) {
                     \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
                 }
@@ -737,9 +739,9 @@ class Core
             }
 
             // Check if product already exists
-            $existing = function_exists('tigon_dms_get_product_by_cart_id')
-                ? tigon_dms_get_product_by_cart_id($cart_id)
-                : false;
+            $existing = function_exists('tigon_dms_find_existing_product')
+                ? tigon_dms_find_existing_product($cart_id, $cart)
+                : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_id) : false);
             $was_existing = (bool) $existing;
 
             try {
@@ -946,9 +948,9 @@ class Core
                 // Eligibility check — delete product if ineligible
                 if (!\Tigon\DmsConnect\Includes\Product_Manager::should_be_on_website($cart)) {
                     $reason = \Tigon\DmsConnect\Includes\Product_Manager::get_ineligibility_reason($cart);
-                    $existing_pid = function_exists('tigon_dms_get_product_by_cart_id')
-                        ? tigon_dms_get_product_by_cart_id($cart_id)
-                        : false;
+                    $existing_pid = function_exists('tigon_dms_find_existing_product')
+                        ? tigon_dms_find_existing_product($cart_id, $cart)
+                        : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_id) : false);
                     if ($existing_pid) {
                         \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
                         $stats['skip_details'][] = "{$cart_label}: Deleted — not eligible ({$reason})";
@@ -961,9 +963,9 @@ class Core
                 $serial_upper = strtoupper($cart['serialNo'] ?? '');
                 $vin    = strtoupper($cart['vinNo'] ?? '');
                 if (str_contains($serial_upper, 'DELETE') || str_contains($vin, 'DELETE')) {
-                    $existing_pid = function_exists('tigon_dms_get_product_by_cart_id')
-                        ? tigon_dms_get_product_by_cart_id($cart_id)
-                        : false;
+                    $existing_pid = function_exists('tigon_dms_find_existing_product')
+                        ? tigon_dms_find_existing_product($cart_id, $cart)
+                        : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_id) : false);
                     if ($existing_pid) {
                         \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
                         $stats['skip_details'][] = "{$cart_label}: Deleted — serial/VIN contains DELETE (product + assets removed)";
@@ -1023,9 +1025,9 @@ class Core
                 }
 
                 // Check if product already exists
-                $existing = function_exists('tigon_dms_get_product_by_cart_id')
-                    ? tigon_dms_get_product_by_cart_id($cart_id)
-                    : false;
+                $existing = function_exists('tigon_dms_find_existing_product')
+                    ? tigon_dms_find_existing_product($cart_id, $cart)
+                    : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_id) : false);
                 $was_existing = (bool) $existing;
 
                 try {
@@ -1167,9 +1169,9 @@ class Core
             if (str_contains($serial, 'DELETE') || str_contains($vin, 'DELETE')) {
                 $cart_del_id = $cart['_id'] ?? '';
                 if ($cart_del_id) {
-                    $existing_pid = function_exists('tigon_dms_get_product_by_cart_id')
-                        ? tigon_dms_get_product_by_cart_id($cart_del_id)
-                        : false;
+                    $existing_pid = function_exists('tigon_dms_find_existing_product')
+                        ? tigon_dms_find_existing_product($cart_del_id, $cart)
+                        : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_del_id) : false);
                     if ($existing_pid) {
                         \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
                     }
@@ -1793,6 +1795,248 @@ class Core
             ]);
         } catch (\Throwable $e) {
             wp_send_json_error('Bulk delete batch error: ' . $e->getMessage());
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    //  Duplicate SKU Cleanup
+    // ─────────────────────────────────────────────────────────────────
+
+    const DUP_SKU_BATCH_SIZE = 5;
+
+    /**
+     * AJAX: Scan for duplicate SKUs across all WooCommerce products.
+     *
+     * Groups products by SKU, identifies duplicates, and for each group
+     * picks the "keeper" — the product whose URL slug has no numeric
+     * suffix (best for SEO). Returns a preview and stores the cleanup
+     * plan in a transient for batch processing.
+     */
+    public static function ajax_dup_sku_scan()
+    {
+        check_ajax_referer('tigon_dms_dup_sku_cleanup_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
+        global $wpdb;
+
+        try {
+            // Find all SKUs that appear on more than one published/draft product
+            $dup_skus = $wpdb->get_results(
+                "SELECT pm.meta_value AS sku, GROUP_CONCAT(pm.post_id ORDER BY p.post_date ASC) AS pids, COUNT(*) AS cnt
+                 FROM {$wpdb->postmeta} pm
+                 INNER JOIN {$wpdb->posts} p ON pm.post_id = p.ID
+                 WHERE pm.meta_key = '_sku'
+                   AND pm.meta_value != ''
+                   AND p.post_type = 'product'
+                   AND p.post_status IN ('publish', 'draft')
+                 GROUP BY pm.meta_value
+                 HAVING cnt > 1
+                 ORDER BY cnt DESC",
+                ARRAY_A
+            );
+
+            if (empty($dup_skus)) {
+                wp_send_json_success([
+                    'total_skus'       => 0,
+                    'total_duplicates' => 0,
+                    'groups'           => [],
+                    'done'             => true,
+                    'message'          => 'No duplicate SKUs found. All products have unique SKUs.',
+                ]);
+                return;
+            }
+
+            // Build cleanup plan: for each SKU group, pick the best keeper
+            $groups = [];
+            $total_to_delete = 0;
+
+            foreach ($dup_skus as $row) {
+                $sku  = $row['sku'];
+                $pids = array_map('intval', explode(',', $row['pids']));
+
+                // Score each product — lower is better (keeper)
+                // Prefer: no numeric slug suffix, published, oldest (first created)
+                $best_pid   = $pids[0];
+                $best_score = PHP_INT_MAX;
+
+                foreach ($pids as $pid) {
+                    $post = get_post($pid);
+                    if (!$post) continue;
+
+                    $slug  = $post->post_name;
+                    $score = 0;
+
+                    // Penalise slugs ending in -2, -3, etc. (WordPress dedup suffix)
+                    if (preg_match('/-(\d+)$/', $slug, $m)) {
+                        $score += 1000 + intval($m[1]);
+                    }
+
+                    // Prefer published over draft
+                    if ($post->post_status !== 'publish') {
+                        $score += 500;
+                    }
+
+                    // Tie-break: oldest product wins (lower post_date)
+                    $score += (int) strtotime($post->post_date);
+
+                    if ($score < $best_score) {
+                        $best_score = $score;
+                        $best_pid   = $pid;
+                    }
+                }
+
+                $to_delete = array_values(array_diff($pids, [$best_pid]));
+                $total_to_delete += count($to_delete);
+
+                $keeper_post = get_post($best_pid);
+                $groups[] = [
+                    'sku'         => $sku,
+                    'keeper'      => $best_pid,
+                    'keeper_slug' => $keeper_post ? $keeper_post->post_name : '',
+                    'keeper_title'=> $keeper_post ? $keeper_post->post_title : '',
+                    'delete_ids'  => $to_delete,
+                    'total_in_group' => count($pids),
+                ];
+            }
+
+            // Flatten all IDs to delete into a single list with their keeper mapping
+            $delete_plan = [];
+            foreach ($groups as $g) {
+                foreach ($g['delete_ids'] as $del_id) {
+                    $delete_plan[] = [
+                        'pid'    => $del_id,
+                        'keeper' => $g['keeper'],
+                        'sku'    => $g['sku'],
+                    ];
+                }
+            }
+
+            // Store plan in transient for batch processing
+            $sync_id = 'dms_dupsku_' . wp_generate_password(16, false);
+            set_transient($sync_id, [
+                'plan'   => $delete_plan,
+                'offset' => 0,
+            ], HOUR_IN_SECONDS);
+
+            // Build sample for preview (first 30 groups)
+            $sample = [];
+            foreach (array_slice($groups, 0, 30) as $g) {
+                $sample[] = 'SKU "' . $g['sku'] . '": ' . $g['total_in_group'] . ' copies — keeping ID ' . $g['keeper'] . ' (' . $g['keeper_slug'] . '), deleting ' . count($g['delete_ids']) . ' duplicates';
+            }
+
+            wp_send_json_success([
+                'sync_id'          => $sync_id,
+                'total_skus'       => count($groups),
+                'total_duplicates' => $total_to_delete,
+                'groups'           => $sample,
+                'batch_size'       => self::DUP_SKU_BATCH_SIZE,
+            ]);
+        } catch (\Throwable $e) {
+            wp_send_json_error('Duplicate SKU scan error: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * AJAX: Batch-process duplicate SKU cleanup.
+     *
+     * For each duplicate being deleted:
+     *   1. Transfers _dms_cart_id to the keeper (if keeper lacks one)
+     *   2. Deletes the duplicate via Product_Media::delete_product()
+     */
+    public static function ajax_dup_sku_cleanup_batch()
+    {
+        check_ajax_referer('tigon_dms_dup_sku_cleanup_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
+        ignore_user_abort(true);
+        set_time_limit(270);
+
+        try {
+            $sync_id = sanitize_text_field($_POST['sync_id'] ?? '');
+            $meta    = get_transient($sync_id);
+            if (!is_array($meta) || !isset($meta['plan'])) {
+                wp_send_json_error('Session expired or invalid. Please scan again.');
+                return;
+            }
+
+            $plan   = $meta['plan'];
+            $offset = $meta['offset'] ?? 0;
+            $batch  = array_slice($plan, $offset, self::DUP_SKU_BATCH_SIZE);
+
+            $deleted = 0;
+            $errors  = 0;
+            $details = [];
+            $error_details = [];
+
+            foreach ($batch as $item) {
+                $pid    = (int) $item['pid'];
+                $keeper = (int) $item['keeper'];
+                $sku    = $item['sku'];
+
+                $title = get_the_title($pid);
+                $slug  = get_post_field('post_name', $pid);
+                $label = $title ? "{$title} (ID:{$pid}, slug:{$slug})" : "ID:{$pid}";
+
+                try {
+                    // Transfer _dms_cart_id to keeper if it doesn't already have one
+                    $dup_cart_id    = get_post_meta($pid, '_dms_cart_id', true);
+                    $keeper_cart_id = get_post_meta($keeper, '_dms_cart_id', true);
+                    if ($dup_cart_id && !$keeper_cart_id) {
+                        update_post_meta($keeper, '_dms_cart_id', $dup_cart_id);
+                    }
+
+                    // Transfer _dms_payload to keeper if it doesn't already have one
+                    $dup_payload    = get_post_meta($pid, '_dms_payload', true);
+                    $keeper_payload = get_post_meta($keeper, '_dms_payload', true);
+                    if ($dup_payload && !$keeper_payload) {
+                        update_post_meta($keeper, '_dms_payload', $dup_payload);
+                    }
+
+                    $result = \Tigon\DmsConnect\Includes\Product_Media::delete_product($pid);
+                    if ($result) {
+                        $deleted++;
+                        $details[] = "SKU {$sku}: Deleted {$label} (kept ID:{$keeper})";
+                    } else {
+                        $errors++;
+                        $error_details[] = "SKU {$sku}: {$label} — not found or already deleted";
+                    }
+                } catch (\Throwable $e) {
+                    $errors++;
+                    $error_details[] = "SKU {$sku}: {$label} — " . $e->getMessage();
+                }
+            }
+
+            $new_offset = $offset + count($batch);
+            $done       = $new_offset >= count($plan);
+
+            if ($done) {
+                delete_transient($sync_id);
+                if (function_exists('wc_update_product_lookup_tables')) {
+                    wc_update_product_lookup_tables();
+                }
+                if (class_exists('\DMS_API')) {
+                    \DMS_API::clear_caches();
+                }
+            } else {
+                $meta['offset'] = $new_offset;
+                set_transient($sync_id, $meta, HOUR_IN_SECONDS);
+            }
+
+            wp_send_json_success([
+                'deleted'        => $deleted,
+                'errors'         => $errors,
+                'details'        => $details,
+                'error_details'  => $error_details,
+                'processed'      => $new_offset,
+                'total'          => count($plan),
+                'done'           => $done,
+            ]);
+        } catch (\Throwable $e) {
+            wp_send_json_error('Duplicate SKU cleanup batch error: ' . $e->getMessage());
         }
     }
 
