@@ -527,9 +527,9 @@ class Core
             if (str_contains($serial, 'DELETE') || str_contains($vin, 'DELETE')) {
                 $cart_del_id = $cart['_id'] ?? '';
                 if ($cart_del_id) {
-                    $existing_pid = function_exists('tigon_dms_get_product_by_cart_id')
-                        ? tigon_dms_get_product_by_cart_id($cart_del_id)
-                        : false;
+                    $existing_pid = function_exists('tigon_dms_find_existing_product')
+                        ? tigon_dms_find_existing_product($cart_del_id, $cart)
+                        : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_del_id) : false);
                     if ($existing_pid) {
                         \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
                     }
@@ -667,9 +667,9 @@ class Core
             // Cart eligibility — delete product if cart is ineligible
             // ---------------------------------------------------------
             if (!\Tigon\DmsConnect\Includes\Product_Manager::should_be_on_website($cart)) {
-                $existing_pid = function_exists('tigon_dms_get_product_by_cart_id')
-                    ? tigon_dms_get_product_by_cart_id($cart_id)
-                    : false;
+                $existing_pid = function_exists('tigon_dms_find_existing_product')
+                    ? tigon_dms_find_existing_product($cart_id, $cart)
+                    : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_id) : false);
                 if ($existing_pid) {
                     \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
                 }
@@ -678,9 +678,9 @@ class Core
             $serial = strtoupper($cart['serialNo'] ?? '');
             $vin    = strtoupper($cart['vinNo'] ?? '');
             if (str_contains($serial, 'DELETE') || str_contains($vin, 'DELETE')) {
-                $existing_pid = function_exists('tigon_dms_get_product_by_cart_id')
-                    ? tigon_dms_get_product_by_cart_id($cart_id)
-                    : false;
+                $existing_pid = function_exists('tigon_dms_find_existing_product')
+                    ? tigon_dms_find_existing_product($cart_id, $cart)
+                    : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_id) : false);
                 if ($existing_pid) {
                     \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
                 }
@@ -737,9 +737,9 @@ class Core
             }
 
             // Check if product already exists
-            $existing = function_exists('tigon_dms_get_product_by_cart_id')
-                ? tigon_dms_get_product_by_cart_id($cart_id)
-                : false;
+            $existing = function_exists('tigon_dms_find_existing_product')
+                ? tigon_dms_find_existing_product($cart_id, $cart)
+                : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_id) : false);
             $was_existing = (bool) $existing;
 
             try {
@@ -946,9 +946,9 @@ class Core
                 // Eligibility check — delete product if ineligible
                 if (!\Tigon\DmsConnect\Includes\Product_Manager::should_be_on_website($cart)) {
                     $reason = \Tigon\DmsConnect\Includes\Product_Manager::get_ineligibility_reason($cart);
-                    $existing_pid = function_exists('tigon_dms_get_product_by_cart_id')
-                        ? tigon_dms_get_product_by_cart_id($cart_id)
-                        : false;
+                    $existing_pid = function_exists('tigon_dms_find_existing_product')
+                        ? tigon_dms_find_existing_product($cart_id, $cart)
+                        : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_id) : false);
                     if ($existing_pid) {
                         \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
                         $stats['skip_details'][] = "{$cart_label}: Deleted — not eligible ({$reason})";
@@ -961,9 +961,9 @@ class Core
                 $serial_upper = strtoupper($cart['serialNo'] ?? '');
                 $vin    = strtoupper($cart['vinNo'] ?? '');
                 if (str_contains($serial_upper, 'DELETE') || str_contains($vin, 'DELETE')) {
-                    $existing_pid = function_exists('tigon_dms_get_product_by_cart_id')
-                        ? tigon_dms_get_product_by_cart_id($cart_id)
-                        : false;
+                    $existing_pid = function_exists('tigon_dms_find_existing_product')
+                        ? tigon_dms_find_existing_product($cart_id, $cart)
+                        : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_id) : false);
                     if ($existing_pid) {
                         \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
                         $stats['skip_details'][] = "{$cart_label}: Deleted — serial/VIN contains DELETE (product + assets removed)";
@@ -1023,9 +1023,9 @@ class Core
                 }
 
                 // Check if product already exists
-                $existing = function_exists('tigon_dms_get_product_by_cart_id')
-                    ? tigon_dms_get_product_by_cart_id($cart_id)
-                    : false;
+                $existing = function_exists('tigon_dms_find_existing_product')
+                    ? tigon_dms_find_existing_product($cart_id, $cart)
+                    : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_id) : false);
                 $was_existing = (bool) $existing;
 
                 try {
@@ -1167,9 +1167,9 @@ class Core
             if (str_contains($serial, 'DELETE') || str_contains($vin, 'DELETE')) {
                 $cart_del_id = $cart['_id'] ?? '';
                 if ($cart_del_id) {
-                    $existing_pid = function_exists('tigon_dms_get_product_by_cart_id')
-                        ? tigon_dms_get_product_by_cart_id($cart_del_id)
-                        : false;
+                    $existing_pid = function_exists('tigon_dms_find_existing_product')
+                        ? tigon_dms_find_existing_product($cart_del_id, $cart)
+                        : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_del_id) : false);
                     if ($existing_pid) {
                         \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
                     }

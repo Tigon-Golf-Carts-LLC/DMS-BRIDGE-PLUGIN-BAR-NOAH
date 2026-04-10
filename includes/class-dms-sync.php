@@ -189,7 +189,7 @@ class DMS_Sync
                 \Tigon\DmsConnect\Admin\CartModel::upsert_from_api($cart_data, $store_name, '', $store_id);
 
                 // Check if product already exists (for stats tracking)
-                $existing_product_id = tigon_dms_get_product_by_cart_id($cart_id);
+                $existing_product_id = tigon_dms_find_existing_product($cart_id, $cart_data);
                 $was_existing = (bool) $existing_product_id;
 
                 try {
