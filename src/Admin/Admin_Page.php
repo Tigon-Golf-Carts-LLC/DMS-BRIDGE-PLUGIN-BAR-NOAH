@@ -1101,9 +1101,9 @@ class Admin_Page
                 <div class="action-box primary" style="flex-direction:column; gap:1rem; align-items:flex-start; border-left:4px solid #dc3545;">
                     <h2 style="margin:0; color:#dc3545;">Duplicate SKU Cleanup</h2>
                     <p>
-                        Scan all WooCommerce products for duplicate SKUs. For each group of duplicates, the product with the
-                        <strong>cleanest URL</strong> (no <code>-2</code>, <code>-3</code> suffix) is kept and all others are permanently deleted.
-                        DMS metadata is transferred to the keeper before deletion.
+                        Scan <strong>DMS-synced</strong> products for duplicates where both the <strong>SKU and VIN number</strong> match.
+                        For each group, the product with the <strong>cleanest URL</strong> (no <code>-2</code>, <code>-3</code> suffix) is kept
+                        and all others are permanently deleted. DMS metadata is transferred to the keeper before deletion.
                     </p>
 
                     <div style="display:flex; align-items:center; gap:0.75rem;">

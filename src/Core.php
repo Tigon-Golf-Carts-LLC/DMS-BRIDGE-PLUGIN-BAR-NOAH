@@ -1822,39 +1822,79 @@ class Core
         global $wpdb;
 
         try {
-            // Find all SKUs that appear on more than one published/draft product
-            $dup_skus = $wpdb->get_results(
-                "SELECT pm.meta_value AS sku, GROUP_CONCAT(pm.post_id ORDER BY p.post_date ASC) AS pids, COUNT(*) AS cnt
-                 FROM {$wpdb->postmeta} pm
-                 INNER JOIN {$wpdb->posts} p ON pm.post_id = p.ID
-                 WHERE pm.meta_key = '_sku'
-                   AND pm.meta_value != ''
-                   AND p.post_type = 'product'
+            // Find all DMS-synced products (must have _dms_cart_id) with their SKU
+            $products = $wpdb->get_results(
+                "SELECT p.ID, sku.meta_value AS sku, payload.meta_value AS payload
+                 FROM {$wpdb->posts} p
+                 INNER JOIN {$wpdb->postmeta} dms ON p.ID = dms.post_id AND dms.meta_key = '_dms_cart_id'
+                 INNER JOIN {$wpdb->postmeta} sku ON p.ID = sku.post_id AND sku.meta_key = '_sku'
+                 LEFT JOIN {$wpdb->postmeta} payload ON p.ID = payload.post_id AND payload.meta_key = '_dms_payload'
+                 WHERE p.post_type = 'product'
                    AND p.post_status IN ('publish', 'draft')
-                 GROUP BY pm.meta_value
-                 HAVING cnt > 1
-                 ORDER BY cnt DESC",
+                   AND sku.meta_value != ''
+                 ORDER BY p.post_date ASC",
                 ARRAY_A
             );
 
-            if (empty($dup_skus)) {
+            if (empty($products)) {
                 wp_send_json_success([
                     'total_skus'       => 0,
                     'total_duplicates' => 0,
                     'groups'           => [],
                     'done'             => true,
-                    'message'          => 'No duplicate SKUs found. All products have unique SKUs.',
+                    'message'          => 'No DMS-synced products found.',
                 ]);
                 return;
             }
 
-            // Build cleanup plan: for each SKU group, pick the best keeper
+            // Group products by composite key: SKU + vinNo
+            // Both must match for products to be considered duplicates
+            $groups_map = [];
+            foreach ($products as $row) {
+                $sku = trim($row['sku']);
+                if ($sku === '') continue;
+
+                // Extract vinNo from _dms_payload JSON
+                $vin = '';
+                if (!empty($row['payload'])) {
+                    $payload = json_decode($row['payload'], true);
+                    if (is_array($payload) && !empty($payload['vinNo'])) {
+                        $vin = trim($payload['vinNo']);
+                    }
+                }
+
+                // Composite key: both SKU and vinNo must match
+                $key = $sku . '||' . $vin;
+                $groups_map[$key][] = (int) $row['ID'];
+            }
+
+            // Filter to only groups with duplicates (more than 1 product)
+            $dup_groups = array_filter($groups_map, function ($pids) {
+                return count($pids) > 1;
+            });
+
+            if (empty($dup_groups)) {
+                wp_send_json_success([
+                    'total_skus'       => 0,
+                    'total_duplicates' => 0,
+                    'groups'           => [],
+                    'done'             => true,
+                    'message'          => 'No duplicate SKU + VIN combinations found among DMS products.',
+                ]);
+                return;
+            }
+
+            // Sort by count descending
+            uasort($dup_groups, function ($a, $b) {
+                return count($b) - count($a);
+            });
+
+            // Build cleanup plan: for each group, pick the best keeper
             $groups = [];
             $total_to_delete = 0;
 
-            foreach ($dup_skus as $row) {
-                $sku  = $row['sku'];
-                $pids = array_map('intval', explode(',', $row['pids']));
+            foreach ($dup_groups as $key => $pids) {
+                list($sku, $vin) = explode('||', $key, 2);
 
                 // Score each product — lower is better (keeper)
                 // Prefer: no numeric slug suffix, published, oldest (first created)
@@ -1892,11 +1932,12 @@ class Core
 
                 $keeper_post = get_post($best_pid);
                 $groups[] = [
-                    'sku'         => $sku,
-                    'keeper'      => $best_pid,
-                    'keeper_slug' => $keeper_post ? $keeper_post->post_name : '',
-                    'keeper_title'=> $keeper_post ? $keeper_post->post_title : '',
-                    'delete_ids'  => $to_delete,
+                    'sku'            => $sku,
+                    'vin'            => $vin,
+                    'keeper'         => $best_pid,
+                    'keeper_slug'    => $keeper_post ? $keeper_post->post_name : '',
+                    'keeper_title'   => $keeper_post ? $keeper_post->post_title : '',
+                    'delete_ids'     => $to_delete,
                     'total_in_group' => count($pids),
                 ];
             }
@@ -1923,7 +1964,8 @@ class Core
             // Build sample for preview (first 30 groups)
             $sample = [];
             foreach (array_slice($groups, 0, 30) as $g) {
-                $sample[] = 'SKU "' . $g['sku'] . '": ' . $g['total_in_group'] . ' copies — keeping ID ' . $g['keeper'] . ' (' . $g['keeper_slug'] . '), deleting ' . count($g['delete_ids']) . ' duplicates';
+                $vin_label = $g['vin'] !== '' ? $g['vin'] : '(no VIN)';
+                $sample[] = 'SKU "' . $g['sku'] . '" / VIN "' . $vin_label . '": ' . $g['total_in_group'] . ' copies — keeping ID ' . $g['keeper'] . ' (' . $g['keeper_slug'] . '), deleting ' . count($g['delete_ids']) . ' duplicates';
             }
 
             wp_send_json_success([
