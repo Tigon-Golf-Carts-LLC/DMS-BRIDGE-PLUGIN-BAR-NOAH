@@ -884,11 +884,40 @@ function tigon_dms_download_and_attach_images($product_id, $image_names, $title,
         ? $templates['schema_image_name']
         : '{^make} {^model} {cartColor} in {city}, {stateAbbr} image';
 
-    // Delete existing attached images to avoid duplicates on re-sync
-    \Tigon\DmsConnect\Includes\Product_Media::delete_product_media($product_id);
+    // ────────────────────────────────────────────────────────────
+    // Safe image sync: download-first, swap, then cleanup.
+    //
+    // The old code deleted all existing media BEFORE downloading
+    // replacements, which left products imageless if the download
+    // failed. Now we:
+    //   1. Remember which attachment IDs the product currently owns
+    //   2. Download all new images into fresh attachments
+    //   3. Only if we got at least one successful download, swap
+    //      the product to use the new attachments and delete the
+    //      old ones. Otherwise, leave the old images in place and
+    //      log a warning so the admin knows a sync cycle failed.
+    // ────────────────────────────────────────────────────────────
+
+    // Snapshot the currently-attached media so we can delete it later
+    // ONLY if new downloads succeed. Excludes the shared placeholder
+    // image — we never want to delete that.
+    $old_ids = array();
+    $old_featured = (int) get_post_thumbnail_id($product_id);
+    if ($old_featured && $old_featured !== \Tigon\DmsConnect\Includes\Product_Media::PLACEHOLDER_IMAGE_ID) {
+        $old_ids[] = $old_featured;
+    }
+    $old_gallery_str = get_post_meta($product_id, '_product_image_gallery', true);
+    if (!empty($old_gallery_str)) {
+        foreach (array_filter(array_map('intval', explode(',', $old_gallery_str))) as $gid) {
+            if ($gid !== \Tigon\DmsConnect\Includes\Product_Media::PLACEHOLDER_IMAGE_ID) {
+                $old_ids[] = $gid;
+            }
+        }
+    }
 
     $attachment_ids = array();
     $i = 0;
+    $download_failures = 0;
 
     foreach ($image_names as $remote_image_name) {
         if (empty($remote_image_name)) {
@@ -909,6 +938,7 @@ function tigon_dms_download_and_attach_images($product_id, $image_names, $title,
         );
         $image_meta = array(
             '_wp_attachment_image_alt' => $title,
+            '_dms_image_url'           => $url,
         );
 
         $att_id = \Tigon\DmsConnect\Includes\Somatic::attach_external_image(
@@ -922,21 +952,45 @@ function tigon_dms_download_and_attach_images($product_id, $image_names, $title,
         if (!is_wp_error($att_id)) {
             $attachment_ids[] = $att_id;
         } else {
+            $download_failures++;
             error_log('DMS Sync: Failed to download image ' . $url . ' for product ' . $product_id . ': ' . $att_id->get_error_message());
         }
 
         $i++;
     }
 
-    // First image = featured, rest = gallery
-    if (!empty($attachment_ids)) {
-        $featured = array_shift($attachment_ids);
-        set_post_thumbnail($product_id, $featured);
+    // If NO new images succeeded, abort: keep existing images intact.
+    // The sync will try again next cycle.
+    if (empty($attachment_ids)) {
+        if ($download_failures > 0) {
+            error_log('DMS Sync: All ' . $download_failures . ' image downloads failed for product ' . $product_id . '. Keeping existing images.');
+            update_post_meta($product_id, '_dms_image_sync_last_error', time());
+        }
+        return;
+    }
 
-        if (!empty($attachment_ids)) {
-            update_post_meta($product_id, '_product_image_gallery', implode(',', $attachment_ids));
+    // Swap: apply new featured + gallery
+    $new_ids  = $attachment_ids; // copy before array_shift mutates
+    $featured = array_shift($attachment_ids);
+    set_post_thumbnail($product_id, $featured);
+
+    if (!empty($attachment_ids)) {
+        update_post_meta($product_id, '_product_image_gallery', implode(',', $attachment_ids));
+    } else {
+        delete_post_meta($product_id, '_product_image_gallery');
+    }
+
+    // Cleanup old attachments — only those not reused by the new set
+    // (defensive: in case attach_external_image ever returns the same ID)
+    $new_set = array_flip($new_ids);
+    foreach ($old_ids as $old_id) {
+        if (!isset($new_set[$old_id])) {
+            wp_delete_attachment($old_id, true);
         }
     }
+
+    // Clear any previous failure marker now that sync succeeded
+    delete_post_meta($product_id, '_dms_image_sync_last_error');
 }
 
 /**
