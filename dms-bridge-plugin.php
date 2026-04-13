@@ -558,6 +558,19 @@ function tigon_dms_state_abbreviation($state_name) {
 }
 
 /**
+ * Check whether the Pricing admin page is managing this product's price.
+ * When true, DMS create / update / field-mapping paths must leave the
+ * `_regular_price`, `_sale_price`, and `_price` meta alone.
+ *
+ * @param int $product_id
+ * @return bool
+ */
+function tigon_dms_is_price_managed($product_id) {
+    if (!$product_id) return false;
+    return (bool) get_post_meta((int) $product_id, '_tigon_price_source', true);
+}
+
+/**
  * Apply user-configured field mappings from the admin Field Mapping page
  * to a product after all built-in mappings have been set.
  *
@@ -571,8 +584,14 @@ function tigon_dms_apply_custom_mappings($product_id, array $cart_data) {
 
     $resolved = \Tigon\DmsConnect\Admin\Field_Mapping::apply($cart_data);
 
-    // Apply postmeta overrides
+    $price_managed = tigon_dms_is_price_managed($product_id);
+    $price_keys    = ['_regular_price', '_sale_price', '_price'];
+
+    // Apply postmeta overrides (skip price keys if Pricing page owns the price)
     foreach ($resolved['postmeta'] as $key => $value) {
+        if ($price_managed && in_array($key, $price_keys, true)) {
+            continue;
+        }
         update_post_meta($product_id, $key, $value);
     }
 
@@ -961,11 +980,27 @@ function tigon_dms_ensure_woo_product($cart_data, $cart_id) {
         // Ensure _dms_cart_id meta is set so future syncs find it faster
         update_post_meta($existing_product_id, '_dms_cart_id', sanitize_text_field($cart_id));
         // Update existing product
-        return tigon_dms_update_woo_product($existing_product_id, $title, $retail_price, $cart_data, $specs, $images, $warranty);
+        $pid = tigon_dms_update_woo_product($existing_product_id, $title, $retail_price, $cart_data, $specs, $images, $warranty);
+    } else {
+        // Create new product only when no existing match was found
+        $pid = tigon_dms_create_woo_product($cart_id, $title, $retail_price, $cart_data, $specs, $images, $warranty);
     }
 
-    // Create new product only when no existing match was found
-    return tigon_dms_create_woo_product($cart_id, $title, $retail_price, $cart_data, $specs, $images, $warranty);
+    // Auto-apply any matching Global Pricing Rule. This ensures that
+    // newly-imported products (and existing unmanaged ones) pick up
+    // their rule-defined price immediately, without waiting for a
+    // manual rule refresh. Products already managed by the Pricing
+    // page had their DMS price skipped above, so the rule price stays.
+    if ($pid && class_exists('\Tigon\DmsConnect\Admin\Pricing_Page')) {
+        try {
+            \Tigon\DmsConnect\Admin\Pricing_Page::apply_matching_rule((int) $pid);
+        } catch (\Throwable $e) {
+            // Non-fatal: sync should never fail because pricing rule application failed.
+            error_log('[DMS Pricing] apply_matching_rule failed for product ' . $pid . ': ' . $e->getMessage());
+        }
+    }
+
+    return $pid;
 }
 
 /**
@@ -1532,9 +1567,9 @@ function tigon_dms_update_woo_product($product_id, $title, $price, $cart_data, $
     $model = $cart_data['cartType']['model'] ?? '';
     $store_id = $cart_data['cartLocation']['locationId'] ?? '';
 
-    // Update price (only if retailPrice is valid)
+    // Update price (only if retailPrice is valid AND Pricing page is not managing this product)
     // Prices must be stored as decimal strings (e.g. "7995.00") for valid structured data
-    if (!empty($price) && floatval($price) > 0) {
+    if (!empty($price) && floatval($price) > 0 && !tigon_dms_is_price_managed($product_id)) {
         $formatted_price = number_format(floatval($price), 2, '.', '');
         update_post_meta($product_id, '_regular_price', $formatted_price);
         update_post_meta($product_id, '_price', $formatted_price);
