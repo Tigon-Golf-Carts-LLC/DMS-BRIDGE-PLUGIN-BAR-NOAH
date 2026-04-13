@@ -1057,15 +1057,19 @@ class Admin_Page
                     <h2 style="margin:0; color:#dc3545;">Bulk Delete Products by Date Range</h2>
                     <p>Permanently delete WooCommerce products created within a date range. <strong>This removes the product, all images, gallery photos, and Monroney stickers.</strong> Choose scope below. Optionally filter by Inventory Status. This action cannot be undone.</p>
 
-                    <div style="display:flex; flex-wrap:wrap; gap:1.5rem; align-items:center; width:100%; padding:0.5rem 0.75rem; background:#fff3cd; border:1px solid #ffe59a; border-radius:6px;">
+                    <div style="display:flex; flex-wrap:wrap; gap:1.25rem; align-items:center; width:100%; padding:0.5rem 0.75rem; background:#fff3cd; border:1px solid #ffe59a; border-radius:6px;">
                         <strong style="font-size:0.85rem;">Scope:</strong>
                         <label style="display:flex; align-items:center; gap:0.35rem; cursor:pointer;">
                             <input type="radio" name="dms-delete-scope" value="dms" checked />
-                            <span>DMS-synced products only</span>
+                            <span>DMS carts only</span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:0.35rem; cursor:pointer;">
+                            <input type="radio" name="dms-delete-scope" value="carts" />
+                            <span>DMS + Static Carts <span style="color:#666;">(Golf Carts category)</span></span>
                         </label>
                         <label style="display:flex; align-items:center; gap:0.35rem; cursor:pointer;">
                             <input type="radio" name="dms-delete-scope" value="all" />
-                            <span style="color:#856404; font-weight:600;">All WooCommerce products (⚠ includes non-DMS items)</span>
+                            <span style="color:#856404; font-weight:600;">All WooCommerce products (⚠ parts, accessories, etc.)</span>
                         </label>
                     </div>
 
@@ -1120,11 +1124,15 @@ class Admin_Page
                         and all others are permanently deleted. DMS metadata is transferred to the keeper before deletion.
                     </p>
 
-                    <div style="display:flex; flex-wrap:wrap; gap:1.5rem; align-items:center; width:100%; padding:0.5rem 0.75rem; background:#fff3cd; border:1px solid #ffe59a; border-radius:6px;">
+                    <div style="display:flex; flex-wrap:wrap; gap:1.25rem; align-items:center; width:100%; padding:0.5rem 0.75rem; background:#fff3cd; border:1px solid #ffe59a; border-radius:6px;">
                         <strong style="font-size:0.85rem;">Scope:</strong>
                         <label style="display:flex; align-items:center; gap:0.35rem; cursor:pointer;">
                             <input type="radio" name="dms-dup-scope" value="dms" checked />
-                            <span>DMS-synced only (match on SKU + VIN)</span>
+                            <span>DMS carts only <span style="color:#666;">(SKU + VIN)</span></span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:0.35rem; cursor:pointer;">
+                            <input type="radio" name="dms-dup-scope" value="carts" />
+                            <span>DMS + Static Carts <span style="color:#666;">(Golf Carts category)</span></span>
                         </label>
                         <label style="display:flex; align-items:center; gap:0.35rem; cursor:pointer;">
                             <input type="radio" name="dms-dup-scope" value="all" />
@@ -1695,12 +1703,15 @@ class Admin_Page
                 var total = parseInt($delBtn.text().replace(/\D/g, ""), 10) || 0;
                 var statusLabel = invStatus ? $("#dms-delete-inv-status option:selected").text() : "All Statuses";
                 var scope = $("input[name=\'dms-delete-scope\']:checked").val() || "dms";
-                var scopeLabel = scope === "all" ? "ALL WooCommerce products (includes non-DMS)" : "DMS-synced only";
+                var scopeLabel;
+                if (scope === "all")        scopeLabel = "ALL WooCommerce products (includes parts & accessories)";
+                else if (scope === "carts") scopeLabel = "DMS + Static Carts (Golf Carts category)";
+                else                        scopeLabel = "DMS carts only";
 
                 if (!confirm("WARNING: You are about to permanently delete " + total + " products and ALL their images, gallery photos, and Monroney stickers.\\n\\nScope: " + scopeLabel + "\\nDate range: " + dateFrom + " to " + dateTo + "\\nInventory status: " + statusLabel + "\\n\\nThis CANNOT be undone. Continue?")) {
                     return;
                 }
-                if (scope === "all" && !confirm("FINAL CONFIRMATION: You selected ALL WooCommerce products. This will delete non-DMS products too (anything created in the date range, including manually-created ones). Type OK to proceed.")) {
+                if (scope === "all" && !confirm("FINAL CONFIRMATION: You selected ALL WooCommerce products. This will delete NON-CART products too (parts, accessories, anything else created in the date range). Proceed?")) {
                     return;
                 }
 
@@ -1915,7 +1926,11 @@ class Admin_Page
             $dupCleanBtn.on("click", function() {
                 var total = parseInt($dupCleanBtn.text().replace(/\D/g, ""), 10) || 0;
                 var dupScope = $("input[name=\'dms-dup-scope\']:checked").val() || "dms";
-                var dupScopeLabel = dupScope === "all" ? "ALL WooCommerce products (includes non-DMS)" : "DMS-synced only";
+                var dupScopeLabel;
+                if (dupScope === "all")        dupScopeLabel = "ALL WooCommerce products (parts, accessories, etc.)";
+                else if (dupScope === "carts") dupScopeLabel = "DMS + Static Carts (Golf Carts category)";
+                else                           dupScopeLabel = "DMS carts only";
+
                 if (!confirm("WARNING: You are about to permanently delete " + total + " duplicate products and ALL their images.\\n\\nScope: " + dupScopeLabel + "\\nFor each SKU group, the product with the cleanest URL (no -2, -3 suffix) will be KEPT. All others will be deleted.\\n\\nThis CANNOT be undone. Continue?")) {
                     return;
                 }

@@ -1618,6 +1618,42 @@ class Core
     const BULK_DELETE_BATCH_SIZE = 3;
 
     /**
+     * Resolve the "Golf Carts" top-level product_cat term and all of
+     * its descendants. Used by the "carts" scope in bulk delete /
+     * duplicate SKU cleanup to target every cart product (DMS or
+     * manually-created) while excluding parts, accessories, etc.
+     *
+     * @return int[] List of term_taxonomy_id values (empty if not found)
+     */
+    private static function golf_carts_term_tt_ids(): array
+    {
+        $root = get_term_by('slug', 'golf-carts', 'product_cat');
+        if (!$root) {
+            $root = get_term_by('name', 'Golf Carts', 'product_cat');
+        }
+        if (!$root) {
+            return [];
+        }
+        $ids = [(int) $root->term_id];
+        $children = get_term_children((int) $root->term_id, 'product_cat');
+        if (is_array($children)) {
+            foreach ($children as $cid) {
+                $ids[] = (int) $cid;
+            }
+        }
+        // Convert term_ids to term_taxonomy_ids (needed for term_relationships joins)
+        global $wpdb;
+        if (empty($ids)) return [];
+        $placeholders = implode(',', array_fill(0, count($ids), '%d'));
+        $tt_ids = $wpdb->get_col($wpdb->prepare(
+            "SELECT term_taxonomy_id FROM {$wpdb->term_taxonomy}
+             WHERE taxonomy = 'product_cat' AND term_id IN ($placeholders)",
+            ...$ids
+        ));
+        return array_map('intval', (array) $tt_ids);
+    }
+
+    /**
      * AJAX: Init (or preview) — find DMS-synced products in a date range,
      * optionally filtered by inventory-status taxonomy.
      *
@@ -1637,7 +1673,7 @@ class Core
             $date_from = sanitize_text_field($_POST['date_from'] ?? '');
             $date_to   = sanitize_text_field($_POST['date_to'] ?? '');
             $inv_status = sanitize_text_field($_POST['inventory_status'] ?? '');
-            $scope      = sanitize_text_field($_POST['scope'] ?? 'dms'); // 'dms' (default) or 'all'
+            $scope      = sanitize_text_field($_POST['scope'] ?? 'dms'); // 'dms' | 'carts' | 'all'
             $preview   = !empty($_POST['preview_only']);
 
             if (empty($date_from) || empty($date_to)) {
@@ -1645,9 +1681,23 @@ class Core
                 return;
             }
 
-            // Build the query — scope is 'dms' (requires _dms_cart_id) or 'all' (any product)
+            // Build the query — scope determines which product set is included.
+            //   'dms'   = only products with _dms_cart_id
+            //   'carts' = any product in the Golf Carts product_cat (DMS + static carts)
+            //   'all'   = every WooCommerce product
             if ($scope === 'all') {
                 $sql = "SELECT DISTINCT p.ID FROM {$wpdb->posts} p";
+            } elseif ($scope === 'carts') {
+                $cart_tt = self::golf_carts_term_tt_ids();
+                if (empty($cart_tt)) {
+                    wp_send_json_error('The "Golf Carts" product category was not found. Either create it or choose a different scope.');
+                    return;
+                }
+                $cart_tt_in = implode(',', array_map('intval', $cart_tt));
+                $sql = "SELECT DISTINCT p.ID
+                        FROM {$wpdb->posts} p
+                        INNER JOIN {$wpdb->term_relationships} trc
+                           ON p.ID = trc.object_id AND trc.term_taxonomy_id IN ($cart_tt_in)";
             } else {
                 $sql = "SELECT DISTINCT p.ID
                         FROM {$wpdb->posts} p
@@ -1837,11 +1887,13 @@ class Core
         global $wpdb;
 
         try {
-            $scope = sanitize_text_field($_POST['scope'] ?? 'dms'); // 'dms' (default) or 'all'
+            $scope = sanitize_text_field($_POST['scope'] ?? 'dms'); // 'dms' | 'carts' | 'all'
 
-            // Scope 'dms': require _dms_cart_id (INNER JOIN). VIN is checked via _dms_payload.
-            // Scope 'all': include any product with an SKU. Non-DMS products have no VIN, so
-            // duplicates are matched on SKU alone (composite key becomes "SKU || '' ").
+            // Scope behaviour:
+            //   'dms'   = DMS products only; SKU + VIN matching
+            //   'carts' = everything in Golf Carts category; DMS carts still match on
+            //             SKU+VIN (via _dms_payload), static carts match on SKU-only
+            //   'all'   = every WooCommerce product with an SKU; SKU-only for non-DMS
             if ($scope === 'all') {
                 $products = $wpdb->get_results(
                     "SELECT p.ID, sku.meta_value AS sku, payload.meta_value AS payload
@@ -1851,6 +1903,27 @@ class Core
                      WHERE p.post_type = 'product'
                        AND p.post_status IN ('publish', 'draft')
                        AND sku.meta_value != ''
+                     ORDER BY p.post_date ASC",
+                    ARRAY_A
+                );
+            } elseif ($scope === 'carts') {
+                $cart_tt = self::golf_carts_term_tt_ids();
+                if (empty($cart_tt)) {
+                    wp_send_json_error('The "Golf Carts" product category was not found. Either create it or choose a different scope.');
+                    return;
+                }
+                $cart_tt_in = implode(',', array_map('intval', $cart_tt));
+                $products = $wpdb->get_results(
+                    "SELECT p.ID, sku.meta_value AS sku, payload.meta_value AS payload
+                     FROM {$wpdb->posts} p
+                     INNER JOIN {$wpdb->term_relationships} trc
+                        ON p.ID = trc.object_id AND trc.term_taxonomy_id IN ($cart_tt_in)
+                     INNER JOIN {$wpdb->postmeta} sku ON p.ID = sku.post_id AND sku.meta_key = '_sku'
+                     LEFT JOIN {$wpdb->postmeta} payload ON p.ID = payload.post_id AND payload.meta_key = '_dms_payload'
+                     WHERE p.post_type = 'product'
+                       AND p.post_status IN ('publish', 'draft')
+                       AND sku.meta_value != ''
+                     GROUP BY p.ID
                      ORDER BY p.post_date ASC",
                     ARRAY_A
                 );
@@ -1870,12 +1943,15 @@ class Core
             }
 
             if (empty($products)) {
+                $msg = 'No products with SKUs found.';
+                if ($scope === 'dms')   $msg = 'No DMS-synced products found.';
+                if ($scope === 'carts') $msg = 'No products found in the Golf Carts category.';
                 wp_send_json_success([
                     'total_skus'       => 0,
                     'total_duplicates' => 0,
                     'groups'           => [],
                     'done'             => true,
-                    'message'          => $scope === 'all' ? 'No products with SKUs found.' : 'No DMS-synced products found.',
+                    'message'          => $msg,
                 ]);
                 return;
             }
