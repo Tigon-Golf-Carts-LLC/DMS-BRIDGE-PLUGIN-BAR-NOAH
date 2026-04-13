@@ -21,6 +21,9 @@ final class Pricing_Page
     /** Batch size for bulk price update jobs. */
     const BATCH_SIZE = 25;
 
+    /** Meta key marking a product whose price is managed by this plugin. */
+    const SOURCE_META = '_tigon_price_source';
+
     private function __construct() {}
 
     /* ─── Menu registration ────────────────────────────────────── */
@@ -121,10 +124,12 @@ final class Pricing_Page
     /* ─── Price update helper ──────────────────────────────────── */
 
     /**
-     * Apply a regular/sale price to a single product using WooCommerce-
-     * compatible meta updates. Returns true if the product was updated.
+     * Apply a regular/sale price to a single product and mark it as
+     * managed by this plugin so subsequent DMS syncs skip the price.
+     *
+     * @param string $source Either 'bulk' (bulk update) or 'rule:<id>'
      */
-    private static function apply_price_to_product(int $pid, float $price, float $sale_price = 0): bool
+    private static function apply_price_to_product(int $pid, float $price, float $sale_price = 0, string $source = 'bulk'): bool
     {
         if (!get_post($pid)) return false;
         $formatted = number_format($price, 2, '.', '');
@@ -139,12 +144,28 @@ final class Pricing_Page
             update_post_meta($pid, '_price', $formatted);
         }
 
+        // Mark the product so DMS sync skips it. Presence = locked.
+        update_post_meta($pid, self::SOURCE_META, sanitize_text_field($source));
+
         if (function_exists('tigon_dms_refresh_wc_product_data')) {
             tigon_dms_refresh_wc_product_data($pid);
         } elseif (function_exists('wc_delete_product_transients')) {
             wc_delete_product_transients($pid);
         }
         return true;
+    }
+
+    /** Check whether a product's price is currently locked by this plugin. */
+    public static function is_price_managed(int $pid): bool
+    {
+        return (bool) get_post_meta($pid, self::SOURCE_META, true);
+    }
+
+    /** Read the source string ('bulk', 'rule:<id>', or '' if unmanaged). */
+    public static function get_price_source(int $pid): string
+    {
+        $v = get_post_meta($pid, self::SOURCE_META, true);
+        return is_string($v) ? $v : '';
     }
 
     /* ─── Page rendering (stub — will be expanded) ─────────────── */
@@ -246,8 +267,10 @@ final class Pricing_Page
         echo '<div style="display:flex; align-items:center; gap:0.75rem; margin-top:0.5rem;">';
         echo '<button type="button" id="dms-price-preview-btn" class="button" style="height:auto; padding:0.6rem 2rem; font-size:14px;">Preview Products</button>';
         echo '<button type="button" id="dms-price-apply-btn" class="button button-primary" style="height:auto; padding:0.6rem 2rem; font-size:14px; background-color:var(--accent-color); color:var(--font-light); display:none;">Apply Price Update</button>';
+        echo '<button type="button" id="dms-bulk-release-btn" class="button" style="height:auto; padding:0.6rem 2rem; font-size:14px; margin-left:auto;" title="Unlock products previously updated by Bulk Price Update so the next DMS sync can restore their DMS price.">Release Bulk Locks</button>';
         echo '<span id="dms-price-spinner" class="spinner" style="float:none; margin-top:0;"></span>';
         echo '</div>';
+        echo '<p style="margin:0; font-size:0.82rem; color:#555;"><strong>How locks work:</strong> Applying a price here locks those products so future DMS syncs won\'t overwrite them. Use <em>Release Bulk Locks</em> to let DMS prices take over again. Rule-based locks are unaffected by this button.</p>';
         echo '<div id="dms-price-results" style="display:none; width:100%;"></div>';
         echo '</div></div>';
 
@@ -255,7 +278,7 @@ final class Pricing_Page
         echo '<div class="action-box-group" style="grid-template-columns:1fr; grid-template-rows:auto;">';
         echo '<div class="action-box primary" style="flex-direction:column; gap:1rem; align-items:flex-start; border-left:4px solid var(--accent-color);">';
         echo '<h2 style="margin:0; color:var(--accent-color);">Global Pricing Rules</h2>';
-        echo '<p>Save reusable pricing rules by manufacturer, model, inventory status, and year. Use the <strong>Refresh</strong> button on a rule to re-apply its price to all matching products (e.g. after new inventory syncs in). Rules are stored in WordPress options and <strong>persist across plugin updates</strong>.</p>';
+        echo '<p>Save reusable pricing rules by manufacturer, model, inventory status, and year. When DMS sync runs, matching products <strong>automatically</strong> receive their rule price — no manual refresh needed. The <strong>Refresh</strong> button re-applies a rule to all currently-matching products on demand. The <strong>Release</strong> button unlocks products so DMS prices take over again. Rules are stored in WordPress options and <strong>persist across plugin updates</strong>.</p>';
 
         echo '<div style="display:flex; flex-wrap:wrap; gap:1rem; align-items:flex-end; width:100%;">';
         echo '<div style="display:flex; flex-direction:column; gap:0.25rem;"><label style="font-weight:600; font-size:0.85rem;">Rule Name <span style="font-weight:400; color:#666;">(optional)</span></label><input type="text" id="dms-rule-name" placeholder="e.g. Club Car Onward 2024 New" style="padding:0.4rem 0.6rem; border:1px solid #8c8f94; border-radius:4px; min-width:220px;" /></div>';
@@ -452,7 +475,8 @@ jQuery(document).ready(function($){
                 html += '<td>' + (parseFloat(r.sale_price) > 0 ? fmtMoney(r.sale_price) : '—') + '</td>';
                 html += '<td class="dms-last-applied">' + esc(lastApplied) + '</td>';
                 html += '<td class="dms-rule-actions">';
-                html += '<button type="button" class="button button-primary dms-rule-refresh" style="background-color:var(--accent-color);color:var(--font-light);">Refresh</button>';
+                html += '<button type="button" class="button button-primary dms-rule-refresh" style="background-color:var(--accent-color);color:var(--font-light);" title="Re-apply this rule price to all matching products and lock them.">Refresh</button>';
+                html += '<button type="button" class="button dms-rule-release" title="Unlock the products managed by this rule so the next DMS sync restores their DMS price.">Release</button>';
                 html += '<button type="button" class="button dms-rule-edit">Edit</button>';
                 html += '<button type="button" class="button dms-rule-delete" style="color:#dc3545;">Delete</button>';
                 html += '</td></tr>';
@@ -547,6 +571,39 @@ jQuery(document).ready(function($){
         });
     });
 
+    $rulesList.on('click', '.dms-rule-release', function(){
+        var id = $(this).closest('tr').data('id');
+        var $btn = $(this);
+        if (!confirm('Release this rule\'s lock on all products it manages?\n\nAfter release, the next DMS sync will restore each product\'s DMS price. This does NOT delete the rule — the rule itself remains and can be re-applied by clicking Refresh.')) return;
+        $btn.prop('disabled', true).text('Releasing...');
+        $.ajax({ url: ajaxurl, type:'POST', data:{ action:'tigon_dms_pricing_rule_release', nonce: pricingNonce, id: id }, timeout: 120000 })
+        .done(function(resp){
+            $btn.prop('disabled', false).text('Release');
+            if (!resp.success) { showErr($ruleResults, resp.data || 'Release failed'); return; }
+            $ruleResults.html('<div style="background:#e2e3e5;border:1px solid #d6d8db;padding:0.75rem 1rem;border-radius:6px;color:#383d41;">Released lock on <strong>' + resp.data.released + '</strong> product(s). Next DMS sync will restore DMS prices.</div>');
+            loadRules();
+        }).fail(function(xhr, status, err){
+            $btn.prop('disabled', false).text('Release');
+            showErr($ruleResults, 'Release failed: ' + (err || status));
+        });
+    });
+
+    /* Bulk release (only bulk-update locks, not rule locks) */
+    $('#dms-bulk-release-btn').on('click', function(){
+        if (!confirm('Release the lock on all products updated via Bulk Price Update?\n\nThis does NOT affect products managed by a Global Pricing Rule. After release, the next DMS sync will restore those products\' DMS prices.')) return;
+        var $btn = $(this);
+        $btn.prop('disabled', true).text('Releasing...');
+        $.ajax({ url: ajaxurl, type:'POST', data:{ action:'tigon_dms_pricing_bulk_release', nonce: pricingNonce }, timeout: 120000 })
+        .done(function(resp){
+            $btn.prop('disabled', false).text('Release Bulk Locks');
+            if (!resp.success) { showErr($bpResults, resp.data || 'Release failed'); return; }
+            $bpResults.html('<div style="background:#e2e3e5;border:1px solid #d6d8db;padding:0.75rem 1rem;border-radius:6px;color:#383d41;">Released lock on <strong>' + resp.data.released + '</strong> product(s). Next DMS sync will restore DMS prices.</div>').show();
+        }).fail(function(xhr, status, err){
+            $btn.prop('disabled', false).text('Release Bulk Locks');
+            showErr($bpResults, 'Release failed: ' + (err || status));
+        });
+    });
+
     loadRules();
 });
 </script>
@@ -632,7 +689,7 @@ jQuery(document).ready(function($){
         $errors  = 0;
         foreach ($batch as $pid) {
             try {
-                if (self::apply_price_to_product((int) $pid, $price, $sale_price)) {
+                if (self::apply_price_to_product((int) $pid, $price, $sale_price, 'bulk')) {
                     $updated++;
                 } else {
                     $errors++;
@@ -779,9 +836,10 @@ jQuery(document).ready(function($){
 
         $updated = 0;
         $errors  = 0;
+        $source  = 'rule:' . $rule_id;
         foreach ($ids as $pid) {
             try {
-                if (self::apply_price_to_product((int) $pid, (float) $rule['price'], (float) $rule['sale_price'])) {
+                if (self::apply_price_to_product((int) $pid, (float) $rule['price'], (float) $rule['sale_price'], $source)) {
                     $updated++;
                 } else {
                     $errors++;
@@ -808,5 +866,122 @@ jQuery(document).ready(function($){
             'last_applied_at'    => $rules[$rule_id]['last_applied_at'],
             'last_applied_count' => $updated,
         ]);
+    }
+
+    /**
+     * AJAX: Release a rule's lock on all products it manages.
+     * Deletes the _tigon_price_source meta so the next DMS sync
+     * will restore the original DMS price on those products.
+     */
+    public static function ajax_rule_release()
+    {
+        check_ajax_referer('tigon_dms_pricing_nonce', 'nonce');
+        if (!current_user_can('manage_options')) wp_send_json_error('Unauthorized', 403);
+
+        $rule_id = sanitize_text_field($_POST['id'] ?? '');
+        if (!$rule_id) wp_send_json_error('Rule ID required.');
+
+        global $wpdb;
+        $needle   = 'rule:' . $rule_id;
+        $released = $wpdb->query($wpdb->prepare(
+            "DELETE FROM {$wpdb->postmeta} WHERE meta_key = %s AND meta_value = %s",
+            self::SOURCE_META,
+            $needle
+        ));
+
+        wp_send_json_success(['id' => $rule_id, 'released' => (int) $released]);
+    }
+
+    /**
+     * AJAX: Release ALL bulk-update locks (products tagged 'bulk').
+     */
+    public static function ajax_bulk_release()
+    {
+        check_ajax_referer('tigon_dms_pricing_nonce', 'nonce');
+        if (!current_user_can('manage_options')) wp_send_json_error('Unauthorized', 403);
+
+        global $wpdb;
+        $released = $wpdb->query($wpdb->prepare(
+            "DELETE FROM {$wpdb->postmeta} WHERE meta_key = %s AND meta_value = 'bulk'",
+            self::SOURCE_META
+        ));
+
+        wp_send_json_success(['released' => (int) $released]);
+    }
+
+    /* ─── Rule matching (called by DMS sync auto-reapply) ──────── */
+
+    /**
+     * Find the first pricing rule that matches the given product.
+     * Returns the rule array or null. Called after every DMS sync
+     * create/update so rule prices automatically win on new products.
+     *
+     * "Match" means every non-zero filter on the rule matches the
+     * product: manufacturer term, model term, inventory-status term,
+     * and year meta.
+     *
+     * @param int $product_id
+     * @return array|null
+     */
+    public static function find_matching_rule(int $product_id): ?array
+    {
+        $rules = self::get_rules();
+        if (empty($rules)) return null;
+
+        // Cache product taxonomy terms + year for the duration of this call
+        $mfr_terms = wp_get_object_terms($product_id, 'manufacturers', ['fields' => 'ids']);
+        $mdl_terms = wp_get_object_terms($product_id, 'models', ['fields' => 'ids']);
+        $inv_terms = wp_get_object_terms($product_id, 'inventory-status', ['fields' => 'ids']);
+        if (is_wp_error($mfr_terms)) $mfr_terms = [];
+        if (is_wp_error($mdl_terms)) $mdl_terms = [];
+        if (is_wp_error($inv_terms)) $inv_terms = [];
+
+        $year = (int) get_post_meta($product_id, 'year', true);
+
+        // Score rules: more specific (more filters) wins when multiple match
+        $best        = null;
+        $best_score  = -1;
+        foreach ($rules as $rule) {
+            $score = 0;
+            if ($rule['manufacturer_id'] > 0) {
+                if (!in_array((int) $rule['manufacturer_id'], array_map('intval', $mfr_terms), true)) continue;
+                $score++;
+            }
+            if ($rule['model_id'] > 0) {
+                if (!in_array((int) $rule['model_id'], array_map('intval', $mdl_terms), true)) continue;
+                $score++;
+            }
+            if ($rule['inventory_status_id'] > 0) {
+                if (!in_array((int) $rule['inventory_status_id'], array_map('intval', $inv_terms), true)) continue;
+                $score++;
+            }
+            if ($rule['year'] > 0) {
+                if ((int) $rule['year'] !== $year) continue;
+                $score++;
+            }
+            if ($score > $best_score) {
+                $best_score = $score;
+                $best       = $rule;
+            }
+        }
+        return $best;
+    }
+
+    /**
+     * Apply any matching pricing rule to a product. Returns the rule
+     * ID that was applied, or null if no rule matched. Used by the
+     * DMS sync auto-reapply hook after ensure_woo_product() succeeds.
+     */
+    public static function apply_matching_rule(int $product_id): ?string
+    {
+        $rule = self::find_matching_rule($product_id);
+        if (!$rule) return null;
+        self::apply_price_to_product(
+            $product_id,
+            (float) $rule['price'],
+            (float) ($rule['sale_price'] ?? 0),
+            'rule:' . $rule['id']
+        );
+        return $rule['id'];
     }
 }

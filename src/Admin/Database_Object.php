@@ -206,15 +206,22 @@ class Database_Object
         if (!empty($attributes)) $this->data['postmeta']['_product_attributes']['meta_value'] = $attributes;
         if (!empty($featured_image)) $this->data['postmeta']['_thumbnail_id']['meta_value'] = $featured_image;
         if (!empty($images_list)) $this->data['postmeta']['_product_image_gallery']['meta_value'] = $images_list;
-        if ($price !== null && $price !== '' && floatval($price) > 0) {
-            $formatted_price = number_format(floatval($price), 2, '.', '');
-            $this->data['postmeta']['_regular_price']['meta_value'] = $formatted_price;
-            $this->data['postmeta']['_price']['meta_value'] = $formatted_price;
-        }
-        if ($sale_price !== null && $sale_price !== '' && floatval($sale_price) > 0 && floatval($sale_price) < floatval($price)) {
-            $formatted_sale = number_format(floatval($sale_price), 2, '.', '');
-            $this->data['postmeta']['_sale_price']['meta_value'] = $formatted_sale;
-            $this->data['postmeta']['_price']['meta_value'] = $formatted_sale;
+        // Skip price writes entirely when the Pricing admin page is
+        // managing this product's price (marker meta: _tigon_price_source).
+        $price_managed = ($id && function_exists('tigon_dms_is_price_managed'))
+            ? tigon_dms_is_price_managed($id)
+            : false;
+        if (!$price_managed) {
+            if ($price !== null && $price !== '' && floatval($price) > 0) {
+                $formatted_price = number_format(floatval($price), 2, '.', '');
+                $this->data['postmeta']['_regular_price']['meta_value'] = $formatted_price;
+                $this->data['postmeta']['_price']['meta_value'] = $formatted_price;
+            }
+            if ($sale_price !== null && $sale_price !== '' && floatval($sale_price) > 0 && floatval($sale_price) < floatval($price)) {
+                $formatted_sale = number_format(floatval($sale_price), 2, '.', '');
+                $this->data['postmeta']['_sale_price']['meta_value'] = $formatted_sale;
+                $this->data['postmeta']['_price']['meta_value'] = $formatted_sale;
+            }
         }
         // Shipping dimensions (placeholder for golf carts)
         $this->data['postmeta']['_weight']['meta_value'] = '500';

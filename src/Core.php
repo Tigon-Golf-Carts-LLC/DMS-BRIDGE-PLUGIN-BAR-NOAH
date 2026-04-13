@@ -61,6 +61,8 @@ class Core
         add_action('wp_ajax_tigon_dms_pricing_rule_save',    'Tigon\DmsConnect\Admin\Pricing_Page::ajax_rule_save');
         add_action('wp_ajax_tigon_dms_pricing_rule_delete',  'Tigon\DmsConnect\Admin\Pricing_Page::ajax_rule_delete');
         add_action('wp_ajax_tigon_dms_pricing_rule_apply',   'Tigon\DmsConnect\Admin\Pricing_Page::ajax_rule_apply');
+        add_action('wp_ajax_tigon_dms_pricing_rule_release', 'Tigon\DmsConnect\Admin\Pricing_Page::ajax_rule_release');
+        add_action('wp_ajax_tigon_dms_pricing_bulk_release', 'Tigon\DmsConnect\Admin\Pricing_Page::ajax_bulk_release');
 
         // Field mapping AJAX handlers
         add_action('wp_ajax_tigon_dms_get_field_mappings', 'Tigon\DmsConnect\Core::ajax_get_field_mappings');
