@@ -33,6 +33,7 @@ class Admin_Page
         self::add_database_objects_page();
         self::add_field_mapping_page();
         self::add_sync_page();
+        \Tigon\DmsConnect\Admin\Pricing_Page::add_pricing_page();
 
         // Force-remove the legacy Import submenu in case a previous plugin
         // version cached it or it was registered by stale code.

@@ -54,6 +54,14 @@ class Core
         add_action('wp_ajax_tigon_dms_dup_sku_scan', 'Tigon\DmsConnect\Core::ajax_dup_sku_scan');
         add_action('wp_ajax_tigon_dms_dup_sku_cleanup_batch', 'Tigon\DmsConnect\Core::ajax_dup_sku_cleanup_batch');
 
+        // Pricing page AJAX handlers
+        add_action('wp_ajax_tigon_dms_pricing_bulk_preview', 'Tigon\DmsConnect\Admin\Pricing_Page::ajax_bulk_preview');
+        add_action('wp_ajax_tigon_dms_pricing_bulk_apply',   'Tigon\DmsConnect\Admin\Pricing_Page::ajax_bulk_apply');
+        add_action('wp_ajax_tigon_dms_pricing_rules_list',   'Tigon\DmsConnect\Admin\Pricing_Page::ajax_rules_list');
+        add_action('wp_ajax_tigon_dms_pricing_rule_save',    'Tigon\DmsConnect\Admin\Pricing_Page::ajax_rule_save');
+        add_action('wp_ajax_tigon_dms_pricing_rule_delete',  'Tigon\DmsConnect\Admin\Pricing_Page::ajax_rule_delete');
+        add_action('wp_ajax_tigon_dms_pricing_rule_apply',   'Tigon\DmsConnect\Admin\Pricing_Page::ajax_rule_apply');
+
         // Field mapping AJAX handlers
         add_action('wp_ajax_tigon_dms_get_field_mappings', 'Tigon\DmsConnect\Core::ajax_get_field_mappings');
         add_action('wp_ajax_tigon_dms_save_field_mapping', 'Tigon\DmsConnect\Core::ajax_save_field_mapping');
