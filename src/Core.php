@@ -1637,6 +1637,7 @@ class Core
             $date_from = sanitize_text_field($_POST['date_from'] ?? '');
             $date_to   = sanitize_text_field($_POST['date_to'] ?? '');
             $inv_status = sanitize_text_field($_POST['inventory_status'] ?? '');
+            $scope      = sanitize_text_field($_POST['scope'] ?? 'dms'); // 'dms' (default) or 'all'
             $preview   = !empty($_POST['preview_only']);
 
             if (empty($date_from) || empty($date_to)) {
@@ -1644,11 +1645,15 @@ class Core
                 return;
             }
 
-            // Build the query — DMS products in the date range
-            $sql = "SELECT DISTINCT p.ID
-                    FROM {$wpdb->posts} p
-                    INNER JOIN {$wpdb->postmeta} pm
-                       ON p.ID = pm.post_id AND pm.meta_key = '_dms_cart_id'";
+            // Build the query — scope is 'dms' (requires _dms_cart_id) or 'all' (any product)
+            if ($scope === 'all') {
+                $sql = "SELECT DISTINCT p.ID FROM {$wpdb->posts} p";
+            } else {
+                $sql = "SELECT DISTINCT p.ID
+                        FROM {$wpdb->posts} p
+                        INNER JOIN {$wpdb->postmeta} pm
+                           ON p.ID = pm.post_id AND pm.meta_key = '_dms_cart_id'";
+            }
 
             // Optional inventory-status taxonomy filter
             if (!empty($inv_status)) {
@@ -1832,19 +1837,37 @@ class Core
         global $wpdb;
 
         try {
-            // Find all DMS-synced products (must have _dms_cart_id) with their SKU
-            $products = $wpdb->get_results(
-                "SELECT p.ID, sku.meta_value AS sku, payload.meta_value AS payload
-                 FROM {$wpdb->posts} p
-                 INNER JOIN {$wpdb->postmeta} dms ON p.ID = dms.post_id AND dms.meta_key = '_dms_cart_id'
-                 INNER JOIN {$wpdb->postmeta} sku ON p.ID = sku.post_id AND sku.meta_key = '_sku'
-                 LEFT JOIN {$wpdb->postmeta} payload ON p.ID = payload.post_id AND payload.meta_key = '_dms_payload'
-                 WHERE p.post_type = 'product'
-                   AND p.post_status IN ('publish', 'draft')
-                   AND sku.meta_value != ''
-                 ORDER BY p.post_date ASC",
-                ARRAY_A
-            );
+            $scope = sanitize_text_field($_POST['scope'] ?? 'dms'); // 'dms' (default) or 'all'
+
+            // Scope 'dms': require _dms_cart_id (INNER JOIN). VIN is checked via _dms_payload.
+            // Scope 'all': include any product with an SKU. Non-DMS products have no VIN, so
+            // duplicates are matched on SKU alone (composite key becomes "SKU || '' ").
+            if ($scope === 'all') {
+                $products = $wpdb->get_results(
+                    "SELECT p.ID, sku.meta_value AS sku, payload.meta_value AS payload
+                     FROM {$wpdb->posts} p
+                     INNER JOIN {$wpdb->postmeta} sku ON p.ID = sku.post_id AND sku.meta_key = '_sku'
+                     LEFT JOIN {$wpdb->postmeta} payload ON p.ID = payload.post_id AND payload.meta_key = '_dms_payload'
+                     WHERE p.post_type = 'product'
+                       AND p.post_status IN ('publish', 'draft')
+                       AND sku.meta_value != ''
+                     ORDER BY p.post_date ASC",
+                    ARRAY_A
+                );
+            } else {
+                $products = $wpdb->get_results(
+                    "SELECT p.ID, sku.meta_value AS sku, payload.meta_value AS payload
+                     FROM {$wpdb->posts} p
+                     INNER JOIN {$wpdb->postmeta} dms ON p.ID = dms.post_id AND dms.meta_key = '_dms_cart_id'
+                     INNER JOIN {$wpdb->postmeta} sku ON p.ID = sku.post_id AND sku.meta_key = '_sku'
+                     LEFT JOIN {$wpdb->postmeta} payload ON p.ID = payload.post_id AND payload.meta_key = '_dms_payload'
+                     WHERE p.post_type = 'product'
+                       AND p.post_status IN ('publish', 'draft')
+                       AND sku.meta_value != ''
+                     ORDER BY p.post_date ASC",
+                    ARRAY_A
+                );
+            }
 
             if (empty($products)) {
                 wp_send_json_success([
@@ -1852,7 +1875,7 @@ class Core
                     'total_duplicates' => 0,
                     'groups'           => [],
                     'done'             => true,
-                    'message'          => 'No DMS-synced products found.',
+                    'message'          => $scope === 'all' ? 'No products with SKUs found.' : 'No DMS-synced products found.',
                 ]);
                 return;
             }
