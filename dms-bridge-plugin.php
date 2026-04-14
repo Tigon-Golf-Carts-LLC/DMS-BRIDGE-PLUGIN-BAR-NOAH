@@ -19,6 +19,16 @@ if (!defined('ABSPATH')) {
  */
 define('TIGON_DMS_VERSION', '2.0.0');
 define('TIGON_DMS_PLUGIN_DIR', plugin_dir_path(__FILE__));
+
+/**
+ * Default S3 prefix for cart image downloads. Used when the
+ * file_source option in tigon_dms_config is empty.
+ *
+ * The Settings page still lets admins override this, but if they
+ * clear the field (or never save one), the plugin falls back to
+ * this value so image sync always works out of the box.
+ */
+define('TIGON_DMS_DEFAULT_FILE_SOURCE', 'https://s3.amazonaws.com/prod.docs.s3/carts/');
 define('TIGON_DMS_PLUGIN_URL', plugin_dir_url(__FILE__));
 
 /**
@@ -687,6 +697,12 @@ function tigon_dms_get_file_source() {
     global $wpdb;
     $table_name = $wpdb->prefix . 'tigon_dms_config';
     $value = $wpdb->get_var("SELECT option_value FROM $table_name WHERE option_name = 'file_source'");
+    // Fall back to the plugin's default S3 prefix when the option is empty
+    // or unset. Admins can override via Settings, but image sync will always
+    // have a working base URL out of the box.
+    if (empty($value) && defined('TIGON_DMS_DEFAULT_FILE_SOURCE')) {
+        $value = TIGON_DMS_DEFAULT_FILE_SOURCE;
+    }
     return $value ? rtrim($value, '/') : '';
 }
 
