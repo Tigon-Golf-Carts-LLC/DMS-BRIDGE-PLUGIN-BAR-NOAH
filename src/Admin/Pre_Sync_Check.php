@@ -98,13 +98,19 @@ final class Pre_Sync_Check
                 'DMS_API class not loaded. Cannot verify API connectivity.');
         }
         try {
-            $carts = \DMS_API::get_carts(1, 1);
+            // page 0, size 1 — get one cart from the very first page so even
+            // tiny inventories return data.
+            $carts = \DMS_API::get_carts(0, 1);
+            if ($carts === false) {
+                return self::result('fail', 'DMS API reachable',
+                    'DMS_API::get_carts() returned false. Check DMS URL, credentials, and network.');
+            }
             if (is_array($carts)) {
                 return self::result('pass', 'DMS API reachable',
                     'Successfully fetched a test page from the DMS API (' . count($carts) . ' cart(s) returned).');
             }
             return self::result('fail', 'DMS API reachable',
-                'DMS API returned a non-array response. Check DMS URL + credentials.');
+                'DMS API returned an unexpected response type. Check DMS URL + credentials.');
         } catch (\Throwable $e) {
             return self::result('fail', 'DMS API reachable',
                 'DMS API call threw an exception: ' . $e->getMessage());
