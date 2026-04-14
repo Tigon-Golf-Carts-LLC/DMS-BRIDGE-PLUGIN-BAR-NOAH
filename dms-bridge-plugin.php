@@ -6,6 +6,7 @@
  * Author: Jaslow Digital | Noah Jaslow
  * Author URI: https://jaslowdigital.com/
  * Text Domain: tigon-dms-connect
+ * Requires PHP: 8.0
  * Requires Plugins: woocommerce
  */
 
