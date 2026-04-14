@@ -372,9 +372,10 @@ class DMS_Sync
         // WooCommerce placeholder image attachment ID (used when DMS has no images)
         $placeholder_image_id = 204304;
 
-        // Check if the DMS payload has real images (not resolved/fallback URLs)
-        $raw_image_urls = $cart_data['imageUrls'] ?? array();
-        $has_real_images = !empty($raw_image_urls) && is_array($raw_image_urls);
+        // Normalise imageUrls — DMS returns either array or comma-separated
+        // string; Template_Engine::parse_cart_images handles both.
+        $image_names = \Tigon\DmsConnect\Includes\Template_Engine::parse_cart_images($cart_data);
+        $has_real_images = !empty($image_names);
 
         if (!$has_real_images) {
             // No real images from DMS — use WooCommerce placeholder
@@ -392,8 +393,24 @@ class DMS_Sync
             delete_post_thumbnail($product_id);
         }
 
-        // Use centralized image resolver (handles coming-soon placeholder)
-        $resolved_urls = DMS_API::resolve_cart_image_urls($cart_data);
+        // Build full URLs using the shared helper so the configured
+        // file_source (Settings page) + /carts/ handling is consistent
+        // everywhere in the plugin.
+        $file_source = function_exists('tigon_dms_get_file_source') ? tigon_dms_get_file_source() : '';
+        $resolved_urls = array();
+        if (!empty($file_source) && function_exists('tigon_dms_build_image_url')) {
+            foreach ($image_names as $img) {
+                $u = tigon_dms_build_image_url($file_source, $img);
+                if ($u !== '') $resolved_urls[] = $u;
+            }
+        }
+
+        // Last-resort fallback (no file_source configured) — let the DMS_API
+        // class build URLs with its own defaults. This also handles the
+        // coming-soon placeholder case for new carts with no images.
+        if (empty($resolved_urls)) {
+            $resolved_urls = DMS_API::resolve_cart_image_urls($cart_data);
+        }
 
         if (empty($resolved_urls)) {
             return;

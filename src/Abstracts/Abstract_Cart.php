@@ -356,7 +356,12 @@ abstract class Abstract_Cart
 
         $table_name = $wpdb->prefix . 'tigon_dms_config';
 
-        $this->file_source = $wpdb->get_var("SELECT option_value FROM $table_name WHERE option_name = 'file_source'");
+        // Load file_source via the plugin helper so we pick up the configured
+        // default when the DB row is empty. Direct DB read was skipping the
+        // fallback chain, leaving $this->file_source empty on fresh installs.
+        $this->file_source = function_exists('tigon_dms_get_file_source')
+            ? tigon_dms_get_file_source()
+            : $wpdb->get_var("SELECT option_value FROM $table_name WHERE option_name = 'file_source'");
 
         $this->get_pid();
         $this->generate_location_data();
@@ -708,14 +713,20 @@ abstract class Abstract_Cart
          */
         $this->images = array();
 
+        // Normalise imageUrls — DMS may return array OR comma-separated string.
+        // Use the shared parser so every sync path treats it the same way.
+        $image_names = class_exists('\Tigon\DmsConnect\Includes\Template_Engine')
+            ? \Tigon\DmsConnect\Includes\Template_Engine::parse_cart_images($this->cart)
+            : (is_array($this->cart['imageUrls'] ?? null) ? $this->cart['imageUrls'] : array());
+
         // If no images from DMS, use the WooCommerce placeholder
-        if (empty($this->cart['imageUrls']) || !is_array($this->cart['imageUrls'])) {
+        if (empty($image_names)) {
             $this->images = array($placeholder_image_id);
             return;
         }
 
         $i = 0;
-        foreach ($this->cart['imageUrls'] as $remote_image_name) {
+        foreach ($image_names as $remote_image_name) {
             $image_name = $this->generate_image_name($i);
             // Check if image already uploaded
             $site_image_url = '';
@@ -740,8 +751,16 @@ abstract class Abstract_Cart
                 '_wp_attachment_image_alt' => $this->name
             ];
 
+            // Build the full image URL with the shared helper so the
+            // configured file_source (Settings page, with /carts/ handled
+            // smartly) is respected. Falls back to the cached $this->file_source
+            // + "/carts/" if the helper isn't loaded for any reason.
+            $image_url = function_exists('tigon_dms_build_image_url')
+                ? tigon_dms_build_image_url($this->file_source ?: '', $remote_image_name)
+                : (($this->file_source ? rtrim($this->file_source, '/') : '') . '/carts/' . ltrim($remote_image_name, '/'));
+
             $new_image_id = \Tigon\DmsConnect\Includes\Somatic::attach_external_image(
-                url: "$this->file_source/carts/$remote_image_name",
+                url: $image_url,
                 filename: $image_filename,
                 post_data: $image_data,
                 metadata: $image_meta
