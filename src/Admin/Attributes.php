@@ -248,6 +248,24 @@ class Attributes
             "youtube" => "https://www.youtube.com/@TigonGolfCarts",
             "pinterest" => "https://www.pinterest.com/tigongolfcarts/",
             "review_link" => "https://g.page/r/CVJLm28kKkTYEBM/review"
+        ],
+        "T14" => [
+            "address" => "",
+            "city" => "Rio Grande",
+            "city_short" => "Rio Grande",
+            "state" => "New Jersey",
+            "st" => "NJ",
+            "zip" => "08242",
+            "city_id" => null,
+            "state_id" => 1152,
+            "phone" => "",
+            "url" => "https://www.tigongolfcarts.com/rio-grande-nj",
+            "coordinates" => ["lat" => 39.0259, "lng" => -74.8838],
+            "google_cid" => "",
+            "facebook" => "",
+            "youtube" => "https://www.youtube.com/@TigonGolfCarts",
+            "pinterest" => "https://www.pinterest.com/tigongolfcarts/",
+            "review_link" => ""
         ]
     ];
 
