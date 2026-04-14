@@ -950,11 +950,25 @@ class Admin_Page
         $publish_nonce = wp_create_nonce('tigon_dms_publish_synced_nonce');
         $bulk_delete_nonce = wp_create_nonce('tigon_dms_bulk_delete_nonce');
         $dup_sku_nonce = wp_create_nonce('tigon_dms_dup_sku_cleanup_nonce');
+        $health_check_nonce = wp_create_nonce('tigon_dms_health_check_nonce');
 
         self::page_header();
 
         echo '
         <div class="body" style="display:flex; flex-direction:column;">
+
+            <!-- ====== PRE-SYNC HEALTH CHECK ====== -->
+            <div class="action-box-group" style="grid-template-columns:1fr; grid-template-rows:auto;">
+                <div class="action-box primary" style="flex-direction:column; gap:1rem; align-items:flex-start; border-left:4px solid #2271b1;">
+                    <h2 style="margin:0; color:#2271b1;">Pre-Sync Health Check</h2>
+                    <p>Verify every dependency the DMS → WooCommerce sync relies on (API credentials, image bucket, required taxonomies, placeholder image, categories, store locations, schema templates, cron, and plugin tables). Run this before a fresh sync, especially after deleting all products.</p>
+                    <div style="display:flex; align-items:center; gap:0.75rem;">
+                        <button type="button" id="dms-health-check-btn" class="button button-primary" style="height:auto; padding:0.6rem 2rem; font-size:14px; background-color:#2271b1; border-color:#2271b1; color:#fff;">Run Health Check</button>
+                        <span id="dms-health-spinner" class="spinner" style="float:none; margin-top:0;"></span>
+                    </div>
+                    <div id="dms-health-results" style="width:100%; display:none;"></div>
+                </div>
+            </div>
 
             <!-- ====== SYNC INVENTORY ====== -->
             <div class="action-box-group" style="grid-template-columns:1fr; grid-template-rows:auto;">
@@ -1187,6 +1201,67 @@ class Admin_Page
             var publishNonce = ' . wp_json_encode($publish_nonce) . ';
             var bulkDeleteNonce = ' . wp_json_encode($bulk_delete_nonce) . ';
             var dupSkuNonce = ' . wp_json_encode($dup_sku_nonce) . ';
+            var healthCheckNonce = ' . wp_json_encode($health_check_nonce) . ';
+
+            /* ─── Pre-Sync Health Check ───────────────────────────── */
+            var $hcBtn = $("#dms-health-check-btn");
+            var $hcSpinner = $("#dms-health-spinner");
+            var $hcResults = $("#dms-health-results");
+
+            $hcBtn.on("click", function(){
+                $hcBtn.prop("disabled", true).text("Running checks...");
+                $hcSpinner.addClass("is-active");
+                $hcResults.hide();
+
+                $.ajax({
+                    url: ajaxurl,
+                    type: "POST",
+                    data: { action: "tigon_dms_health_check", nonce: healthCheckNonce },
+                    timeout: 60000
+                }).done(function(resp){
+                    $hcSpinner.removeClass("is-active");
+                    $hcBtn.prop("disabled", false).text("Run Health Check");
+
+                    if (!resp.success) {
+                        $hcResults.html(\'<div style="background:#f8d7da;border:1px solid #f5c6cb;padding:1rem;border-radius:6px;color:#721c24;">Health check failed: \' + ($("<div>").text(resp.data || "unknown error").html()) + \'</div>\').show();
+                        return;
+                    }
+
+                    var d = resp.data;
+                    var bgColor = d.overall === "fail" ? "#f8d7da" : (d.overall === "warn" ? "#fff3cd" : "#d4edda");
+                    var borderColor = d.overall === "fail" ? "#f5c6cb" : (d.overall === "warn" ? "#ffc107" : "#c3e6cb");
+                    var headerColor = d.overall === "fail" ? "#721c24" : (d.overall === "warn" ? "#856404" : "#155724");
+                    var overallLabel = d.overall === "fail" ? "Issues found — please address failures before syncing"
+                                      : d.overall === "warn" ? "Ready to sync, but with warnings"
+                                      : "All checks passed — ready to sync";
+
+                    var html = \'<div style="background:\' + bgColor + \';border:1px solid \' + borderColor + \';padding:1rem;border-radius:6px;margin-top:0.5rem;">\';
+                    html += \'<h3 style="margin:0 0 0.5rem 0;color:\' + headerColor + \';">\' + overallLabel + \'</h3>\';
+                    html += \'<p style="margin:0 0 0.75rem 0;font-size:0.9rem;"><strong>\' + d.counts.pass + \'</strong> passed, <strong>\' + d.counts.warn + \'</strong> warnings, <strong>\' + d.counts.fail + \'</strong> failures</p>\';
+                    html += \'<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:4px;">\';
+                    html += \'<thead><tr><th style="padding:0.5rem 0.75rem;text-align:left;font-size:0.78rem;text-transform:uppercase;color:#555;background:#f6f7f7;width:70px;">Status</th><th style="padding:0.5rem 0.75rem;text-align:left;font-size:0.78rem;text-transform:uppercase;color:#555;background:#f6f7f7;width:220px;">Check</th><th style="padding:0.5rem 0.75rem;text-align:left;font-size:0.78rem;text-transform:uppercase;color:#555;background:#f6f7f7;">Message</th></tr></thead><tbody>\';
+
+                    d.results.forEach(function(r){
+                        var badge;
+                        if (r.status === "pass")      badge = \'<span style="display:inline-block;padding:0.2rem 0.6rem;border-radius:4px;background:#28a745;color:#fff;font-weight:600;font-size:0.75rem;">✓ PASS</span>\';
+                        else if (r.status === "warn") badge = \'<span style="display:inline-block;padding:0.2rem 0.6rem;border-radius:4px;background:#ffc107;color:#333;font-weight:600;font-size:0.75rem;">⚠ WARN</span>\';
+                        else                          badge = \'<span style="display:inline-block;padding:0.2rem 0.6rem;border-radius:4px;background:#dc3545;color:#fff;font-weight:600;font-size:0.75rem;">✗ FAIL</span>\';
+
+                        html += \'<tr style="border-top:1px solid #e5e5e5;">\';
+                        html += \'<td style="padding:0.5rem 0.75rem;vertical-align:top;">\' + badge + \'</td>\';
+                        html += \'<td style="padding:0.5rem 0.75rem;vertical-align:top;font-weight:600;">\' + $("<div>").text(r.name).html() + \'</td>\';
+                        html += \'<td style="padding:0.5rem 0.75rem;vertical-align:top;font-size:0.88rem;color:#333;">\' + $("<div>").text(r.message).html() + \'</td>\';
+                        html += \'</tr>\';
+                    });
+                    html += \'</tbody></table>\';
+                    html += \'</div>\';
+                    $hcResults.html(html).show();
+                }).fail(function(xhr, status, err){
+                    $hcSpinner.removeClass("is-active");
+                    $hcBtn.prop("disabled", false).text("Run Health Check");
+                    $hcResults.html(\'<div style="background:#f8d7da;border:1px solid #f5c6cb;padding:1rem;border-radius:6px;color:#721c24;">Health check request failed: \' + ($("<div>").text(err || status).html()) + \'</div>\').show();
+                });
+            });
 
             // Highlight selected radio option
             $("input[name=sync_type]").on("change", function() {
