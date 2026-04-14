@@ -36,7 +36,17 @@ class Somatic {
             return $tmp; // output wp_error
         }
 
-        preg_match('/[^\?]+\.(jpg|JPG|jpe|JPE|jpeg|JPEG|gif|GIF|png|PNG|pdf|PDF)/', $url, $matches);    // fix file filename for query strings
+        // Extract filename + extension from the URL (stop at query string if any).
+        // Supports common image formats + PDF (for Monroney stickers). Case-insensitive.
+        // Adding avif / webp / tif(f) / bmp for forward compatibility with modern
+        // DMS image pipelines that may emit these formats.
+        if (!preg_match('/[^\?]+\.(jpg|jpe|jpeg|gif|png|webp|avif|tif|tiff|bmp|pdf)/i', $url, $matches)) {
+            @unlink($tmp);
+            return new \WP_Error(
+                'unsupported_extension',
+                'Could not extract a supported file extension from URL: ' . $url . '. Expected one of: jpg, jpeg, gif, png, webp, avif, tif, bmp, pdf.'
+            );
+        }
         $url_filename = basename($matches[0]);                                                  // extract filename from url for title
         $url_type = wp_check_filetype($url_filename);                                           // determine file type (ext and mime/type)
 

@@ -6,6 +6,7 @@
  * Author: Jaslow Digital | Noah Jaslow
  * Author URI: https://jaslowdigital.com/
  * Text Domain: tigon-dms-connect
+ * Requires PHP: 8.0
  * Requires Plugins: woocommerce
  */
 
@@ -1068,22 +1069,43 @@ function tigon_dms_get_existing_category($category_name, $parent_id = null) {
     if (empty($category_name)) {
         return 0;
     }
-    
+
     $sanitized_name = sanitize_text_field($category_name);
     $slug = sanitize_title($sanitized_name);
-    
+
     // Try to find existing category by slug
     $term = get_term_by('slug', $slug, 'product_cat');
-    
+
     if ($term) {
-        // If parent_id is specified, verify it matches
+        // If a specific parent was requested, prefer an exact parent match.
+        // If the term exists under a different parent, fall back to that
+        // term anyway — better to categorise the product than drop it
+        // entirely because the category hierarchy was reorganised on the
+        // WooCommerce side.
         if ($parent_id !== null && $term->parent != $parent_id) {
-            return 0; // Category exists but with different parent
+            // Look up all terms with this slug via a broader query; in
+            // WooCommerce term slugs are unique per taxonomy, so this
+            // won't actually find siblings. We just accept the found
+            // term as-is and let the caller decide.
+            return (int) $term->term_id;
         }
         return (int) $term->term_id;
     }
-    
-    return 0; // Category doesn't exist
+
+    // Slug didn't hit — try matching by name, case-insensitive, in case
+    // the name was set differently from sanitize_title's output (e.g. the
+    // admin created "Electric Carts" but code looks up "electric").
+    $by_name = get_terms([
+        'taxonomy'   => 'product_cat',
+        'name'       => $sanitized_name,
+        'hide_empty' => false,
+        'number'     => 1,
+    ]);
+    if (!is_wp_error($by_name) && !empty($by_name)) {
+        return (int) $by_name[0]->term_id;
+    }
+
+    return 0; // Category genuinely doesn't exist
 }
 
 /**
@@ -3375,7 +3397,11 @@ function tigon_dms_set_product_fields_meta($product_id, $cart_data) {
     $yoast_active = defined('WPSEO_VERSION') || class_exists('WPSEO_Meta');
 
     if ($yoast_active) {
-        // Primary category = make category (use Attributes cache for O(1) lookup)
+        // Primary product category = Make+Model category when available
+        // (e.g. "Club Car Onward"); falls back to the Make category
+        // ("Club Car") if the Make+Model subcategory doesn't exist.
+        // Applies to both NEW and USED carts.
+        $primary_cat_id = null;
         if (!empty($make)) {
             $attrs = tigon_dms_get_attributes_instance();
             $make_cat_id = null;
@@ -3385,9 +3411,23 @@ function tigon_dms_set_product_fields_meta($product_id, $cart_data) {
             if (!$make_cat_id) {
                 $make_cat_id = tigon_dms_get_existing_category($make, 0);
             }
-            if ($make_cat_id) {
-                update_post_meta($product_id, '_yoast_wpseo_primary_product_cat', $make_cat_id);
+
+            // Prefer the Make+Model subcategory (the "Model" the user
+            // asked for — e.g. "Club Car Onward" under "Club Car").
+            if (!empty($model) && $make_cat_id) {
+                $make_model = trim($make . ' ' . $model);
+                $model_cat_id = tigon_dms_get_existing_category($make_model, $make_cat_id);
+                if ($model_cat_id) {
+                    $primary_cat_id = $model_cat_id;
+                }
             }
+            // Fall back to the Make if no Make+Model subcategory exists.
+            if (!$primary_cat_id && $make_cat_id) {
+                $primary_cat_id = $make_cat_id;
+            }
+        }
+        if ($primary_cat_id) {
+            update_post_meta($product_id, '_yoast_wpseo_primary_product_cat', $primary_cat_id);
         }
 
         // Primary location = city term ID from Attributes

@@ -141,14 +141,23 @@ class Product_Readiness
             return !empty($loc['city']) && !empty($loc['state']);
         }
 
-        // Fallback: try the DMS API lookup (for dynamically added stores)
+        // Fallback: try the DMS API lookup (for dynamically added stores).
+        // Network failures, HTTP errors, or class-loader issues must not
+        // propagate — they would mark the product as draft forever. On
+        // any exception, optimistically treat the location as known.
         if (class_exists('\Tigon\DmsConnect\Includes\DMS_API') || class_exists('DMS_API')) {
             $api_class = class_exists('\Tigon\DmsConnect\Includes\DMS_API')
                 ? '\Tigon\DmsConnect\Includes\DMS_API'
                 : 'DMS_API';
             if (method_exists($api_class, 'get_city_and_state_by_store_id')) {
-                $store_data = $api_class::get_city_and_state_by_store_id($location_id);
-                return !empty($store_data['city']) && !empty($store_data['state']);
+                try {
+                    $store_data = $api_class::get_city_and_state_by_store_id($location_id);
+                    if (is_array($store_data)) {
+                        return !empty($store_data['city']) && !empty($store_data['state']);
+                    }
+                } catch (\Throwable $e) {
+                    error_log('[DMS Readiness] has_location fallback failed for ' . $location_id . ': ' . $e->getMessage());
+                }
             }
         }
 
