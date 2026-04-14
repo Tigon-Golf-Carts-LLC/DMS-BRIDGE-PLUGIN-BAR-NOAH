@@ -234,6 +234,7 @@ class Attributes
         "T13" => [
             "address" => "299 E. Gulf to Lake Hwy",
             "city" => "Lecanto",
+            "city_short" => "Lecanto",
             "state" => "Florida",
             "st" => "FL",
             "zip" => "34461",
