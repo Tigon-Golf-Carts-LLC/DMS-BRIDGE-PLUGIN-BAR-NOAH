@@ -19,6 +19,16 @@ if (!defined('ABSPATH')) {
  */
 define('TIGON_DMS_VERSION', '2.0.0');
 define('TIGON_DMS_PLUGIN_DIR', plugin_dir_path(__FILE__));
+
+/**
+ * Default S3 prefix for cart image downloads. Used when the
+ * file_source option in tigon_dms_config is empty.
+ *
+ * The Settings page still lets admins override this, but if they
+ * clear the field (or never save one), the plugin falls back to
+ * this value so image sync always works out of the box.
+ */
+define('TIGON_DMS_DEFAULT_FILE_SOURCE', 'https://s3.amazonaws.com/prod.docs.s3/carts/');
 define('TIGON_DMS_PLUGIN_URL', plugin_dir_url(__FILE__));
 
 /**
@@ -687,7 +697,48 @@ function tigon_dms_get_file_source() {
     global $wpdb;
     $table_name = $wpdb->prefix . 'tigon_dms_config';
     $value = $wpdb->get_var("SELECT option_value FROM $table_name WHERE option_name = 'file_source'");
+    // Fall back to the plugin's default S3 prefix when the option is empty
+    // or unset. Admins can override via Settings, but image sync will always
+    // have a working base URL out of the box.
+    if (empty($value) && defined('TIGON_DMS_DEFAULT_FILE_SOURCE')) {
+        $value = TIGON_DMS_DEFAULT_FILE_SOURCE;
+    }
     return $value ? rtrim($value, '/') : '';
+}
+
+/**
+ * Build the full S3 URL for a single DMS image filename.
+ *
+ * The plugin's file_source setting can be configured two ways:
+ *   - "https://s3.amazonaws.com/bucket"               → we append /carts/<name>
+ *   - "https://s3.amazonaws.com/bucket/carts/"        → we append <name> directly
+ *   - "https://s3.amazonaws.com/bucket/carts"         → we append /<name>
+ *
+ * If the image filename itself is already a full URL (starts with http),
+ * it's returned as-is (supports pre-signed / absolute-URL deliveries).
+ *
+ * @param string $file_source Configured file_source base URL.
+ * @param string $image_name  Single image filename or relative path from imageUrls.
+ * @return string Full URL ready for download.
+ */
+function tigon_dms_build_image_url($file_source, $image_name) {
+    $image_name = ltrim(trim((string) $image_name), '/');
+    if ($image_name === '') {
+        return '';
+    }
+    // Image is already a full URL (pre-signed, absolute): use as-is.
+    if (preg_match('~^https?://~i', $image_name)) {
+        return $image_name;
+    }
+    $base = rtrim((string) $file_source, '/');
+    if ($base === '') {
+        return '';
+    }
+    // If file_source already ends in /carts, don't double-append.
+    if (preg_match('~/carts$~i', $base)) {
+        return $base . '/' . $image_name;
+    }
+    return $base . '/carts/' . $image_name;
 }
 
 /**
@@ -925,7 +976,10 @@ function tigon_dms_download_and_attach_images($product_id, $image_names, $title,
             continue;
         }
 
-        $url = $file_source . '/carts/' . $remote_image_name;
+        $url = tigon_dms_build_image_url($file_source, $remote_image_name);
+        if ($url === '') {
+            continue;
+        }
 
         // Generate descriptive filename from schema template
         $vars['index'] = $i + 1;

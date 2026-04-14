@@ -306,12 +306,33 @@ class Template_Engine
     /**
      * Extract image URLs from DMS cart data.
      *
+     * The DMS API returns imageUrls in two possible shapes:
+     *   - an array: ["cart123/img1.jpg", "cart123/img2.jpg"]
+     *   - a comma-separated string: "cart123/img1.jpg,cart123/img2.jpg"
+     *
+     * Normalises both to an array of trimmed, non-empty strings.
+     *
      * @param array $cart_data
      * @return array
      */
     public static function parse_cart_images(array $cart_data): array
     {
-        return $cart_data['imageUrls'] ?? [];
+        $raw = $cart_data['imageUrls'] ?? [];
+        if (is_string($raw)) {
+            $raw = explode(',', $raw);
+        }
+        if (!is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $item) {
+            if (!is_string($item)) continue;
+            $trimmed = trim($item);
+            if ($trimmed !== '') {
+                $out[] = $trimmed;
+            }
+        }
+        return $out;
     }
 
     /**

@@ -3422,7 +3422,14 @@ class Admin_Page
         $shown_key = substr($api_key, -6);
         $api_key = substr_replace(preg_replace('/[^-]/', '•', $api_key), $shown_key, -6, 6);
         
-        $file_source = $wpdb->get_var("SELECT option_value FROM $table_name WHERE option_name = 'file_source'") ?? 'e.g. https://s3.amazonaws.com/your.bucket.s3';
+        // File source: show the currently-saved value if any, else the plugin's
+        // default prefix (TIGON_DMS_DEFAULT_FILE_SOURCE). If the admin clears the
+        // field and saves, the getter will fall back to the default on reads.
+        $saved_file_source = $wpdb->get_var("SELECT option_value FROM $table_name WHERE option_name = 'file_source'");
+        $default_file_source = defined('TIGON_DMS_DEFAULT_FILE_SOURCE')
+            ? TIGON_DMS_DEFAULT_FILE_SOURCE
+            : 'https://s3.amazonaws.com/your.bucket.s3';
+        $file_source = !empty($saved_file_source) ? $saved_file_source : $default_file_source;
 
         self::page_header();
 
@@ -3473,7 +3480,10 @@ class Admin_Page
                         </div>
                         <div>
                             <span>File source:</span>
-                            <input type="text" style="float:right" id="txt-file-source" placeholder="' . esc_attr($file_source) . '" />
+                            <input type="text" style="float:right" id="txt-file-source" value="' . esc_attr($file_source) . '" placeholder="' . esc_attr($default_file_source) . '" />
+                        </div>
+                        <div style="text-align:right; font-size:0.78rem; color:#666; margin-top:-0.25rem;">
+                            Default if left blank: <code>' . esc_html($default_file_source) . '</code>
                         </div>
                     </div>
                     <a class="tigon_dms_action tigon_dms_save" data-nonce="' . $nonce . '"><button>Save Settings</button></a>

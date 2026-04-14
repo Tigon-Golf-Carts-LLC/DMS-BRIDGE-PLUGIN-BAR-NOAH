@@ -164,15 +164,14 @@ final class Pre_Sync_Check
                     'Could not fetch sample carts from DMS — API empty or unreachable.');
             }
 
+            // Use the same parser as the sync so comma-separated + array
+            // imageUrls both work.
             $sample_image = null;
             foreach ($carts as $c) {
-                if (!empty($c['imageUrls']) && is_array($c['imageUrls'])) {
-                    foreach ($c['imageUrls'] as $img) {
-                        if (!empty($img) && is_string($img)) {
-                            $sample_image = $img;
-                            break 2;
-                        }
-                    }
+                if (!is_array($c)) continue;
+                $images = \Tigon\DmsConnect\Includes\Template_Engine::parse_cart_images($c);
+                foreach ($images as $img) {
+                    if ($img !== '') { $sample_image = $img; break 2; }
                 }
             }
             if (!$sample_image) {
@@ -180,7 +179,10 @@ final class Pre_Sync_Check
                     'Sample carts have no imageUrls. Cannot verify S3 connectivity without a real image. This is fine if your inventory is brand new — once the first cart with images is added, rerun.');
             }
 
-            $url = rtrim($src, '/') . '/carts/' . ltrim($sample_image, '/');
+            // Use the same URL builder the sync uses so we test the exact URL.
+            $url = function_exists('tigon_dms_build_image_url')
+                ? tigon_dms_build_image_url($src, $sample_image)
+                : (rtrim($src, '/') . '/carts/' . ltrim($sample_image, '/'));
 
             // HEAD request only — we don't need the body. 10s timeout.
             $resp = wp_remote_head($url, [
