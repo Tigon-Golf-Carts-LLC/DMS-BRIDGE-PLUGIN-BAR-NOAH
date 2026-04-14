@@ -691,6 +691,41 @@ function tigon_dms_get_file_source() {
 }
 
 /**
+ * Build the full S3 URL for a single DMS image filename.
+ *
+ * The plugin's file_source setting can be configured two ways:
+ *   - "https://s3.amazonaws.com/bucket"               → we append /carts/<name>
+ *   - "https://s3.amazonaws.com/bucket/carts/"        → we append <name> directly
+ *   - "https://s3.amazonaws.com/bucket/carts"         → we append /<name>
+ *
+ * If the image filename itself is already a full URL (starts with http),
+ * it's returned as-is (supports pre-signed / absolute-URL deliveries).
+ *
+ * @param string $file_source Configured file_source base URL.
+ * @param string $image_name  Single image filename or relative path from imageUrls.
+ * @return string Full URL ready for download.
+ */
+function tigon_dms_build_image_url($file_source, $image_name) {
+    $image_name = ltrim(trim((string) $image_name), '/');
+    if ($image_name === '') {
+        return '';
+    }
+    // Image is already a full URL (pre-signed, absolute): use as-is.
+    if (preg_match('~^https?://~i', $image_name)) {
+        return $image_name;
+    }
+    $base = rtrim((string) $file_source, '/');
+    if ($base === '') {
+        return '';
+    }
+    // If file_source already ends in /carts, don't double-append.
+    if (preg_match('~/carts$~i', $base)) {
+        return $base . '/' . $image_name;
+    }
+    return $base . '/carts/' . $image_name;
+}
+
+/**
  * Read a single option from the tigon_dms_config table.
  *
  * @param string      $option_name  Option key
@@ -925,7 +960,10 @@ function tigon_dms_download_and_attach_images($product_id, $image_names, $title,
             continue;
         }
 
-        $url = $file_source . '/carts/' . $remote_image_name;
+        $url = tigon_dms_build_image_url($file_source, $remote_image_name);
+        if ($url === '') {
+            continue;
+        }
 
         // Generate descriptive filename from schema template
         $vars['index'] = $i + 1;
