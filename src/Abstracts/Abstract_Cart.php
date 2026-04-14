@@ -975,17 +975,27 @@ abstract class Abstract_Cart
                 $this->generated_attributes->tags['NEW']
             );
 
-        // location
-        array_push(
-            $this->taxonomy_terms,
+        // location tags — auto-create any that don't exist yet, so a
+        // brand-new store (e.g. T13 Lecanto) gets its tags on first sync
+        // without manual set-up in wp-admin. Null returns are filtered out
+        // later by wp_set_object_terms.
+        $state_full = Attributes::$locations[$this->location_id]['state'] ?? '';
+        $city_full  = $this->city_shortname;
 
-            $this->generated_attributes->tags[strtoupper($this->city_shortname)],
-            $this->generated_attributes->tags[strtoupper($this->tigonwm_text)],
-            $this->generated_attributes->tags[strtoupper(Attributes::$locations[$this->location_id]['state'])],
-            $this->generated_attributes->tags[strtoupper($this->city_shortname) . ' GOLF CART DEALERSHIP'],
-            $this->generated_attributes->tags[strtoupper(Attributes::$locations[$this->location_id]['state']) . ' GOLF CART DEALERSHIP'],
-            $this->generated_attributes->tags[strtoupper($this->city_shortname . ' ' . Attributes::$locations[$this->location_id]['state']) . ' STREET LEGAL DEALERSHIP']
-        );
+        $location_tag_names = array_filter([
+            $city_full,
+            $this->tigonwm_text,
+            $state_full,
+            $city_full !== '' ? $city_full . ' Golf Cart Dealership' : '',
+            $state_full !== '' ? $state_full . ' Golf Cart Dealership' : '',
+            ($city_full !== '' && $state_full !== '')
+                ? $city_full . ' ' . $state_full . ' Street Legal Dealership'
+                : '',
+        ]);
+        foreach ($location_tag_names as $tag_name) {
+            $tid = $this->resolve_or_create_tag($tag_name);
+            if ($tid) $this->taxonomy_terms[] = $tid;
+        }
 
         // battery or gas
         array_push(
@@ -1100,35 +1110,39 @@ abstract class Abstract_Cart
             }
         }
 
-        // Location hierarchy categories (Location > State > City)
+        // Location hierarchy categories (Location > State > City) — auto-create
+        // so a brand-new store (e.g. T13 Lecanto) gets proper categories
+        // without manual set-up in wp-admin.
         $state_name = Attributes::$locations[$this->location_id]['state'] ?? '';
-        if (!empty($state_name) && isset($this->generated_attributes->categories[strtoupper($state_name)])) {
-            array_push($this->taxonomy_terms, $this->generated_attributes->categories[strtoupper($state_name)]);
+        $location_parent = $this->resolve_or_create_category('Location', 0);
+        if ($location_parent) {
+            $this->taxonomy_terms[] = $location_parent;
         }
-        if (isset($this->generated_attributes->categories['LOCATION'])) {
-            array_push($this->taxonomy_terms, $this->generated_attributes->categories['LOCATION']);
+        $state_id = 0;
+        if (!empty($state_name)) {
+            $state_id = (int) ($this->resolve_or_create_category($state_name, $location_parent ?: 0) ?? 0);
+            if ($state_id) $this->taxonomy_terms[] = $state_id;
         }
         $city_name = $this->city_shortname ?? '';
-        if (!empty($city_name) && isset($this->generated_attributes->categories[strtoupper($city_name)])) {
-            array_push($this->taxonomy_terms, $this->generated_attributes->categories[strtoupper($city_name)]);
+        if (!empty($city_name)) {
+            $city_id = $this->resolve_or_create_category($city_name, $state_id ?: 0);
+            if ($city_id) $this->taxonomy_terms[] = $city_id;
         }
 
-        // TIGON Dealership
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->categories['TIGON DEALERSHIP'],
-            $this->generated_attributes->categories[strtoupper(
-                'TIGON GOLF CARTS ' .
-                $this->city_shortname .
-                ' ' . Attributes::$locations[$this->location_id]['state']
-            )],
-        );
+        // TIGON Dealership — auto-create the parent + per-store child
+        $dealership_parent = $this->resolve_or_create_category('TIGON Dealership', 0);
+        if ($dealership_parent) $this->taxonomy_terms[] = $dealership_parent;
+        if (!empty($city_name) && !empty($state_name)) {
+            $dealership_name = 'TIGON Golf Carts ' . $city_name . ' ' . $state_name;
+            $dealership_id = $this->resolve_or_create_category($dealership_name, $dealership_parent ?: 0);
+            if ($dealership_id) $this->taxonomy_terms[] = $dealership_id;
+        }
 
-        array_push(
-            $this->taxonomy_terms,
-            $this->generated_attributes->tags['TIGON'],
-            $this->generated_attributes->tags['TIGON GOLF CARTS']
-        );
+        // TIGON tags (always exist after first sync)
+        $tigon_tag = $this->resolve_or_create_tag('TIGON');
+        if ($tigon_tag) $this->taxonomy_terms[] = $tigon_tag;
+        $tigon_gc_tag = $this->resolve_or_create_tag('TIGON Golf Carts');
+        if ($tigon_gc_tag) $this->taxonomy_terms[] = $tigon_gc_tag;
 
         // 0% FINANCING tag — all vehicles
         $this->taxonomy_terms[] = $this->resolve_or_create_tag('0% FINANCING');
@@ -1179,6 +1193,44 @@ abstract class Abstract_Cart
             $this->generated_attributes->tags[$key] = $existing->term_id;
             return $existing->term_id;
         }
+        return null;
+    }
+
+    /**
+     * Resolve a product_cat term by name, or auto-create it if missing.
+     *
+     * Mirrors resolve_or_create_tag but for product_cat. Used for
+     * location-driven categories (state, city, TIGON Golf Carts
+     * {city} {state}) so a brand-new location added to Attributes
+     * doesn't need a manual term set-up before sync works.
+     *
+     * @param string $name       Human-readable category name
+     * @param int    $parent_id  Parent term ID (0 = top level)
+     * @return int|null
+     */
+    private function resolve_or_create_category(string $name, int $parent_id = 0): ?int
+    {
+        $name = trim($name);
+        if ($name === '') return null;
+        $key = strtoupper($name);
+        if (isset($this->generated_attributes->categories[$key])) {
+            return $this->generated_attributes->categories[$key];
+        }
+        $args = ['slug' => sanitize_title($name)];
+        if ($parent_id > 0) {
+            $args['parent'] = $parent_id;
+        }
+        $new_term = wp_insert_term($name, 'product_cat', $args);
+        if (!is_wp_error($new_term)) {
+            $this->generated_attributes->categories[$key] = $new_term['term_id'];
+            return $new_term['term_id'];
+        }
+        $existing = get_term_by('name', $name, 'product_cat');
+        if ($existing && !is_wp_error($existing)) {
+            $this->generated_attributes->categories[$key] = $existing->term_id;
+            return $existing->term_id;
+        }
+        error_log('[DMS Connect] Failed to resolve or create product_cat term "' . $name . '"');
         return null;
     }
 
