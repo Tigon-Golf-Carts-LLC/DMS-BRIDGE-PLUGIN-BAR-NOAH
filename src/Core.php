@@ -1705,8 +1705,11 @@ class Core
                            ON p.ID = pm.post_id AND pm.meta_key = '_dms_cart_id'";
             }
 
-            // Optional inventory-status taxonomy filter
-            if (!empty($inv_status)) {
+            // Optional inventory-status taxonomy filter. Three modes:
+            //   empty string → no filter (all statuses)
+            //   'none'       → products that have NO inventory-status term
+            //   numeric term → products tagged with that specific status
+            if (!empty($inv_status) && is_numeric($inv_status)) {
                 $sql .= " INNER JOIN {$wpdb->term_relationships} tr
                              ON p.ID = tr.object_id
                           INNER JOIN {$wpdb->term_taxonomy} tt
@@ -1722,6 +1725,18 @@ class Core
                 $date_from . ' 00:00:00',
                 $date_to . ' 23:59:59'
             );
+
+            // "No Inventory Status" filter — exclude any product tagged with
+            // any inventory-status term. NOT EXISTS is fast and index-friendly.
+            if ($inv_status === 'none') {
+                $sql .= " AND NOT EXISTS (
+                    SELECT 1 FROM {$wpdb->term_relationships} tr_none
+                    INNER JOIN {$wpdb->term_taxonomy} tt_none
+                        ON tr_none.term_taxonomy_id = tt_none.term_taxonomy_id
+                    WHERE tr_none.object_id = p.ID
+                      AND tt_none.taxonomy = 'inventory-status'
+                )";
+            }
 
             $product_ids = $wpdb->get_col($sql);
 

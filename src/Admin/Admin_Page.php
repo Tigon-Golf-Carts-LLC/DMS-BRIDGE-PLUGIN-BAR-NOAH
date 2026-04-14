@@ -1087,6 +1087,21 @@ class Admin_Page
                             <select id="dms-delete-inv-status" style="padding:0.4rem 0.6rem; border:1px solid #8c8f94; border-radius:4px; min-width:220px;">
                                 <option value="">All Statuses</option>';
 
+        // Compute count of products that have NO inventory-status term assigned
+        global $wpdb;
+        $no_status_count = (int) $wpdb->get_var(
+            "SELECT COUNT(*) FROM {$wpdb->posts} p
+             WHERE p.post_type = 'product'
+               AND p.post_status IN ('publish', 'draft')
+               AND p.ID NOT IN (
+                   SELECT DISTINCT tr.object_id
+                   FROM {$wpdb->term_relationships} tr
+                   INNER JOIN {$wpdb->term_taxonomy} tt ON tr.term_taxonomy_id = tt.term_taxonomy_id
+                   WHERE tt.taxonomy = 'inventory-status'
+               )"
+        );
+        echo '<option value="none">— No Inventory Status (unassigned) — (' . $no_status_count . ')</option>';
+
         // Populate inventory status options dynamically
         $inv_terms = get_terms(['taxonomy' => 'inventory-status', 'hide_empty' => false, 'orderby' => 'name']);
         if (!is_wp_error($inv_terms) && !empty($inv_terms)) {
