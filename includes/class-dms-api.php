@@ -26,9 +26,14 @@ class DMS_API
      *
      * @var string
      */
-    private static $s3_carts_url = 'https://s3.amazonaws.com/test.docs.s3/carts/';
+    // Production S3 URLs. These are last-resort fallbacks — the plugin
+    // primarily uses the Settings-page file_source value (via
+    // tigon_dms_get_file_source() + tigon_dms_build_image_url()) to build
+    // image URLs, so admins can point at a different bucket per environment
+    // without editing code.
+    private static $s3_carts_url = 'https://s3.amazonaws.com/prod.docs.s3/carts/';
     private static $s3_window_stickers_url = 'https://s3.amazonaws.com/prod.docs.s3/cart-window-stickers/';
-    private static $s3_default_images_url = 'https://s3.amazonaws.com/test.docs.s3/default-cart-web-images/';
+    private static $s3_default_images_url = 'https://s3.amazonaws.com/prod.docs.s3/default-cart-web-images/';
 
     /**
      * Placeholder image for carts without public images
@@ -388,13 +393,31 @@ class DMS_API
      */
     public static function resolve_cart_image_urls(array $cart_data): array
     {
-        $image_filenames = $cart_data['imageUrls'] ?? array();
+        // Normalise imageUrls — the DMS payload can be either an array OR a
+        // comma-separated string. Template_Engine::parse_cart_images() handles
+        // both shapes and returns trimmed, non-empty strings.
+        if (class_exists('\Tigon\DmsConnect\Includes\Template_Engine')) {
+            $image_filenames = \Tigon\DmsConnect\Includes\Template_Engine::parse_cart_images($cart_data);
+        } else {
+            $raw = $cart_data['imageUrls'] ?? array();
+            if (is_string($raw)) $raw = array_filter(array_map('trim', explode(',', $raw)));
+            $image_filenames = is_array($raw) ? $raw : array();
+        }
 
-        // 1. Use prod S3 images if available
-        if (!empty($image_filenames) && is_array($image_filenames)) {
+        // 1. Use configured file_source (Settings page, with plugin default)
+        //    to build URLs. Honors tigon_dms_build_image_url's smart /carts/
+        //    handling so "prod.docs.s3", "prod.docs.s3/carts", and
+        //    "prod.docs.s3/carts/" all work the same.
+        if (!empty($image_filenames)) {
+            $file_source = function_exists('tigon_dms_get_file_source') ? tigon_dms_get_file_source() : '';
             $urls = array();
             foreach ($image_filenames as $filename) {
-                if (!empty($filename)) {
+                if (empty($filename)) continue;
+                if (!empty($file_source) && function_exists('tigon_dms_build_image_url')) {
+                    $u = tigon_dms_build_image_url($file_source, $filename);
+                    if ($u !== '') $urls[] = $u;
+                } else {
+                    // Last-resort fallback to the class-level S3 URL
                     $urls[] = self::$s3_carts_url . ltrim($filename, '/');
                 }
             }
