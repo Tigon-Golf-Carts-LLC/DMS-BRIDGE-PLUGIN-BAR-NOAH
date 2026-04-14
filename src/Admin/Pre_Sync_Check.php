@@ -35,6 +35,7 @@ final class Pre_Sync_Check
         $results[] = self::check_dms_credentials();
         $results[] = self::check_dms_api_reachable();
         $results[] = self::check_file_source();
+        $results[] = self::check_s3_image_download();
         $results[] = self::check_placeholder_image();
         $results[] = self::check_required_taxonomies();
         $results[] = self::check_required_categories();
@@ -130,6 +131,91 @@ final class Pre_Sync_Check
         }
         return self::result('pass', 'Image file source',
             'Configured: ' . esc_html($src));
+    }
+
+    /**
+     * Verify that an image can actually be fetched from S3 by:
+     *   1. Asking the DMS API for one cart that has images.
+     *   2. Building the same URL the sync would build
+     *      ($file_source . '/carts/' . $imageUrls[0]).
+     *   3. Issuing a HEAD request to see if S3 serves it.
+     *
+     * Fails if the bucket is private, path structure has changed,
+     * or DNS/firewall blocks outbound S3. Passes (with info) if no
+     * cart in the sample has any images.
+     */
+    private static function check_s3_image_download(): array
+    {
+        $src = function_exists('tigon_dms_get_file_source') ? tigon_dms_get_file_source() : '';
+        if (empty($src)) {
+            return self::result('warn', 'S3 image reachable',
+                'Skipped — file_source not configured. Set it first, then rerun.');
+        }
+        if (!class_exists('\DMS_API')) {
+            return self::result('warn', 'S3 image reachable',
+                'DMS_API class not loaded — cannot fetch a sample cart to test.');
+        }
+
+        try {
+            // Fetch up to 5 carts to find one with images (some DMS carts have none)
+            $carts = \DMS_API::get_carts(0, 5);
+            if (!is_array($carts) || empty($carts)) {
+                return self::result('warn', 'S3 image reachable',
+                    'Could not fetch sample carts from DMS — API empty or unreachable.');
+            }
+
+            $sample_image = null;
+            foreach ($carts as $c) {
+                if (!empty($c['imageUrls']) && is_array($c['imageUrls'])) {
+                    foreach ($c['imageUrls'] as $img) {
+                        if (!empty($img) && is_string($img)) {
+                            $sample_image = $img;
+                            break 2;
+                        }
+                    }
+                }
+            }
+            if (!$sample_image) {
+                return self::result('warn', 'S3 image reachable',
+                    'Sample carts have no imageUrls. Cannot verify S3 connectivity without a real image. This is fine if your inventory is brand new — once the first cart with images is added, rerun.');
+            }
+
+            $url = rtrim($src, '/') . '/carts/' . ltrim($sample_image, '/');
+
+            // HEAD request only — we don't need the body. 10s timeout.
+            $resp = wp_remote_head($url, [
+                'timeout'     => 10,
+                'redirection' => 3,
+                'sslverify'   => true,
+            ]);
+
+            if (is_wp_error($resp)) {
+                return self::result('fail', 'S3 image reachable',
+                    'HEAD request to ' . esc_html($url) . ' failed: ' . esc_html($resp->get_error_message()));
+            }
+            $code = (int) wp_remote_retrieve_response_code($resp);
+            if ($code >= 200 && $code < 300) {
+                $ctype = wp_remote_retrieve_header($resp, 'content-type');
+                $clen  = wp_remote_retrieve_header($resp, 'content-length');
+                return self::result('pass', 'S3 image reachable',
+                    'HTTP ' . $code . ' from ' . esc_html($url)
+                    . ($ctype ? ' (Content-Type: ' . esc_html($ctype) . ')' : '')
+                    . ($clen ? ', ' . esc_html($clen) . ' bytes' : ''));
+            }
+            if ($code === 403) {
+                return self::result('fail', 'S3 image reachable',
+                    'HTTP 403 Forbidden. The S3 bucket at ' . esc_html($src) . ' appears to block public reads. Either make the /carts/ prefix publicly readable, or update the DMS API to return pre-signed URLs.');
+            }
+            if ($code === 404) {
+                return self::result('fail', 'S3 image reachable',
+                    'HTTP 404 for ' . esc_html($url) . '. The file_source URL or /carts/ path prefix may be wrong. Double-check the S3 bucket layout.');
+            }
+            return self::result('fail', 'S3 image reachable',
+                'Unexpected HTTP ' . $code . ' from ' . esc_html($url));
+        } catch (\Throwable $e) {
+            return self::result('fail', 'S3 image reachable',
+                'S3 image test threw an exception: ' . $e->getMessage());
+        }
     }
 
     private static function check_placeholder_image(): array
