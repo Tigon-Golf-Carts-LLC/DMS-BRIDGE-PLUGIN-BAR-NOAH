@@ -1055,7 +1055,23 @@ class Admin_Page
             <div class="action-box-group" style="grid-template-columns:1fr; grid-template-rows:auto;">
                 <div class="action-box primary" style="flex-direction:column; gap:1rem; align-items:flex-start; border-left:4px solid #dc3545;">
                     <h2 style="margin:0; color:#dc3545;">Bulk Delete Products by Date Range</h2>
-                    <p>Permanently delete DMS-synced WooCommerce products created within a date range. <strong>This removes the product, all images, gallery photos, and Monroney stickers.</strong> Optionally filter by Inventory Status. This action cannot be undone.</p>
+                    <p>Permanently delete WooCommerce products created within a date range. <strong>This removes the product, all images, gallery photos, and Monroney stickers.</strong> Choose scope below. Optionally filter by Inventory Status. This action cannot be undone.</p>
+
+                    <div style="display:flex; flex-wrap:wrap; gap:1.25rem; align-items:center; width:100%; padding:0.5rem 0.75rem; background:#fff3cd; border:1px solid #ffe59a; border-radius:6px;">
+                        <strong style="font-size:0.85rem;">Scope:</strong>
+                        <label style="display:flex; align-items:center; gap:0.35rem; cursor:pointer;">
+                            <input type="radio" name="dms-delete-scope" value="dms" checked />
+                            <span>DMS carts only</span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:0.35rem; cursor:pointer;">
+                            <input type="radio" name="dms-delete-scope" value="carts" />
+                            <span>DMS + Static Carts <span style="color:#666;">(Golf Carts category)</span></span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:0.35rem; cursor:pointer;">
+                            <input type="radio" name="dms-delete-scope" value="all" />
+                            <span style="color:#856404; font-weight:600;">All WooCommerce products (⚠ parts, accessories, etc.)</span>
+                        </label>
+                    </div>
 
                     <div style="display:flex; flex-wrap:wrap; gap:1rem; align-items:flex-end; width:100%;">
                         <div style="display:flex; flex-direction:column; gap:0.25rem;">
@@ -1070,6 +1086,21 @@ class Admin_Page
                             <label for="dms-delete-inv-status" style="font-weight:600; font-size:0.85rem;">Inventory Status <span style="font-weight:400; color:#666;">(optional)</span></label>
                             <select id="dms-delete-inv-status" style="padding:0.4rem 0.6rem; border:1px solid #8c8f94; border-radius:4px; min-width:220px;">
                                 <option value="">All Statuses</option>';
+
+        // Compute count of products that have NO inventory-status term assigned
+        global $wpdb;
+        $no_status_count = (int) $wpdb->get_var(
+            "SELECT COUNT(*) FROM {$wpdb->posts} p
+             WHERE p.post_type = 'product'
+               AND p.post_status IN ('publish', 'draft')
+               AND p.ID NOT IN (
+                   SELECT DISTINCT tr.object_id
+                   FROM {$wpdb->term_relationships} tr
+                   INNER JOIN {$wpdb->term_taxonomy} tt ON tr.term_taxonomy_id = tt.term_taxonomy_id
+                   WHERE tt.taxonomy = 'inventory-status'
+               )"
+        );
+        echo '<option value="none">— No Inventory Status (unassigned) — (' . $no_status_count . ')</option>';
 
         // Populate inventory status options dynamically
         $inv_terms = get_terms(['taxonomy' => 'inventory-status', 'hide_empty' => false, 'orderby' => 'name']);
@@ -1102,10 +1133,27 @@ class Admin_Page
                 <div class="action-box primary" style="flex-direction:column; gap:1rem; align-items:flex-start; border-left:4px solid #dc3545;">
                     <h2 style="margin:0; color:#dc3545;">Duplicate SKU Cleanup</h2>
                     <p>
-                        Scan <strong>DMS-synced</strong> products for duplicates where both the <strong>SKU and VIN number</strong> match.
+                        Scan products for duplicate SKUs. In <strong>DMS-only</strong> scope, both <strong>SKU and VIN</strong> must match
+                        (safest). In <strong>All WooCommerce</strong> scope, non-DMS products are matched on SKU alone.
                         For each group, the product with the <strong>cleanest URL</strong> (no <code>-2</code>, <code>-3</code> suffix) is kept
                         and all others are permanently deleted. DMS metadata is transferred to the keeper before deletion.
                     </p>
+
+                    <div style="display:flex; flex-wrap:wrap; gap:1.25rem; align-items:center; width:100%; padding:0.5rem 0.75rem; background:#fff3cd; border:1px solid #ffe59a; border-radius:6px;">
+                        <strong style="font-size:0.85rem;">Scope:</strong>
+                        <label style="display:flex; align-items:center; gap:0.35rem; cursor:pointer;">
+                            <input type="radio" name="dms-dup-scope" value="dms" checked />
+                            <span>DMS carts only <span style="color:#666;">(SKU + VIN)</span></span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:0.35rem; cursor:pointer;">
+                            <input type="radio" name="dms-dup-scope" value="carts" />
+                            <span>DMS + Static Carts <span style="color:#666;">(Golf Carts category)</span></span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:0.35rem; cursor:pointer;">
+                            <input type="radio" name="dms-dup-scope" value="all" />
+                            <span style="color:#856404; font-weight:600;">All WooCommerce products (⚠ SKU-only for non-DMS)</span>
+                        </label>
+                    </div>
 
                     <div style="display:flex; align-items:center; gap:0.75rem;">
                         <button type="button" id="dms-dup-sku-scan-btn" class="button button-primary" style="height:auto; min-width:auto; padding:0.6rem 2rem; font-size:14px;">
@@ -1617,6 +1665,7 @@ class Admin_Page
                         date_from: dateFrom,
                         date_to: dateTo,
                         inventory_status: invStatus,
+                        scope: $("input[name=\'dms-delete-scope\']:checked").val() || "dms",
                         preview_only: "1"
                     },
                     timeout: 120000,
@@ -1668,8 +1717,16 @@ class Admin_Page
                 var invStatus = $("#dms-delete-inv-status").val();
                 var total = parseInt($delBtn.text().replace(/\D/g, ""), 10) || 0;
                 var statusLabel = invStatus ? $("#dms-delete-inv-status option:selected").text() : "All Statuses";
+                var scope = $("input[name=\'dms-delete-scope\']:checked").val() || "dms";
+                var scopeLabel;
+                if (scope === "all")        scopeLabel = "ALL WooCommerce products (includes parts & accessories)";
+                else if (scope === "carts") scopeLabel = "DMS + Static Carts (Golf Carts category)";
+                else                        scopeLabel = "DMS carts only";
 
-                if (!confirm("WARNING: You are about to permanently delete " + total + " products and ALL their images, gallery photos, and Monroney stickers.\\n\\nDate range: " + dateFrom + " to " + dateTo + "\\nInventory status: " + statusLabel + "\\n\\nThis CANNOT be undone. Continue?")) {
+                if (!confirm("WARNING: You are about to permanently delete " + total + " products and ALL their images, gallery photos, and Monroney stickers.\\n\\nScope: " + scopeLabel + "\\nDate range: " + dateFrom + " to " + dateTo + "\\nInventory status: " + statusLabel + "\\n\\nThis CANNOT be undone. Continue?")) {
+                    return;
+                }
+                if (scope === "all" && !confirm("FINAL CONFIRMATION: You selected ALL WooCommerce products. This will delete NON-CART products too (parts, accessories, anything else created in the date range). Proceed?")) {
                     return;
                 }
 
@@ -1686,7 +1743,8 @@ class Admin_Page
                         nonce: bulkDeleteNonce,
                         date_from: dateFrom,
                         date_to: dateTo,
-                        inventory_status: invStatus
+                        inventory_status: invStatus,
+                        scope: $("input[name=\'dms-delete-scope\']:checked").val() || "dms"
                     },
                     timeout: 120000,
                     success: function(initResp) {
@@ -1827,7 +1885,7 @@ class Admin_Page
                 $.ajax({
                     url: ajaxurl,
                     type: "POST",
-                    data: { action: "tigon_dms_dup_sku_scan", nonce: dupSkuNonce },
+                    data: { action: "tigon_dms_dup_sku_scan", nonce: dupSkuNonce, scope: $("input[name=\'dms-dup-scope\']:checked").val() || "dms" },
                     timeout: 120000,
                     success: function(resp) {
                         $dupSpinner.removeClass("is-active");
@@ -1882,7 +1940,16 @@ class Admin_Page
 
             $dupCleanBtn.on("click", function() {
                 var total = parseInt($dupCleanBtn.text().replace(/\D/g, ""), 10) || 0;
-                if (!confirm("WARNING: You are about to permanently delete " + total + " duplicate products and ALL their images.\\n\\nFor each SKU group, the product with the cleanest URL (no -2, -3 suffix) will be KEPT. All others will be deleted.\\n\\nThis CANNOT be undone. Continue?")) {
+                var dupScope = $("input[name=\'dms-dup-scope\']:checked").val() || "dms";
+                var dupScopeLabel;
+                if (dupScope === "all")        dupScopeLabel = "ALL WooCommerce products (parts, accessories, etc.)";
+                else if (dupScope === "carts") dupScopeLabel = "DMS + Static Carts (Golf Carts category)";
+                else                           dupScopeLabel = "DMS carts only";
+
+                if (!confirm("WARNING: You are about to permanently delete " + total + " duplicate products and ALL their images.\\n\\nScope: " + dupScopeLabel + "\\nFor each SKU group, the product with the cleanest URL (no -2, -3 suffix) will be KEPT. All others will be deleted.\\n\\nThis CANNOT be undone. Continue?")) {
+                    return;
+                }
+                if (dupScope === "all" && !confirm("FINAL CONFIRMATION: You selected ALL WooCommerce products. Non-DMS products will be matched on SKU alone (no VIN check). Proceed?")) {
                     return;
                 }
 
