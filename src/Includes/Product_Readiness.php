@@ -8,11 +8,13 @@ use Tigon\DmsConnect\Admin\Attributes;
  * Determines whether a DMS cart has all required mappings to be published.
  *
  * Required fields: SKU, Price, Categories (make), Location, Manufacturers,
- * Models, Vehicle Class, Drivetrain, Inventory Status, Brands.
+ * Models, Vehicle Class, Drivetrain, Inventory Status, Brands, Images.
  *
  * Products missing any required mapping are set to "draft" until a subsequent
- * sync provides the missing data.  Products with all mappings but no images
- * are still published.
+ * sync provides the missing data. A product with no imageUrls will remain
+ * draft (with the WooCommerce placeholder as its featured image) until a
+ * sync delivers at least one real image — at that point the draft is
+ * automatically promoted to publish.
  */
 class Product_Readiness
 {
@@ -93,6 +95,15 @@ class Product_Readiness
             $missing[] = 'Brands (cartType.make is empty)';
         }
 
+        // 11. Images — a product with no real images should remain draft.
+        //     We use the same parser the sync uses so comma-separated strings
+        //     and arrays are both handled. Products without images get the
+        //     WooCommerce placeholder for preview purposes but won't be
+        //     published until at least one real imageUrls entry is present.
+        if (!self::has_images($cart_data)) {
+            $missing[] = 'Images (imageUrls is empty)';
+        }
+
         $status = empty($missing) ? 'publish' : 'draft';
 
         if (!empty($missing)) {
@@ -104,6 +115,27 @@ class Product_Readiness
             'status'  => $status,
             'missing' => $missing,
         ];
+    }
+
+    /**
+     * Check if the cart has at least one real image URL.
+     *
+     * DMS returns imageUrls as either an array or a comma-separated string.
+     * Template_Engine::parse_cart_images normalises both shapes and strips
+     * empty entries, so any non-empty result means at least one real image.
+     */
+    private static function has_images(array $cart_data): bool
+    {
+        if (class_exists('\Tigon\DmsConnect\Includes\Template_Engine')) {
+            $images = \Tigon\DmsConnect\Includes\Template_Engine::parse_cart_images($cart_data);
+            return !empty($images);
+        }
+        // Fallback: handle both shapes inline
+        $raw = $cart_data['imageUrls'] ?? [];
+        if (is_string($raw)) {
+            $raw = array_filter(array_map('trim', explode(',', $raw)));
+        }
+        return is_array($raw) && !empty($raw);
     }
 
     /**

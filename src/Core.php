@@ -67,6 +67,10 @@ class Core
         // Pre-sync health check
         add_action('wp_ajax_tigon_dms_health_check', 'Tigon\DmsConnect\Admin\Pre_Sync_Check::ajax_run');
 
+        // Draft imageless products (one-time bulk cleanup)
+        add_action('wp_ajax_tigon_dms_draft_imageless_init',  'Tigon\DmsConnect\Core::ajax_draft_imageless_init');
+        add_action('wp_ajax_tigon_dms_draft_imageless_batch', 'Tigon\DmsConnect\Core::ajax_draft_imageless_batch');
+
         // Field mapping AJAX handlers
         add_action('wp_ajax_tigon_dms_get_field_mappings', 'Tigon\DmsConnect\Core::ajax_get_field_mappings');
         add_action('wp_ajax_tigon_dms_save_field_mapping', 'Tigon\DmsConnect\Core::ajax_save_field_mapping');
@@ -2206,6 +2210,149 @@ class Core
             ]);
         } catch (\Throwable $e) {
             wp_send_json_error('Duplicate SKU cleanup batch error: ' . $e->getMessage());
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    //  Draft Imageless Products (one-time bulk cleanup)
+    //
+    //  Finds every DMS-synced product whose featured image is either
+    //  unset or the WooCommerce placeholder (and whose gallery is also
+    //  empty/placeholder), then flips them to draft and records a
+    //  _dms_readiness_missing marker. On the next sync, as soon as
+    //  imageUrls arrives, the update path promotes the product back
+    //  to publish automatically.
+    // ─────────────────────────────────────────────────────────────────
+
+    const DRAFT_IMAGELESS_BATCH_SIZE = 25;
+    const DRAFT_IMAGELESS_PLACEHOLDER_ID = 204304;
+
+    public static function ajax_draft_imageless_init()
+    {
+        check_ajax_referer('tigon_dms_draft_imageless_nonce', 'nonce');
+        if (!current_user_can('manage_options')) wp_send_json_error('Unauthorized', 403);
+
+        global $wpdb;
+        $placeholder = self::DRAFT_IMAGELESS_PLACEHOLDER_ID;
+
+        try {
+            // Published DMS products whose featured image is missing OR is
+            // the shared placeholder. Gallery emptiness isn't required — a
+            // product with a placeholder featured + real gallery is still
+            // considered "imageless" for this purpose (it means sync hasn't
+            // delivered a real featured image yet).
+            $sql = $wpdb->prepare(
+                "SELECT p.ID
+                 FROM {$wpdb->posts} p
+                 INNER JOIN {$wpdb->postmeta} dms ON p.ID = dms.post_id AND dms.meta_key = '_dms_cart_id'
+                 LEFT JOIN {$wpdb->postmeta} thumb ON p.ID = thumb.post_id AND thumb.meta_key = '_thumbnail_id'
+                 WHERE p.post_type = 'product'
+                   AND p.post_status = 'publish'
+                   AND (thumb.meta_value IS NULL
+                        OR thumb.meta_value = ''
+                        OR thumb.meta_value = '0'
+                        OR thumb.meta_value = %d)",
+                $placeholder
+            );
+            $ids = array_map('intval', (array) $wpdb->get_col($sql));
+
+            // Sample product titles (first 20 for preview)
+            $sample = [];
+            foreach (array_slice($ids, 0, 20) as $pid) {
+                $title = get_the_title($pid);
+                $sku   = get_post_meta($pid, '_sku', true);
+                $sample[] = ($title ?: 'ID:' . $pid) . ($sku ? ' [SKU: ' . $sku . ']' : '');
+            }
+
+            if (empty($ids)) {
+                wp_send_json_success([
+                    'total'   => 0,
+                    'done'    => true,
+                    'sample'  => [],
+                    'message' => 'No imageless published DMS products found.',
+                ]);
+                return;
+            }
+
+            $sync_id = 'dms_drfimg_' . wp_generate_password(16, false);
+            set_transient($sync_id, [
+                'ids'    => $ids,
+                'offset' => 0,
+            ], HOUR_IN_SECONDS);
+
+            wp_send_json_success([
+                'sync_id'    => $sync_id,
+                'total'      => count($ids),
+                'batch_size' => self::DRAFT_IMAGELESS_BATCH_SIZE,
+                'sample'     => $sample,
+            ]);
+        } catch (\Throwable $e) {
+            wp_send_json_error('Draft-imageless init error: ' . $e->getMessage());
+        }
+    }
+
+    public static function ajax_draft_imageless_batch()
+    {
+        check_ajax_referer('tigon_dms_draft_imageless_nonce', 'nonce');
+        if (!current_user_can('manage_options')) wp_send_json_error('Unauthorized', 403);
+
+        ignore_user_abort(true);
+        set_time_limit(270);
+
+        try {
+            $sync_id = sanitize_text_field($_POST['sync_id'] ?? '');
+            $meta    = get_transient($sync_id);
+            if (!is_array($meta) || !isset($meta['ids'])) {
+                wp_send_json_error('Session expired. Please re-scan.');
+                return;
+            }
+
+            $ids    = $meta['ids'];
+            $offset = (int) ($meta['offset'] ?? 0);
+            $batch  = array_slice($ids, $offset, self::DRAFT_IMAGELESS_BATCH_SIZE);
+
+            $drafted = 0;
+            $errors  = 0;
+            foreach ($batch as $pid) {
+                try {
+                    $result = wp_update_post([
+                        'ID'          => (int) $pid,
+                        'post_status' => 'draft',
+                    ], true);
+                    if (is_wp_error($result)) {
+                        $errors++;
+                        continue;
+                    }
+                    update_post_meta((int) $pid, '_dms_readiness_missing',
+                        wp_json_encode(['Images (imageUrls is empty)']));
+                    $drafted++;
+                } catch (\Throwable $e) {
+                    $errors++;
+                }
+            }
+
+            $new_offset = $offset + count($batch);
+            $done       = $new_offset >= count($ids);
+
+            if ($done) {
+                delete_transient($sync_id);
+                if (function_exists('wc_update_product_lookup_tables')) {
+                    wc_update_product_lookup_tables();
+                }
+            } else {
+                $meta['offset'] = $new_offset;
+                set_transient($sync_id, $meta, HOUR_IN_SECONDS);
+            }
+
+            wp_send_json_success([
+                'drafted'   => $drafted,
+                'errors'    => $errors,
+                'processed' => $new_offset,
+                'total'     => count($ids),
+                'done'      => $done,
+            ]);
+        } catch (\Throwable $e) {
+            wp_send_json_error('Draft-imageless batch error: ' . $e->getMessage());
         }
     }
 
