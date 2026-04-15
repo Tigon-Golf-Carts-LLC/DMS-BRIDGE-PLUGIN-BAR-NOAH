@@ -951,6 +951,7 @@ class Admin_Page
         $bulk_delete_nonce = wp_create_nonce('tigon_dms_bulk_delete_nonce');
         $dup_sku_nonce = wp_create_nonce('tigon_dms_dup_sku_cleanup_nonce');
         $health_check_nonce = wp_create_nonce('tigon_dms_health_check_nonce');
+        $draft_imageless_nonce = wp_create_nonce('tigon_dms_draft_imageless_nonce');
 
         self::page_header();
 
@@ -1181,6 +1182,26 @@ class Admin_Page
                     <div id="dms-dup-sku-results" style="display:none; width:100%;"></div>
                 </div>
             </div>
+
+            <!-- ====== DRAFT IMAGELESS PRODUCTS ====== -->
+            <div class="action-box-group" style="grid-template-columns:1fr; grid-template-rows:auto;">
+                <div class="action-box primary" style="flex-direction:column; gap:1rem; align-items:flex-start; border-left:4px solid #f39c12;">
+                    <h2 style="margin:0; color:#b9770e;">Draft Products Without Images</h2>
+                    <p>
+                        Scan all <strong>published DMS-synced products</strong> and move any that have no featured image (or only the WooCommerce placeholder) back to <strong>draft</strong> status. Once the DMS sync delivers real images on a subsequent update, those drafts will automatically be promoted back to publish.
+                    </p>
+                    <p style="margin:0; font-size:0.85rem; color:#555;">
+                        Going forward, any new DMS cart with no <code>imageUrls</code> will also be created as a draft automatically (via the Product Readiness check). This tool is for cleaning up existing imageless products that were published before that rule existed.
+                    </p>
+
+                    <div style="display:flex; align-items:center; gap:0.75rem;">
+                        <button type="button" id="dms-draft-imageless-scan-btn" class="button" style="height:auto; padding:0.6rem 2rem; font-size:14px;">Scan Imageless Products</button>
+                        <button type="button" id="dms-draft-imageless-apply-btn" class="button button-primary" style="height:auto; padding:0.6rem 2rem; font-size:14px; background-color:#f39c12; border-color:#f39c12; color:#fff; display:none;">Draft All Imageless Products</button>
+                        <span id="dms-draft-imageless-spinner" class="spinner" style="float:none; margin-top:0;"></span>
+                    </div>
+                    <div id="dms-draft-imageless-results" style="display:none; width:100%;"></div>
+                </div>
+            </div>
         </div>
 
         <style>
@@ -1202,6 +1223,109 @@ class Admin_Page
             var bulkDeleteNonce = ' . wp_json_encode($bulk_delete_nonce) . ';
             var dupSkuNonce = ' . wp_json_encode($dup_sku_nonce) . ';
             var healthCheckNonce = ' . wp_json_encode($health_check_nonce) . ';
+            var draftImagelessNonce = ' . wp_json_encode($draft_imageless_nonce) . ';
+
+            /* ─── Draft Imageless Products ──────────────────────── */
+            var $diScanBtn = $("#dms-draft-imageless-scan-btn");
+            var $diApplyBtn = $("#dms-draft-imageless-apply-btn");
+            var $diSpinner = $("#dms-draft-imageless-spinner");
+            var $diResults = $("#dms-draft-imageless-results");
+            var diSyncId = "";
+
+            $diScanBtn.on("click", function(){
+                $diScanBtn.prop("disabled", true).text("Scanning...");
+                $diApplyBtn.hide();
+                $diSpinner.addClass("is-active");
+                $diResults.hide();
+
+                $.ajax({
+                    url: ajaxurl, type: "POST", timeout: 120000,
+                    data: { action: "tigon_dms_draft_imageless_init", nonce: draftImagelessNonce }
+                }).done(function(resp){
+                    $diSpinner.removeClass("is-active");
+                    $diScanBtn.prop("disabled", false).text("Scan Imageless Products");
+
+                    if (!resp.success) {
+                        $diResults.html(\'<div style="background:#f8d7da;border:1px solid #f5c6cb;padding:1rem;border-radius:6px;color:#721c24;">\' + $("<div>").text(resp.data || "Scan failed").html() + \'</div>\').show();
+                        return;
+                    }
+                    var d = resp.data;
+                    if (d.done && d.total === 0) {
+                        $diResults.html(\'<div style="background:#d4edda;border:1px solid #c3e6cb;padding:1rem;border-radius:6px;color:#155724;"><strong>No imageless products found.</strong> All published DMS products have a real featured image.</div>\').show();
+                        return;
+                    }
+                    diSyncId = d.sync_id;
+                    var html = \'<div style="background:#fff3cd;border:1px solid #ffc107;padding:1rem;border-radius:6px;margin-top:0.5rem;">\';
+                    html += \'<h3 style="margin:0 0 0.5rem 0;color:#856404;">Preview: \' + d.total + \' imageless published products</h3>\';
+                    if (d.sample && d.sample.length) {
+                        html += \'<details open style="margin-top:0.5rem;"><summary style="cursor:pointer;font-weight:600;color:#856404;">Sample (\' + d.sample.length + \' of \' + d.total + \')</summary>\';
+                        html += \'<ul style="list-style:disc;padding-left:1.5rem;font-size:0.85rem;max-height:240px;overflow-y:auto;">\';
+                        d.sample.forEach(function(item){ html += \'<li>\' + $("<div>").text(item).html() + \'</li>\'; });
+                        html += \'</ul></details>\';
+                    }
+                    html += \'</div>\';
+                    $diResults.html(html).show();
+                    $diApplyBtn.show().text("Draft All " + d.total + " Imageless Products");
+                }).fail(function(xhr, status, err){
+                    $diSpinner.removeClass("is-active");
+                    $diScanBtn.prop("disabled", false).text("Scan Imageless Products");
+                    $diResults.html(\'<div style="background:#f8d7da;border:1px solid #f5c6cb;padding:1rem;border-radius:6px;color:#721c24;">Scan failed: \' + $("<div>").text(err || status).html() + \'</div>\').show();
+                });
+            });
+
+            $diApplyBtn.on("click", function(){
+                var total = parseInt($diApplyBtn.text().replace(/\D/g, ""), 10) || 0;
+                if (!confirm("Move " + total + " published products to DRAFT? They will be promoted back to publish automatically on the next DMS sync that delivers an image.")) return;
+
+                $diApplyBtn.prop("disabled", true).text("Drafting...");
+                $diScanBtn.prop("disabled", true);
+                $diSpinner.addClass("is-active");
+
+                $diResults.html(
+                    \'<div class="sync-progress" style="display:block;">\' +
+                    \'<div class="sync-progress-bar-wrap"><div class="sync-progress-bar" style="width:0%;"></div>\' +
+                    \'<div class="sync-progress-text">Starting…</div></div>\' +
+                    \'<div class="sync-progress-status">Processing…</div></div>\'
+                ).show();
+
+                var cumulative = { drafted: 0, errors: 0 };
+                function runBatch(){
+                    $.ajax({
+                        url: ajaxurl, type: "POST", timeout: 280000,
+                        data: { action: "tigon_dms_draft_imageless_batch", nonce: draftImagelessNonce, sync_id: diSyncId }
+                    }).done(function(resp){
+                        if (!resp.success) { cumulative.errors++; finishDraft(cumulative, total, resp.data || ""); return; }
+                        var d = resp.data || {};
+                        cumulative.drafted += (d.drafted || 0);
+                        cumulative.errors  += (d.errors || 0);
+                        var processed = d.processed || 0;
+                        var pct = total > 0 ? Math.min(Math.round(processed / total * 100), 100) : 0;
+                        $diResults.find(".sync-progress-bar").css("width", pct + "%");
+                        $diResults.find(".sync-progress-text").text(processed + " / " + total + " (" + pct + "%)");
+                        $diResults.find(".sync-progress-status").text("Drafting… " + processed + " of " + total);
+                        if (d.done) { finishDraft(cumulative, total); } else { runBatch(); }
+                    }).fail(function(xhr, status, err){
+                        cumulative.errors++;
+                        finishDraft(cumulative, total, "Network error: " + (err || status));
+                    });
+                }
+                runBatch();
+            });
+
+            function finishDraft(stats, total, errMsg){
+                $diSpinner.removeClass("is-active");
+                $diApplyBtn.hide();
+                $diScanBtn.prop("disabled", false).text("Scan Imageless Products");
+                var html = \'<div style="background:#d4edda;border:1px solid #c3e6cb;padding:1rem;border-radius:6px;margin-top:0.5rem;">\';
+                html += \'<h3 style="margin:0;color:#155724;">Draft Imageless Complete</h3>\';
+                html += \'<ul style="list-style:disc;padding-left:1.5rem;margin-top:0.5rem;">\';
+                html += \'<li><strong>Scanned:</strong> \' + total + \'</li>\';
+                html += \'<li><strong>Moved to draft:</strong> \' + stats.drafted + \'</li>\';
+                if (stats.errors) html += \'<li style="color:#dc3545;"><strong>Errors:</strong> \' + stats.errors + \'</li>\';
+                if (errMsg) html += \'<li style="color:#dc3545;">\' + $("<div>").text(errMsg).html() + \'</li>\';
+                html += \'</ul><p style="margin:0.5rem 0 0;font-size:0.85rem;color:#155724;">These products will be promoted to publish automatically on the next DMS sync that delivers real images for them.</p></div>\';
+                $diResults.html(html).show();
+            }
 
             /* ─── Pre-Sync Health Check ───────────────────────────── */
             var $hcBtn = $("#dms-health-check-btn");
