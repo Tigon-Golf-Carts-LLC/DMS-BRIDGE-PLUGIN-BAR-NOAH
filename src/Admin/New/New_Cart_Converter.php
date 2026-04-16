@@ -2687,11 +2687,29 @@ class New_Cart_Converter
 
     public function get_specific($model)
     {
+        $normalized_requested_model = self::normalize_md_key($model);
+
         foreach ($this->new_carts as $cart) {
-            if ($cart['cartType']['model'] == $model) {
+            if (self::normalize_md_key($cart['cartType']['model']) == $normalized_requested_model) {
+                return $cart;
+            }
+
+            $make_model_key = self::normalize_md_key($cart['cartType']['make'] . ' ' . $cart['cartType']['model']);
+            if ($make_model_key == $normalized_requested_model) {
                 return $cart;
             }
         }
         return new WP_Error(400, 'Specified cart not in list.', "$model");
+    }
+
+    private static function normalize_md_key($value)
+    {
+        $normalized = strtoupper(trim((string) $value));
+        $normalized = str_replace(['®', 'EV', '_'], ['', '', ' '], $normalized);
+        $normalized = preg_replace('/\s+/', ' ', $normalized);
+        $normalized = str_replace(['EZ GO', 'EZ-GO'], 'EZGO', $normalized);
+        $normalized = str_replace(['DRIVE 2'], 'DRIVE2', $normalized);
+
+        return trim($normalized);
     }
 }
