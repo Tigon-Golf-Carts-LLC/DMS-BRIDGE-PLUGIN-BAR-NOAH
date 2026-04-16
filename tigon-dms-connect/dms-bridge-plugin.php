@@ -350,14 +350,83 @@ function tigon_dms_parse_cart_images($cart_data) {
  */
 function tigon_dms_parse_cart_warranty($cart_data) {
     $warranty = array();
-    
+
     // Extract any warranty-related fields from cart data
     // Adjust these keys based on actual DMS payload structure
     if (!empty($cart_data['warranty'])) {
         $warranty = $cart_data['warranty'];
     }
-    
+
     return $warranty;
+}
+
+/**
+ * Convert a state name to its 2-letter USPS abbreviation.
+ * Accepts an already-abbreviated 2-letter code as pass-through.
+ *
+ * @param string $state State name or 2-letter code
+ * @return string 2-letter uppercase code, or original string if not recognized
+ */
+function tigon_dms_get_state_abbr($state) {
+    $state = trim((string) $state);
+    if ($state === '') {
+        return '';
+    }
+    if (strlen($state) === 2) {
+        return strtoupper($state);
+    }
+    $map = array(
+        'Alabama' => 'AL', 'Alaska' => 'AK', 'Arizona' => 'AZ', 'Arkansas' => 'AR',
+        'California' => 'CA', 'Colorado' => 'CO', 'Connecticut' => 'CT', 'Delaware' => 'DE',
+        'Florida' => 'FL', 'Georgia' => 'GA', 'Hawaii' => 'HI', 'Idaho' => 'ID',
+        'Illinois' => 'IL', 'Indiana' => 'IN', 'Iowa' => 'IA', 'Kansas' => 'KS',
+        'Kentucky' => 'KY', 'Louisiana' => 'LA', 'Maine' => 'ME', 'Maryland' => 'MD',
+        'Massachusetts' => 'MA', 'Michigan' => 'MI', 'Minnesota' => 'MN', 'Mississippi' => 'MS',
+        'Missouri' => 'MO', 'Montana' => 'MT', 'Nebraska' => 'NE', 'Nevada' => 'NV',
+        'New Hampshire' => 'NH', 'New Jersey' => 'NJ', 'New Mexico' => 'NM', 'New York' => 'NY',
+        'North Carolina' => 'NC', 'North Dakota' => 'ND', 'Ohio' => 'OH', 'Oklahoma' => 'OK',
+        'Oregon' => 'OR', 'Pennsylvania' => 'PA', 'Rhode Island' => 'RI', 'South Carolina' => 'SC',
+        'South Dakota' => 'SD', 'Tennessee' => 'TN', 'Texas' => 'TX', 'Utah' => 'UT',
+        'Vermont' => 'VT', 'Virginia' => 'VA', 'Washington' => 'WA', 'West Virginia' => 'WV',
+        'Wisconsin' => 'WI', 'Wyoming' => 'WY', 'District of Columbia' => 'DC',
+    );
+    $key = ucwords(strtolower($state));
+    return $map[$key] ?? $state;
+}
+
+/**
+ * Compute the location watermark text (_tigonwm) for a DMS cart.
+ * Matches the legacy mapped-logic format: "{City Short} {ST}" or "TIGON® RENTALS" for rentals.
+ *
+ * @param array $cart_data Full DMS cart payload
+ * @return string Watermark text (e.g., "Lecanto FL", "South Bend IN", "TIGON® RENTALS")
+ */
+function tigon_dms_get_watermark_text($cart_data) {
+    if (!empty($cart_data['isRental'])) {
+        return 'TIGON® RENTALS';
+    }
+
+    $store_id = $cart_data['cartLocation']['locationId'] ?? '';
+    if (empty($store_id) || !class_exists('DMS_API')) {
+        return 'TIGON®';
+    }
+
+    $location_data = DMS_API::get_city_and_state_by_store_id($store_id);
+    $city = $location_data['city'] ?? '';
+    $state = $location_data['state'] ?? '';
+
+    if ($city === '' && $state === '') {
+        return 'TIGON®';
+    }
+
+    // Short-name overrides for cities with long/compound names.
+    $city_short_map = array(
+        'Scranton Wilkes-Barre' => 'Scranton',
+    );
+    $city_short = $city_short_map[$city] ?? $city;
+    $state_abbr = tigon_dms_get_state_abbr($state);
+
+    return trim($city_short . ' ' . $state_abbr);
 }
 
 /**
@@ -622,7 +691,12 @@ function tigon_dms_create_woo_product($cart_id, $title, $price, $cart_data, $spe
     // Set DMS meta
     update_post_meta($product_id, '_dms_cart_id', sanitize_text_field($cart_id));
     update_post_meta($product_id, '_dms_payload', wp_json_encode($cart_data));
-    
+
+    // Location watermark badge (_tigonwm) derived from this cart's actual location,
+    // so Lecanto products show "Lecanto FL" instead of falling back to the
+    // WooCommerce store-location default.
+    update_post_meta($product_id, '_tigonwm', tigon_dms_get_watermark_text($cart_data));
+
     // Store parsed DMS cart data in structured meta
     update_post_meta($product_id, '_dms_cart_specs', $specs);
     update_post_meta($product_id, '_dms_cart_images', $images);
@@ -683,7 +757,10 @@ function tigon_dms_update_woo_product($product_id, $title, $price, $cart_data, $
     
     // Update DMS payload
     update_post_meta($product_id, '_dms_payload', wp_json_encode($cart_data));
-    
+
+    // Refresh location watermark badge so store transfers reflect correctly.
+    update_post_meta($product_id, '_tigonwm', tigon_dms_get_watermark_text($cart_data));
+
     // Update parsed DMS cart data in structured meta
     update_post_meta($product_id, '_dms_cart_specs', $specs);
     update_post_meta($product_id, '_dms_cart_images', $images);
