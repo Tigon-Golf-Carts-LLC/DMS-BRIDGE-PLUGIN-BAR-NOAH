@@ -1,8 +1,0 @@
-{
-  "main": "import.js",
-  "type": "module",
-  "dependencies": {
-    "buffer": "^6.0.3",
-    "php-serialize": "^5.1.0"
-  }
-}

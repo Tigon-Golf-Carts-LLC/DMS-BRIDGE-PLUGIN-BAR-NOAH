@@ -12,7 +12,7 @@ jQuery(document).ready(() => {
             type: "post",
             dataType: "json",
             url: global.ajaxurl,
-            data: { action: "tigon_dms_query", query: query, endpoint: endpoint }
+            data: { action: "tigon_dms_query", nonce: global.nonce, query: query, endpoint: endpoint }
         });
 
         dmsQuery.then(cartList => {
@@ -43,7 +43,7 @@ jQuery(document).ready(() => {
             type: "post",
             dataType: "json",
             url: global.ajaxurl,
-            data: { action: "tigon_dms_post_import", query: query, endpoint: endpoint }
+            data: { action: "tigon_dms_post_import", nonce: global.nonce, query: query, endpoint: endpoint }
         });
     }
 
@@ -60,7 +60,7 @@ jQuery(document).ready(() => {
             return jQuery.ajax({
                 dataType: 'json',
                 url: global.ajaxurl,
-                data: { action: "tigon_dms_ajax_import_convert", data: JSON.stringify(targetCart) }
+                data: { action: "tigon_dms_ajax_import_convert", nonce: global.nonce, data: JSON.stringify(targetCart) }
             })
                 .catch(e => {
                     console.log(e);
@@ -83,7 +83,7 @@ jQuery(document).ready(() => {
                 type: "post",
                 dataType: 'json',
                 url: global.ajaxurl,
-                data: { action: "tigon_dms_ajax_import_create", data: targetCart }
+                data: { action: "tigon_dms_ajax_import_create", nonce: global.nonce, data: targetCart }
             })
                 .then(createdCart => {
                     count++;
@@ -101,7 +101,7 @@ jQuery(document).ready(() => {
                 type: "post",
                 dataType: 'json',
                 url: global.ajaxurl,
-                data: { action: "tigon_dms_ajax_import_update", data: targetCart }
+                data: { action: "tigon_dms_ajax_import_update", nonce: global.nonce, data: targetCart }
             })
                 .then(updatedCart => {
                     count++;
@@ -119,7 +119,7 @@ jQuery(document).ready(() => {
                 type: "post",
                 dataType: 'json',
                 url: global.ajaxurl,
-                data: { action: "tigon_dms_ajax_import_delete", data: targetCart }
+                data: { action: "tigon_dms_ajax_import_delete", nonce: global.nonce, data: targetCart }
             })
                 .then(deletedCart => {
                     count++;
@@ -156,7 +156,7 @@ jQuery(document).ready(() => {
                 type: "post",
                 dataType: "json",
                 url: global.ajaxurl,
-                data: { action: "tigon_dms_query", query: query, endpoint: endpoint }
+                data: { action: "tigon_dms_query", nonce: global.nonce, query: query, endpoint: endpoint }
             });
 
             // Create array of convert promises, return Promise.all of array
@@ -281,6 +281,7 @@ jQuery(document).ready(() => {
                 url: global.ajaxurl,
                 data: {
                     action: "tigon_dms_ajax_import_new",
+                    nonce: global.nonce,
                     data: JSON.stringify(data),
                     forced: JSON.stringify(forcedFields)
                 }
@@ -297,7 +298,7 @@ jQuery(document).ready(() => {
             type: "post",
             dataType: "json",
             url: global.ajaxurl,
-            data: { action: "tigon_dms_query", query: query, endpoint: endpoint }
+            data: { action: "tigon_dms_query", nonce: global.nonce, query: query, endpoint: endpoint }
         });
 
         let allImported = dmsQuery.then(dmsCarts => {

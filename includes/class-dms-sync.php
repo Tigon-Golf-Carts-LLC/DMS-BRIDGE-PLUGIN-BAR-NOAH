@@ -33,6 +33,10 @@ class DMS_Sync
      */
     public static function sync_inventory()
     {
+        // Extend execution time for large inventories (30 minutes)
+        @set_time_limit(1800);
+        ignore_user_abort(true);
+
         // Check if WooCommerce is active
         if (!class_exists('WooCommerce')) {
             return array(
@@ -46,11 +50,19 @@ class DMS_Sync
             'updated'   => 0,
             'skipped'   => 0,
             'errors'    => 0,
+            'sold'      => 0,
             'total'     => 0,
         );
 
+        // Collect all active DMS cart IDs so we can detect sold products afterwards
+        $active_cart_ids = array();
+
+        // Deduplication set for new carts (mirrors import.js + Core.php)
+        // Key: make|model|cartColor|seatColor|locationId
+        $seen_new = array();
+
         $page_number = 0;
-        $page_size = 20;
+        $page_size = 50;
 
         // Paginate through all carts
         // The /get-carts API returns a raw JSON array: [{...}, {...}, {...}]
@@ -88,24 +100,115 @@ class DMS_Sync
 
                 $cart_id = $cart_data['_id'];
 
+                // ---------------------------------------------------------
+                // Cart eligibility filters (mirrors import.js + Core.php)
+                //
+                // The DMS API may return ALL carts without pre-filtering.
+                // Apply the same three-state condition from Abstract_Cart:
+                //   if (isInStock && !isInBoneyard && needOnWebsite) → create/update
+                //   else → delete/skip
+                // ---------------------------------------------------------
+
+                // Check eligibility using centralized logic
+                if (!\Tigon\DmsConnect\Includes\Product_Manager::should_be_on_website($cart_data)) {
+                    // Cart is ineligible — delete existing product if one exists
+                    $existing_pid = function_exists('tigon_dms_find_existing_product')
+                        ? tigon_dms_find_existing_product($cart_id, $cart_data)
+                        : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_id) : false);
+                    if ($existing_pid) {
+                        \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
+                        $stats['sold']++;
+                    } else {
+                        $stats['skipped']++;
+                    }
+                    continue;
+                }
+
+                // DELETE in serial/VIN — delete existing product + assets, then skip
+                $serial = strtoupper($cart_data['serialNo'] ?? '');
+                $vin    = strtoupper($cart_data['vinNo'] ?? '');
+                if (str_contains($serial, 'DELETE') || str_contains($vin, 'DELETE')) {
+                    $existing_pid = function_exists('tigon_dms_find_existing_product')
+                        ? tigon_dms_find_existing_product($cart_id, $cart_data)
+                        : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_id) : false);
+                    if ($existing_pid) {
+                        \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
+                        $stats['sold']++;
+                    } else {
+                        $stats['skipped']++;
+                    }
+                    continue;
+                }
+
+                // Deduplicate new carts by unique identifiers (_id, vinNo, serialNo)
+                // instead of make/model/color/seat/location — multiple carts of the
+                // same model/color are distinct inventory items with unique IDs.
+                $is_used = !empty($cart_data['isUsed']);
+                if (!$is_used) {
+                    $dominated = false;
+
+                    // Primary dedup: DMS cart _id (unique per cart)
+                    if (!empty($cart_id)) {
+                        if (isset($seen_new['id:' . $cart_id])) {
+                            $dominated = true;
+                        }
+                        $seen_new['id:' . $cart_id] = true;
+                    }
+
+                    // Secondary dedup: vinNo (matches CMS SKU priority 1)
+                    $vin_val = trim($cart_data['vinNo'] ?? '');
+                    if (!$dominated && $vin_val !== '') {
+                        if (isset($seen_new['vin:' . $vin_val])) {
+                            $dominated = true;
+                        }
+                        $seen_new['vin:' . $vin_val] = true;
+                    }
+
+                    // Tertiary dedup: serialNo (matches CMS SKU priority 2)
+                    $serial_val = trim($cart_data['serialNo'] ?? '');
+                    if (!$dominated && $serial_val !== '') {
+                        if (isset($seen_new['sn:' . $serial_val])) {
+                            $dominated = true;
+                        }
+                        $seen_new['sn:' . $serial_val] = true;
+                    }
+
+                    if ($dominated) {
+                        $stats['skipped']++;
+                        continue;
+                    }
+                }
+
+                // Cart passed all filters — track as active
+                $active_cart_ids[] = $cart_id;
+
+                // Stage cart data in local tigon_dms_carts table
+                // This preserves ALL DMS fields locally for debugging/querying
+                $store_id   = $cart_data['cartLocation']['locationId'] ?? '';
+                $store_name = DMS_API::get_city_by_store_id($store_id);
+                \Tigon\DmsConnect\Admin\CartModel::upsert_from_api($cart_data, $store_name, '', $store_id);
+
                 // Check if product already exists (for stats tracking)
-                $existing_product_id = tigon_dms_get_product_by_cart_id($cart_id);
+                $existing_product_id = tigon_dms_find_existing_product($cart_id, $cart_data);
                 $was_existing = (bool) $existing_product_id;
 
                 try {
                     // Use existing function to create/update product (idempotent)
                     $product_id = tigon_dms_ensure_woo_product($cart_data, $cart_id);
-                    
+
                     if ($product_id) {
                         // Handle images (featured + gallery)
                         self::sync_product_images($product_id, $cart_data);
-                        
+
                         // Track stats
                         if ($was_existing) {
                             $stats['updated']++;
                         } else {
                             $stats['created']++;
                         }
+
+                        // Report PID and URL back to DMS (mirrors Core.php:478-488)
+                        self::report_pid_to_dms($cart_id, $product_id);
                     } else {
                         $stats['errors']++;
                     }
@@ -124,12 +227,127 @@ class DMS_Sync
             }
         }
 
+        // -----------------------------------------------------------------
+        // Sold product detection
+        //
+        // Find WooCommerce products with _dms_cart_id that are no longer
+        // in the active DMS inventory and fully delete them (product +
+        // all media attachments).
+        // -----------------------------------------------------------------
+        if (!empty($active_cart_ids)) {
+            $sold_products = self::detect_sold_products($active_cart_ids);
+            foreach ($sold_products as $sold_product_id) {
+                $deleted = \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $sold_product_id);
+                if ($deleted) {
+                    $stats['sold']++;
+                }
+            }
+        }
+
+        // -----------------------------------------------------------------
+        // Post-import: global WC lookup table refresh
+        // (mirrors Abstract_Import_Controller::process_post_import and
+        //  Core.php:557 — called once after ALL products are processed)
+        // -----------------------------------------------------------------
+        if (function_exists('wc_update_product_lookup_tables')) {
+            wc_update_product_lookup_tables();
+        }
+
+        // Clear DMS API transient caches so the next frontend page load
+        // picks up the freshly-synced data instead of stale cached results.
+        DMS_API::clear_caches();
+
         return array(
             'success' => true,
             'stats'   => $stats,
         );
     }
 
+
+    /**
+     * Detect WooCommerce products whose DMS cart IDs are no longer active.
+     *
+     * Queries all published and draft products with a _dms_cart_id meta and
+     * returns the product IDs whose cart ID is NOT in the active set.
+     * Draft products are included because they may be waiting for complete
+     * mappings but are still active DMS inventory.
+     *
+     * @param array $active_cart_ids Array of DMS cart IDs still in inventory
+     * @return array Product IDs that are no longer in DMS
+     */
+    private static function detect_sold_products($active_cart_ids)
+    {
+        global $wpdb;
+
+        // Get all published and draft products that have a DMS cart ID
+        $results = $wpdb->get_results(
+            "SELECT p.ID, pm.meta_value AS cart_id
+             FROM {$wpdb->posts} p
+             INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id AND pm.meta_key = '_dms_cart_id'
+             WHERE p.post_type = 'product' AND p.post_status IN ('publish', 'draft')",
+            ARRAY_A
+        );
+
+        if (empty($results)) {
+            return array();
+        }
+
+        $sold_ids = array();
+        $active_set = array_flip($active_cart_ids); // O(1) lookups
+
+        foreach ($results as $row) {
+            if (!isset($active_set[$row['cart_id']])) {
+                $sold_ids[] = (int) $row['ID'];
+            }
+        }
+
+        return $sold_ids;
+    }
+
+    /**
+     * Report product ID and URL back to DMS after successful create/update.
+     *
+     * Mirrors Core.php:478-488 — tells DMS that this cart is now on the
+     * website with its permalink, so the DMS dashboard shows accurate status.
+     *
+     * @param string $cart_id    DMS cart _id
+     * @param int    $product_id WooCommerce product ID
+     */
+    private static function report_pid_to_dms($cart_id, $product_id)
+    {
+        if (empty($cart_id) || empty($product_id)) {
+            return;
+        }
+
+        // Use DMS_Connector if available (class-based API path)
+        if (class_exists('\Tigon\DmsConnect\Includes\DMS_Connector')) {
+            try {
+                $pid_request = wp_json_encode(array(array(
+                    '_id' => $cart_id,
+                    'pid' => $product_id,
+                    'advertising' => array(
+                        'onWebsite'  => true,
+                        'websiteUrl' => get_permalink($product_id),
+                    ),
+                )));
+                \Tigon\DmsConnect\Includes\DMS_Connector::request($pid_request, '/chimera/carts', 'PUT');
+            } catch (\Exception $e) {
+                error_log('DMS Sync: Failed to report PID ' . $product_id . ' for cart ' . $cart_id . ': ' . $e->getMessage());
+            }
+            return;
+        }
+
+        // Fallback: use DMS_API if it has an update method
+        if (method_exists('DMS_API', 'update_cart')) {
+            DMS_API::update_cart($cart_id, array(
+                'pid' => $product_id,
+                'advertising' => array(
+                    'onWebsite'  => true,
+                    'websiteUrl' => get_permalink($product_id),
+                ),
+            ));
+        }
+    }
 
     /**
      * Sync product images from DMS cart data
@@ -141,24 +359,70 @@ class DMS_Sync
      * @param array $cart_data  Full DMS cart payload
      * @return void
      */
+    /**
+     * Public wrapper for sync_product_images (used by selective sync AJAX handler).
+     */
+    public static function sync_product_images_public($product_id, $cart_data)
+    {
+        self::sync_product_images($product_id, $cart_data);
+    }
+
     private static function sync_product_images($product_id, $cart_data)
     {
-        $image_urls = $cart_data['imageUrls'] ?? array();
+        // WooCommerce placeholder image attachment ID (used when DMS has no images)
+        $placeholder_image_id = 204304;
 
-        if (empty($image_urls) || !is_array($image_urls)) {
+        // Normalise imageUrls — DMS returns either array or comma-separated
+        // string; Template_Engine::parse_cart_images handles both.
+        $image_names = \Tigon\DmsConnect\Includes\Template_Engine::parse_cart_images($cart_data);
+        $has_real_images = !empty($image_names);
+
+        if (!$has_real_images) {
+            // No real images from DMS — use WooCommerce placeholder
+            $current_thumb = get_post_thumbnail_id($product_id);
+            if (!$current_thumb || (int) $current_thumb === $placeholder_image_id) {
+                set_post_thumbnail($product_id, $placeholder_image_id);
+                update_post_meta($product_id, '_product_image_gallery', '');
+            }
+            return;
+        }
+
+        // Real images arrived — remove placeholder if it was the featured image
+        $current_thumb = get_post_thumbnail_id($product_id);
+        if ((int) $current_thumb === $placeholder_image_id) {
+            delete_post_thumbnail($product_id);
+        }
+
+        // Build full URLs using the shared helper so the configured
+        // file_source (Settings page) + /carts/ handling is consistent
+        // everywhere in the plugin.
+        $file_source = function_exists('tigon_dms_get_file_source') ? tigon_dms_get_file_source() : '';
+        $resolved_urls = array();
+        if (!empty($file_source) && function_exists('tigon_dms_build_image_url')) {
+            foreach ($image_names as $img) {
+                $u = tigon_dms_build_image_url($file_source, $img);
+                if ($u !== '') $resolved_urls[] = $u;
+            }
+        }
+
+        // Last-resort fallback (no file_source configured) — let the DMS_API
+        // class build URLs with its own defaults. This also handles the
+        // coming-soon placeholder case for new carts with no images.
+        if (empty($resolved_urls)) {
+            $resolved_urls = DMS_API::resolve_cart_image_urls($cart_data);
+        }
+
+        if (empty($resolved_urls)) {
             return;
         }
 
         $attachment_ids = array();
         $featured_image_id = null;
 
-        foreach ($image_urls as $index => $image_filename) {
-            if (empty($image_filename)) {
+        foreach ($resolved_urls as $index => $image_url) {
+            if (empty($image_url)) {
                 continue;
             }
-
-            // Build full image URL
-            $image_url = self::get_image_base_url() . ltrim($image_filename, '/');
 
             // Check if attachment already exists by URL
             $existing_attachment_id = self::get_attachment_id_by_url($image_url);
@@ -259,10 +523,11 @@ class DMS_Sync
         require_once ABSPATH . 'wp-admin/includes/media.php';
         require_once ABSPATH . 'wp-admin/includes/image.php';
 
-        // Download image to temp file
-        $temp_file = download_url($image_url);
+        // Download image to temp file (30 second timeout per image)
+        $temp_file = download_url($image_url, 30);
 
         if (is_wp_error($temp_file)) {
+            error_log('[DMS Sync] Image download failed for ' . $image_url . ': ' . $temp_file->get_error_message());
             return false;
         }
 

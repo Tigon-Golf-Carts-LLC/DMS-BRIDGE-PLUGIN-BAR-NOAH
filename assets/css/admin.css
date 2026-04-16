@@ -35,7 +35,8 @@
     display: none;
 }
 
-.header *, .body * {
+/* Only header gets white text; body uses dark text by default */
+.header * {
     color: var(--font-light);
 }
 
@@ -78,6 +79,7 @@
     flex-wrap: wrap;
     justify-content: space-around;
     gap: 1rem;
+    color: var(--font-dark);
 }
 
 .body .action-box {
@@ -110,7 +112,7 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     grid-template-rows: 20rem 1fr;
-    grid-template-areas: 
+    grid-template-areas:
         "primary-1 primary-2"
         "secondary secondary";
     grid-auto-flow: row;
@@ -291,8 +293,7 @@
 
     border-top: 1px solid var(--nav-color);
 
-    cursor:pointer;
-    user-select: none;
+    cursor: pointer;
 }
 
 .checkbox-list {
@@ -412,21 +413,22 @@ input {
 }
 
 .tigon-dms-tab {
-    width: 10%;
-
-    padding: 0.5rem;
+    min-width: 8rem;
+    padding: 0.75rem 1.25rem;
     border-radius: 0.5rem;
     border: unset;
+    font-size: 0.95rem;
+    font-weight: 600;
 
-    background-color: var(--nav-color);
+    background-color: transparent;
     color: var(--font-light);
 
     cursor: pointer;
+    transition: background-color 0.15s;
 }
 
 .tigon-dms-tab.active{
     background-color: var(--main-color);
-
     cursor: unset;
 }
 
@@ -435,7 +437,7 @@ input {
 }
 
 .tigon-dms-tab:hover {
-    background-image: linear-gradient(rgba(255, 255, 255, 0.1) 0 0);
+    background-image: linear-gradient(rgba(255, 255, 255, 0.15) 0 0);
 }
 
 #used-panel {
@@ -449,12 +451,46 @@ input {
     display: none;
 }
 
-#general {
+/* Settings tabs — hidden by default; JS activates the correct one.
+   #general is visible by default so the page works even if JS delays. */
+#urls,
+#endpoints,
+#schema {
     display: none;
 }
 
-#schema {
-    display: none;
+/* ── Uniform settings-panel layout ───────────────────────────────── */
+.settings-panel {
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+}
+
+.settings-panel-header {
+    margin-bottom: 1.5rem;
+    width: 100%;
+}
+
+.settings-panel-header h3 {
+    margin: 0 0 0.35rem 0;
+    font-size: 1.15rem;
+}
+
+.settings-panel-header p {
+    font-size: 0.85rem;
+    color: #666;
+    margin: 0;
+    line-height: 1.5;
+}
+
+.settings-panel-header p code {
+    background: #f0f4f8;
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    font-size: 0.8rem;
+}
+
+.settings-panel-body {
+    width: 100%;
 }
 
 .drag-n-drop {
@@ -481,16 +517,6 @@ input {
     border-radius: 4px;
 }
 
-.form div.html-input {
-    padding: 0.5rem;
-
-    justify-content: flex-start;
-
-    background-color: #fff;
-    border: 1px solid var(--nav-color);
-    border-radius: 4px;
-}
-
 #dms-schema {
     position: sticky;
     top: 10vh;
@@ -500,100 +526,7 @@ input {
     flex-grow: 1;
     align-self: stretch;
 
-    overflow: scroll;
-
-    background-color: #fff;
-    border: 1px solid var(--nav-color);
-    border-radius: 4px;
-}
-
-.dms-value {
-    padding: 0.25rem;
-    width: fit-content;
-    background-color: var(--component-color);
-    border-radius: 0.5rem;
-    border: 1px solid var(--nav-color);
-
-    cursor: pointer;
-    user-select: none;
-}
-
-.dms-value:hover {
-    background-image: linear-gradient(rgba(0, 0, 0, 0.1) 0 0);
-}
-
-.specific-value::first-letter {
-    font-family: monospace;
-    padding-left: 0.3rem;
-    padding-right: 0.3rem;
-    border-radius: 1rem;
-    border: 1px solid var(--nav-color);
-    background-color: var(--font-light);
-}
-
- /* Remove default bullets */
- ul, #myUL, div {
-    list-style-type: none;
-  }
-  
-  /* Remove margins and padding from the parent ul */
-  #myUL {
-    margin: 0;
-    padding: 0;
-  }
-  
-  /* Style the caret/arrow */
-  .caret {
-    cursor: pointer;
-    user-select: none; /* Prevent text selection */
-    font-weight: 500;
-  }
-  
-  /* Create the caret/arrow with a unicode, and style it */
-  .caret::before {
-    content: "\25B6";
-    color: var(--font-dark);
-    display: inline-block;
-    margin-right: 6px;
-  }
-  
-  /* Rotate the caret/arrow icon when clicked on (using JavaScript) */
-  .caret-down::before {
-    transform: rotate(90deg);
-  }
-  
-  /* Hide the nested list */
-  .nested {
-    display: none;
-  }
-  
-  /* Show the nested list when the user clicks on the caret/arrow (with JavaScript) */
-  .active {
-    display: block;
-  }
-
-  ul ul {
-    padding-left: 2.5rem;
-  }
-
-  .body li {
-    margin: 0 !important;
-  }
-
-  #dms-schema li {
-    margin: 0.25rem !important;
-  }
-
-#dms-schema {
-    position: sticky;
-    top: 10vh;
-
-    max-height: 80vh;
-    padding: 0.5rem;
-    flex-grow: 1;
-    align-self: stretch;
-
-    overflow: scroll;
+    overflow: auto;
 
     background-color: #fff;
     border: 1px solid var(--nav-color);
@@ -637,19 +570,20 @@ input {
  ul, #myUL, div {
     list-style-type: none;
   }
-  
+
   /* Remove margins and padding from the parent ul */
   #myUL {
     margin: 0;
     padding: 0;
   }
-  
+
   /* Style the caret/arrow */
   .caret {
     cursor: pointer;
     user-select: none; /* Prevent text selection */
+    font-weight: 500;
   }
-  
+
   /* Create the caret/arrow with a unicode, and style it */
   .caret::before {
     content: "\25B6";
@@ -657,20 +591,25 @@ input {
     display: inline-block;
     margin-right: 6px;
   }
-  
+
   /* Rotate the caret/arrow icon when clicked on (using JavaScript) */
   .caret-down::before {
     transform: rotate(90deg);
   }
-  
+
   /* Hide the nested list */
   .nested {
     display: none;
   }
-  
-  /* Show the nested list when the user clicks on the caret/arrow (with JavaScript) */
-  .active {
+
+  /* Show the nested list when caret is clicked — scoped to .nested only */
+  .nested.active {
     display: block;
+  }
+
+  /* Checkbox list items use their own .active pattern */
+  .cb-container.active {
+    display: flex;
   }
 
   ul ul {
@@ -684,6 +623,216 @@ input {
   #dms-schema li {
     margin: 0.25rem !important;
   }
+
+/* ============================================
+   Field Mapping page styles
+   ============================================ */
+.tigon-mapping-form select,
+.tigon-mapping-form input[type="text"] {
+    color: var(--font-dark);
+    background-color: #fff;
+    border: 1px solid #8c8f94;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 13px;
+}
+
+.tigon-mapping-form label strong {
+    color: var(--font-dark);
+}
+
+#tigon-mapping-table {
+    border-collapse: collapse;
+    width: 100%;
+}
+
+#tigon-mapping-table th,
+#tigon-mapping-table td {
+    padding: 8px 10px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+    color: var(--font-dark);
+    font-size: 13px;
+}
+
+#tigon-mapping-table thead th {
+    background-color: #f0f0f1;
+    font-weight: 600;
+}
+
+#tigon-mapping-table tbody tr:hover {
+    background-color: #f6f7f7;
+}
+
+#tigon-mapping-table code {
+    background-color: #e8e8e8;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 12px;
+    color: var(--font-dark);
+}
+
+/* ============================================
+   Inventory Dashboard styles (Diagnostic page)
+   ============================================ */
+.dms-dashboard {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    width: 100%;
+}
+
+.dms-dashboard .dash-card {
+    background: var(--content-color);
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    padding: 1.25rem;
+}
+
+.dms-dashboard .dash-card h3 {
+    margin: 0 0 0.75rem 0;
+    font-size: 1rem;
+    color: var(--font-dark);
+    border-bottom: 2px solid var(--main-color);
+    padding-bottom: 0.5rem;
+}
+
+.dms-dashboard .dash-card .stat-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.35rem 0;
+    border-bottom: 1px solid #e0e0e0;
+    font-size: 0.9rem;
+    color: var(--font-dark);
+}
+
+.dms-dashboard .dash-card .stat-row:last-child {
+    border-bottom: none;
+}
+
+.dms-dashboard .dash-card .stat-row .stat-value {
+    font-weight: 700;
+    color: var(--main-color);
+}
+
+.dms-dashboard .dash-card .stat-row.total-row {
+    font-weight: 700;
+    font-size: 1.05rem;
+    border-top: 2px solid var(--main-color);
+    margin-top: 0.25rem;
+    padding-top: 0.5rem;
+}
+
+.dash-scrollable {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+/* ============================================
+   Full Payload Schema tree
+   ============================================ */
+#schema-output {
+    width: 100%;
+    max-height: 70vh;
+    overflow: auto;
+    background-color: #fff;
+    border: 1px solid var(--nav-color);
+    border-radius: 4px;
+    padding: 1rem;
+}
+
+#schema-output .schema-tree {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+#schema-output .schema-tree .schema-tree {
+    padding-left: 1.5rem;
+}
+
+#schema-output .schema-node {
+    padding: 0.15rem 0;
+}
+
+#schema-output .schema-leaf {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    padding: 0.2rem 0;
+}
+
+#schema-output .schema-caret {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    padding: 0.2rem 0;
+}
+
+#schema-output .schema-caret::before {
+    content: "\25B6";
+    display: inline-block;
+    font-size: 0.65rem;
+    transition: transform 0.15s;
+    color: var(--accent-color);
+}
+
+#schema-output .schema-caret-open::before {
+    transform: rotate(90deg);
+}
+
+#schema-output .schema-nested {
+    display: none;
+}
+
+#schema-output .schema-nested-open {
+    display: block;
+}
+
+#schema-output .schema-key {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--font-dark);
+}
+
+#schema-output .schema-type {
+    font-size: 0.65rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+#schema-output .schema-type-string  { background: #e3f2fd; color: #1565c0; }
+#schema-output .schema-type-number  { background: #fff3e0; color: #e65100; }
+#schema-output .schema-type-boolean { background: #e8f5e9; color: #2e7d32; }
+#schema-output .schema-type-null    { background: #f5f5f5; color: #757575; }
+#schema-output .schema-type-mixed   { background: #fce4ec; color: #c62828; }
+#schema-output .schema-type-object  { background: #f3e5f5; color: #6a1b9a; }
+
+#schema-output .schema-count {
+    font-size: 0.75rem;
+    color: #888;
+}
+
+#schema-output .schema-samples {
+    font-size: 0.8rem;
+    color: #555;
+}
+
+#schema-output .schema-str  { color: #2e7d32; }
+#schema-output .schema-num  { color: #e65100; }
+#schema-output .schema-samples em { color: #999; font-style: italic; }
+
+#fetch-schema-btn {
+    height: 2.5rem !important;
+    min-width: 8rem !important;
+    font-size: 0.85rem;
+}
 
 @media (max-width: 640px) {
     #wpcontent {
@@ -735,12 +884,13 @@ input {
     #result-separator,#result {
         max-width: 80%;
     }
-    
+
     .tabbed-panel {
         width: 100% !important;
     }
 
     .tigon-dms-tab {
+        min-width: unset;
         width: 25%;
     }
 
@@ -769,5 +919,9 @@ input {
         height: 15rem;
         overflow-anchor: none;
         top: 2em !important;
+    }
+
+    .dms-dashboard {
+        grid-template-columns: 1fr;
     }
 }
