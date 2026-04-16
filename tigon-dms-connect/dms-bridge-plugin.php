@@ -500,13 +500,13 @@ function tigon_dms_get_existing_category($category_name, $parent_id = null) {
     if (empty($category_name)) {
         return 0;
     }
-    
+
     $sanitized_name = sanitize_text_field($category_name);
     $slug = sanitize_title($sanitized_name);
-    
+
     // Try to find existing category by slug
     $term = get_term_by('slug', $slug, 'product_cat');
-    
+
     if ($term) {
         // If parent_id is specified, verify it matches
         if ($parent_id !== null && $term->parent != $parent_id) {
@@ -514,8 +514,82 @@ function tigon_dms_get_existing_category($category_name, $parent_id = null) {
         }
         return (int) $term->term_id;
     }
-    
+
     return 0; // Category doesn't exist
+}
+
+/**
+ * Get an existing product category by name (any parent), or create it as a
+ * top-level category if it doesn't exist. Used for required taxonomy buckets
+ * that must always be present on DMS-synced products (e.g., the
+ * "Local New/Used Active Inventory" categories).
+ *
+ * @param string $category_name Category name
+ * @param int    $parent_id     Parent category ID for new categories (0 = top-level)
+ * @return int Category term ID, or 0 on failure
+ */
+function tigon_dms_get_or_create_category($category_name, $parent_id = 0) {
+    $name = trim((string) $category_name);
+    if ($name === '') {
+        return 0;
+    }
+
+    $term = get_term_by('slug', sanitize_title($name), 'product_cat');
+    if (!$term) {
+        $term = get_term_by('name', $name, 'product_cat');
+    }
+    if ($term && !is_wp_error($term)) {
+        return (int) $term->term_id;
+    }
+
+    $created = wp_insert_term($name, 'product_cat', array('parent' => (int) $parent_id));
+    if (is_wp_error($created)) {
+        // Race condition: term may have been created between our lookup and insert.
+        $term = get_term_by('name', $name, 'product_cat');
+        return $term ? (int) $term->term_id : 0;
+    }
+    return (int) ($created['term_id'] ?? 0);
+}
+
+/**
+ * Apply required inventory taxonomy that must be set on every DMS-synced
+ * product: the "Local {New|Used} Active Inventory" category and the
+ * location city name as a product tag (e.g., "Ocean View").
+ *
+ * Called by both create and update paths so products stay in sync when
+ * they transition between new/used or move between stores.
+ *
+ * @param int   $product_id WooCommerce product ID
+ * @param array $cart_data  Full DMS cart payload
+ * @return void
+ */
+function tigon_dms_apply_inventory_taxonomy($product_id, $cart_data) {
+    // "Local New/Used Active Inventory" category — required on all products.
+    $is_used = isset($cart_data['isUsed']) && $cart_data['isUsed'] === true;
+    $inventory_cat_name = $is_used ? 'Local Used Active Inventory' : 'Local New Active Inventory';
+    $inventory_cat_id = tigon_dms_get_or_create_category($inventory_cat_name, 0);
+    if ($inventory_cat_id) {
+        // Also remove the opposite category if it was previously applied
+        // (e.g., a cart flipped from new to used).
+        $opposite_name = $is_used ? 'Local New Active Inventory' : 'Local Used Active Inventory';
+        $opposite = get_term_by('slug', sanitize_title($opposite_name), 'product_cat');
+        if ($opposite && !is_wp_error($opposite)) {
+            wp_remove_object_terms($product_id, (int) $opposite->term_id, 'product_cat');
+        }
+        wp_set_object_terms($product_id, array($inventory_cat_id), 'product_cat', true);
+    }
+
+    // Location tag — city name as product_tag (e.g., "Ocean View").
+    $store_id = $cart_data['cartLocation']['locationId'] ?? '';
+    if (!empty($store_id) && class_exists('DMS_API')) {
+        $location_data = DMS_API::get_city_and_state_by_store_id($store_id);
+        $city = trim((string) ($location_data['city'] ?? ''));
+        if ($city !== '') {
+            // product_tag is non-hierarchical, so wp_set_object_terms will
+            // auto-create missing tags from string names.
+            wp_set_object_terms($product_id, array($city), 'product_tag', true);
+        }
+    }
 }
 
 /**
@@ -687,7 +761,12 @@ function tigon_dms_create_woo_product($cart_id, $title, $price, $cart_data, $spe
     if (!empty($categories)) {
         wp_set_object_terms($product_id, $categories, 'product_cat');
     }
-    
+
+    // Apply required inventory taxonomy (Local New/Used Active Inventory
+    // category + location city tag). Append-based so it plays nicely with
+    // the $categories assignment above.
+    tigon_dms_apply_inventory_taxonomy($product_id, $cart_data);
+
     // Set DMS meta
     update_post_meta($product_id, '_dms_cart_id', sanitize_text_field($cart_id));
     update_post_meta($product_id, '_dms_payload', wp_json_encode($cart_data));
@@ -878,7 +957,11 @@ function tigon_dms_update_woo_product($product_id, $title, $price, $cart_data, $
     if (!empty($categories)) {
         wp_set_object_terms($product_id, $categories, 'product_cat');
     }
-    
+
+    // Apply required inventory taxonomy (Local New/Used Active Inventory
+    // category + location city tag).
+    tigon_dms_apply_inventory_taxonomy($product_id, $cart_data);
+
     // Ensure product is visible in catalog (remove any exclude-from-catalog terms)
     // This ensures synced products appear on inventory page
     $current_visibility = wp_get_object_terms($product_id, 'product_visibility', array('fields' => 'slugs'));
