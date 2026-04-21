@@ -379,17 +379,17 @@ class Admin_Page
             <div class="action-box" id="recrop-panel" data-nonce="' . $nonce . '">
                 <div class="action-box-column" style="max-width:28rem; align-self:unset">
                     <h3>Primary Image Size</h3>
-                    <div>Every new product has its featured image cropped to <b>' . $recrop_width . ' &times; ' . $recrop_height . ' px</b> on sync. Use this action to bring existing inventory in line with that standard.</div>
-                    <div class="warning"><i>This rewrites the featured image file for every product that has one. Depending on inventory size, it may take several minutes.</i></div>
+                    <div>Every new product has its featured image generated as a <b>' . $recrop_width . ' &times; ' . $recrop_height . ' px</b> copy of the first synced image. Use this action to bring existing inventory in line with that standard.</div>
+                    <div class="warning"><i>This creates a cropped copy of each featured image. The original images are left untouched in the media library. Depending on inventory size, it may take several minutes.</i></div>
                     <a id="recrop-all" class="tigon_dms_action" data-nonce="' . $nonce . '"><button>Recrop All Primary Images</button></a>
                 </div>
                 <div class="action-box-column">
                     <h3>What this does</h3>
                     <ul>
                         <li>Scans every WooCommerce product that has a featured image.</li>
-                        <li>Resizes and center-crops the original image file to ' . $recrop_width . ' &times; ' . $recrop_height . ' px.</li>
-                        <li>Regenerates WordPress thumbnail sub-sizes from the corrected source.</li>
-                        <li>Skips images that are already at the correct dimensions.</li>
+                        <li>Creates a center-cropped copy sized to ' . $recrop_width . ' &times; ' . $recrop_height . ' px as a separate attachment.</li>
+                        <li>Sets the cropped copy as the product&#39;s featured image; the original remains in the media library untouched.</li>
+                        <li>Skips products whose featured image is already a cropped copy at the correct dimensions.</li>
                     </ul>
                 </div>
             </div>
