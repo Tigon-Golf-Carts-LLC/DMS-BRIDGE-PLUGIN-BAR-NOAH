@@ -377,53 +377,6 @@ button.dms-reset-filters-btn:hover {
     transform: translateY(-2px);
 }
 
-/* DMS Ribbon - Diagonal Corner Style */
-.dms-ribbon {
-    position: absolute;
-    top: 73px;
-    right: -19px;
-    z-index: 10;
-    padding: 3px 17px;
-    font-size: 9px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
-    color: #fff;
-    background: #0c4774;
-    transform: rotate(45deg);
-    transform-origin: top right;
-    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
-    width: 130px;
-    text-align: center;
-    /* right: -35px; */
-    /* top: 20px; */
-    line-height: 1;
-}
-
-/* Add fold effect shadow */
-.dms-ribbon::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 100%;
-    width: 0;
-    height: 0;
-    border-style: solid;
-    border-width: 0 0 10px 10px;
-    border-color: transparent transparent transparent rgba(0, 0, 0, 0.2);
-}
-
-.dms-ribbon::after {
-    content: '';
-    position: absolute;
-    right: 0;
-    top: 100%;
-    width: 0;
-    height: 0;
-    border-style: solid;
-    border-width: 0 10px 10px 0;
-    border-color: transparent rgba(0, 0, 0, 0.2) transparent transparent;
-}
 
 .dms-inventory-cart img {
     width: 100%;
@@ -792,15 +745,6 @@ a.dms-see-details-btn:hover {
         width: 100% !important;
     }
 
-    /* Adjust ribbon for 2-column mobile */
-    .dms-ribbon {
-        top: 60px;
-        right: -14px;
-        font-size: 8px;
-        padding: 2px 15px;
-        width: 106px;
-    }
-
     .dms-filter-title {
         font-size: 13px;
         padding: 12px 15px;
@@ -917,16 +861,6 @@ a.dms-see-details-btn:hover {
         font-size: 15px !important;
         width: 100% !important;
         max-width: 250px !important;
-    }
-
-    /* Adjust ribbon for single column portrait */
-    .dms-ribbon {
-        top: 66px;
-        right: -15px; /* Reduced to prevent overflow */
-        font-size: 9px;
-        padding: 3px 22px;
-        width: 120px;
-        max-width: 150px; /* Prevent ribbon from being too wide */
     }
 
     /* Ensure header and filters don't overflow */

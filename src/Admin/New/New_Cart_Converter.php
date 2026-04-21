@@ -2,12 +2,11 @@
 
 namespace Tigon\DmsConnect\Admin\New;
 
-use Automattic\WooCommerce\Blocks\Domain\Services\GoogleAnalytics;
 use WP_Error;
 
 class New_Cart_Converter
 {
-    static $locations = ['T1', 'T2', 'T3', 'T4'];
+    static $locations = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13'];
 
     static $denago_colors = [
         'Black',

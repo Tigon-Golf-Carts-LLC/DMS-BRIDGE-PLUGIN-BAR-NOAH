@@ -12,7 +12,7 @@ jQuery(document).ready(() => {
             type: "post",
             dataType: "json",
             url: global.ajaxurl,
-            data: { action: "tigon_dms_query", query: query, endpoint: endpoint }
+            data: { action: "tigon_dms_query", nonce: global.nonce, query: query, endpoint: endpoint }
         });
 
         dmsQuery.then(cartList => {
@@ -43,7 +43,7 @@ jQuery(document).ready(() => {
             type: "post",
             dataType: "json",
             url: global.ajaxurl,
-            data: { action: "tigon_dms_post_import", query: query, endpoint: endpoint }
+            data: { action: "tigon_dms_post_import", nonce: global.nonce, query: query, endpoint: endpoint }
         });
     }
 
@@ -60,7 +60,7 @@ jQuery(document).ready(() => {
             return jQuery.ajax({
                 dataType: 'json',
                 url: global.ajaxurl,
-                data: { action: "tigon_dms_ajax_import_convert", data: JSON.stringify(targetCart) }
+                data: { action: "tigon_dms_ajax_import_convert", nonce: global.nonce, data: JSON.stringify(targetCart) }
             })
                 .catch(e => {
                     console.log(e);
@@ -83,7 +83,7 @@ jQuery(document).ready(() => {
                 type: "post",
                 dataType: 'json',
                 url: global.ajaxurl,
-                data: { action: "tigon_dms_ajax_import_create", data: targetCart }
+                data: { action: "tigon_dms_ajax_import_create", nonce: global.nonce, data: targetCart }
             })
                 .then(createdCart => {
                     count++;
@@ -101,7 +101,7 @@ jQuery(document).ready(() => {
                 type: "post",
                 dataType: 'json',
                 url: global.ajaxurl,
-                data: { action: "tigon_dms_ajax_import_update", data: targetCart }
+                data: { action: "tigon_dms_ajax_import_update", nonce: global.nonce, data: targetCart }
             })
                 .then(updatedCart => {
                     count++;
@@ -119,7 +119,7 @@ jQuery(document).ready(() => {
                 type: "post",
                 dataType: 'json',
                 url: global.ajaxurl,
-                data: { action: "tigon_dms_ajax_import_delete", data: targetCart }
+                data: { action: "tigon_dms_ajax_import_delete", nonce: global.nonce, data: targetCart }
             })
                 .then(deletedCart => {
                     count++;
@@ -156,7 +156,7 @@ jQuery(document).ready(() => {
                 type: "post",
                 dataType: "json",
                 url: global.ajaxurl,
-                data: { action: "tigon_dms_query", query: query, endpoint: endpoint }
+                data: { action: "tigon_dms_query", nonce: global.nonce, query: query, endpoint: endpoint }
             });
 
             // Create array of convert promises, return Promise.all of array
@@ -281,6 +281,7 @@ jQuery(document).ready(() => {
                 url: global.ajaxurl,
                 data: {
                     action: "tigon_dms_ajax_import_new",
+                    nonce: global.nonce,
                     data: JSON.stringify(data),
                     forced: JSON.stringify(forcedFields)
                 }
@@ -297,7 +298,7 @@ jQuery(document).ready(() => {
             type: "post",
             dataType: "json",
             url: global.ajaxurl,
-            data: { action: "tigon_dms_query", query: query, endpoint: endpoint }
+            data: { action: "tigon_dms_query", nonce: global.nonce, query: query, endpoint: endpoint }
         });
 
         let allImported = dmsQuery.then(dmsCarts => {
@@ -356,82 +357,6 @@ jQuery(document).ready(() => {
             );
             runPostImport();
         });
-    });
-
-    jQuery("#recrop-all").click(e => {
-        e.preventDefault();
-        const nonce = jQuery("#recrop-panel").data('nonce');
-        const batchSize = 10;
-        let offset = 0;
-        let totals = { processed: 0, skipped: 0, errors: 0 };
-
-        jQuery(".tigon_dms_action button").prop('disabled', true);
-        jQuery("#progress-bar").width(0);
-        jQuery("#result-separator").attr('style', 'display:none;');
-        jQuery("#result").html('');
-        jQuery("#errors").html('');
-        jQuery("#progress-text").html('Starting primary image recrop...');
-
-        function finish(message) {
-            jQuery("#progress-bar").width('100%');
-            jQuery("#progress-text").html(message);
-            jQuery(".tigon_dms_action button").prop('disabled', false);
-            jQuery("#result-separator").attr('style', 'display:block;');
-            jQuery("#result").html(
-                '<div class="result-item">' +
-                '<div>Cropped: ' + totals.processed + '</div>' +
-                '<div>Skipped: ' + totals.skipped + '</div>' +
-                '<div>Errors: ' + totals.errors + '</div>' +
-                '</div>'
-            );
-        }
-
-        function processBatch() {
-            jQuery.ajax({
-                type: "post",
-                dataType: "json",
-                url: global.ajaxurl,
-                data: {
-                    action: "tigon_dms_recrop_primary_images",
-                    nonce: nonce,
-                    offset: offset,
-                    batch_size: batchSize
-                }
-            }).then(response => {
-                if (!response || !response.success) {
-                    jQuery('#errors').append('<div>Batch failed at offset ' + offset + '</div>');
-                    finish('Recrop failed');
-                    return;
-                }
-
-                const data = response.data;
-                totals.processed += data.processed || 0;
-                totals.skipped   += data.skipped   || 0;
-                totals.errors    += data.errors    || 0;
-
-                const total = data.total || 0;
-                const seen = data.offset || 0;
-                const pct = total > 0 ? Math.min(100, Math.round((seen / total) * 1000) / 10) : 100;
-                jQuery("#progress-bar").width(pct + '%');
-                jQuery("#progress-text").html(
-                    'Cropping primary images... ' + seen + ' / ' + total +
-                    ' (' + data.width + '×' + data.height + ')'
-                );
-
-                if (data.done) {
-                    finish('Primary image recrop complete');
-                    return;
-                }
-
-                offset = data.offset;
-                processBatch();
-            }).catch(() => {
-                jQuery('#errors').append('<div>Network error during recrop at offset ' + offset + '</div>');
-                finish('Recrop failed');
-            });
-        }
-
-        processBatch();
     });
 
     jQuery("#used-tab").click(e => {

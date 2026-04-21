@@ -60,7 +60,8 @@ class Cart extends \Tigon\DmsConnect\Abstracts\Abstract_Cart
 
         //DMS generated
         if($this->cart['advertising']['websiteUrl']) {
-            $this->slug = end(explode('/', $this->cart['advertising']['websiteUrl']));
+            $url_parts = explode('/', $this->cart['advertising']['websiteUrl']);
+            $this->slug = end($url_parts);
             $this->slug = preg_replace('/\+/', '-plus-', $this->slug);
             if(substr($this->slug,-1) === '/') $this->slug = substr_replace($this->slug,'',-1);
         } else {
@@ -76,24 +77,11 @@ class Cart extends \Tigon\DmsConnect\Abstracts\Abstract_Cart
         // throw new ErrorException($this->slug);
     }
 
-    /**
-     * Sideload and/or Initialize images
-     *
-     * @return void
-     */
-    protected function fetch_images()
-    {
-        $this->images = null;
-    }
-
-    protected function generate_image_name($i)
-    {
-        return 'woocommerce-placeholder';
-    }
+    // fetch_images() inherited from Abstract_Cart — downloads images from S3
 
     protected function field_overrides()
     {
-        $this->published = 'draft';
+        $this->published = 'publish';
         if (!$this->not_default) {
             $this->in_stock = 'outofstock';
             $this->monroney_sticker = '[pdf-embedder url=""]';
