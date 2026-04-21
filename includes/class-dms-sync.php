@@ -700,21 +700,65 @@ class DMS_Sync
      */
     public static function count_products_with_featured_image()
     {
-        $query = new WP_Query(array(
+        $args = self::recrop_query_args();
+        $args['posts_per_page'] = 1;
+
+        $query = new WP_Query($args);
+
+        return (int) $query->found_posts;
+    }
+
+    /**
+     * Inventory-status term names eligible for primary image recrop.
+     *
+     * Only DMS-sourced products in these two active-inventory buckets are
+     * processed. Static and rental inventories are explicitly excluded.
+     *
+     * @return string[]
+     */
+    public static function recrop_eligible_inventory_status_terms()
+    {
+        return array(
+            'LOCAL NEW ACTIVE INVENTORY',
+            'LOCAL USED ACTIVE INVENTORY',
+        );
+    }
+
+    /**
+     * Shared query args for the recrop batch: DMS-sourced products with a
+     * featured image in the two active-inventory buckets.
+     *
+     * @return array
+     */
+    private static function recrop_query_args()
+    {
+        return array(
             'post_type'      => 'product',
             'post_status'    => 'any',
-            'posts_per_page' => 1,
+            'orderby'        => 'ID',
+            'order'          => 'ASC',
             'fields'         => 'ids',
             'no_found_rows'  => false,
             'meta_query'     => array(
+                'relation' => 'AND',
                 array(
                     'key'     => '_thumbnail_id',
                     'compare' => 'EXISTS',
                 ),
+                array(
+                    'key'     => '_dms_cart_id',
+                    'compare' => 'EXISTS',
+                ),
             ),
-        ));
-
-        return (int) $query->found_posts;
+            'tax_query'      => array(
+                array(
+                    'taxonomy' => 'inventory-status',
+                    'field'    => 'name',
+                    'terms'    => self::recrop_eligible_inventory_status_terms(),
+                    'operator' => 'IN',
+                ),
+            ),
+        );
     }
 
     /**
@@ -729,22 +773,11 @@ class DMS_Sync
         $offset     = max(0, (int) $offset);
         $batch_size = max(1, (int) $batch_size);
 
-        $query = new WP_Query(array(
-            'post_type'      => 'product',
-            'post_status'    => 'any',
-            'posts_per_page' => $batch_size,
-            'offset'         => $offset,
-            'orderby'        => 'ID',
-            'order'          => 'ASC',
-            'fields'         => 'ids',
-            'no_found_rows'  => false,
-            'meta_query'     => array(
-                array(
-                    'key'     => '_thumbnail_id',
-                    'compare' => 'EXISTS',
-                ),
-            ),
-        ));
+        $args = self::recrop_query_args();
+        $args['posts_per_page'] = $batch_size;
+        $args['offset']         = $offset;
+
+        $query = new WP_Query($args);
 
         $product_ids = $query->posts;
         $total       = (int) $query->found_posts;

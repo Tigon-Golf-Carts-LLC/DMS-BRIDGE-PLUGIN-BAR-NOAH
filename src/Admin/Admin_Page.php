@@ -1211,7 +1211,8 @@ class Admin_Page
                 <div class="action-box primary" style="flex-direction:column; gap:1rem; align-items:flex-start; border-left:4px solid #6f42c1;">
                     <h2 style="margin:0; color:#6f42c1;">Primary Image Size</h2>
                     <p>Every new product sync generates a <strong>' . $recrop_width . ' &times; ' . $recrop_height . ' px</strong> cropped copy of the first DMS image and sets that copy as the featured image. Run this tool to bring existing inventory in line with the same standard — originals are left untouched in the media library.</p>
-                    <p style="margin:0; font-size:0.85rem; color:#555;">Scans every WooCommerce product that has a featured image, creates a center-cropped copy as a separate attachment, and sets it as the featured image. Products already pointed at a correctly-sized cropped copy are skipped.</p>
+                    <p style="margin:0; font-size:0.85rem; color:#555;"><strong>Scope:</strong> DMS-sourced WooCommerce products tagged <code>LOCAL NEW ACTIVE INVENTORY</code> or <code>LOCAL USED ACTIVE INVENTORY</code>. Static and rental inventories are skipped.</p>
+                    <p style="margin:0; font-size:0.85rem; color:#555;">Creates a center-cropped copy as a separate attachment and sets it as the featured image. Products already pointed at a correctly-sized cropped copy are skipped.</p>
 
                     <div style="display:flex; align-items:center; gap:0.75rem;">
                         <button type="button" id="dms-recrop-btn" class="button button-primary" style="height:auto; padding:0.6rem 2rem; font-size:14px; background-color:#6f42c1; border-color:#6f42c1; color:#fff;">Recrop All Primary Images</button>
