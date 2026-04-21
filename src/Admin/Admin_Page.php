@@ -315,6 +315,9 @@ class Admin_Page
         $nonce = wp_create_nonce("tigon_dms_run_import_nonce");
         $link = admin_url('admin-ajax.php?action=tigon_dms_run_import&nonce=' . $nonce);
 
+        $recrop_width  = class_exists('DMS_Sync') ? \DMS_Sync::PRIMARY_IMAGE_WIDTH  : 715;
+        $recrop_height = class_exists('DMS_Sync') ? \DMS_Sync::PRIMARY_IMAGE_HEIGHT : 953;
+
         self::page_header();
 
         echo '
@@ -371,6 +374,23 @@ class Admin_Page
                     <div class="action-box-column">
                     ' . self::checkboxes() . '
                     </div>
+                </div>
+            </div>
+            <div class="action-box" id="recrop-panel" data-nonce="' . $nonce . '">
+                <div class="action-box-column" style="max-width:28rem; align-self:unset">
+                    <h3>Primary Image Size</h3>
+                    <div>Every new product has its featured image cropped to <b>' . $recrop_width . ' &times; ' . $recrop_height . ' px</b> on sync. Use this action to bring existing inventory in line with that standard.</div>
+                    <div class="warning"><i>This rewrites the featured image file for every product that has one. Depending on inventory size, it may take several minutes.</i></div>
+                    <a id="recrop-all" class="tigon_dms_action" data-nonce="' . $nonce . '"><button>Recrop All Primary Images</button></a>
+                </div>
+                <div class="action-box-column">
+                    <h3>What this does</h3>
+                    <ul>
+                        <li>Scans every WooCommerce product that has a featured image.</li>
+                        <li>Resizes and center-crops the original image file to ' . $recrop_width . ' &times; ' . $recrop_height . ' px.</li>
+                        <li>Regenerates WordPress thumbnail sub-sizes from the corrected source.</li>
+                        <li>Skips images that are already at the correct dimensions.</li>
+                    </ul>
                 </div>
             </div>
             <div class="action-box" id="result-box">

@@ -358,6 +358,82 @@ jQuery(document).ready(() => {
         });
     });
 
+    jQuery("#recrop-all").click(e => {
+        e.preventDefault();
+        const nonce = jQuery("#recrop-panel").data('nonce');
+        const batchSize = 10;
+        let offset = 0;
+        let totals = { processed: 0, skipped: 0, errors: 0 };
+
+        jQuery(".tigon_dms_action button").prop('disabled', true);
+        jQuery("#progress-bar").width(0);
+        jQuery("#result-separator").attr('style', 'display:none;');
+        jQuery("#result").html('');
+        jQuery("#errors").html('');
+        jQuery("#progress-text").html('Starting primary image recrop...');
+
+        function finish(message) {
+            jQuery("#progress-bar").width('100%');
+            jQuery("#progress-text").html(message);
+            jQuery(".tigon_dms_action button").prop('disabled', false);
+            jQuery("#result-separator").attr('style', 'display:block;');
+            jQuery("#result").html(
+                '<div class="result-item">' +
+                '<div>Cropped: ' + totals.processed + '</div>' +
+                '<div>Skipped: ' + totals.skipped + '</div>' +
+                '<div>Errors: ' + totals.errors + '</div>' +
+                '</div>'
+            );
+        }
+
+        function processBatch() {
+            jQuery.ajax({
+                type: "post",
+                dataType: "json",
+                url: global.ajaxurl,
+                data: {
+                    action: "tigon_dms_recrop_primary_images",
+                    nonce: nonce,
+                    offset: offset,
+                    batch_size: batchSize
+                }
+            }).then(response => {
+                if (!response || !response.success) {
+                    jQuery('#errors').append('<div>Batch failed at offset ' + offset + '</div>');
+                    finish('Recrop failed');
+                    return;
+                }
+
+                const data = response.data;
+                totals.processed += data.processed || 0;
+                totals.skipped   += data.skipped   || 0;
+                totals.errors    += data.errors    || 0;
+
+                const total = data.total || 0;
+                const seen = data.offset || 0;
+                const pct = total > 0 ? Math.min(100, Math.round((seen / total) * 1000) / 10) : 100;
+                jQuery("#progress-bar").width(pct + '%');
+                jQuery("#progress-text").html(
+                    'Cropping primary images... ' + seen + ' / ' + total +
+                    ' (' + data.width + '×' + data.height + ')'
+                );
+
+                if (data.done) {
+                    finish('Primary image recrop complete');
+                    return;
+                }
+
+                offset = data.offset;
+                processBatch();
+            }).catch(() => {
+                jQuery('#errors').append('<div>Network error during recrop at offset ' + offset + '</div>');
+                finish('Recrop failed');
+            });
+        }
+
+        processBatch();
+    });
+
     jQuery("#used-tab").click(e => {
         jQuery(".tigon-dms-tab").removeClass("active");
         jQuery("#used-tab").addClass("active");

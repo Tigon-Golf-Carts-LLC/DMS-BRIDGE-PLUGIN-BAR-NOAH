@@ -14,6 +14,14 @@ if (!defined('ABSPATH')) {
 class DMS_Sync
 {
     /**
+     * Target dimensions for the primary (featured) product image.
+     * All featured images are resized + center-cropped to these pixels so
+     * every product card renders at the same size.
+     */
+    const PRIMARY_IMAGE_WIDTH  = 715;
+    const PRIMARY_IMAGE_HEIGHT = 953;
+
+    /**
      * Image base URL for DMS images
      * Now uses centralized URL from DMS_API class
      *
@@ -185,8 +193,9 @@ class DMS_Sync
             }
         }
 
-        // Set featured image
+        // Set featured image (cropped to standard primary dimensions)
         if ($featured_image_id) {
+            self::crop_to_primary_size($featured_image_id);
             set_post_thumbnail($product_id, $featured_image_id);
         }
 
@@ -303,6 +312,156 @@ class DMS_Sync
         update_post_meta($attachment_id, '_dms_image_url', $image_url);
 
         return $attachment_id;
+    }
+
+    /**
+     * Resize + center-crop an attachment's original file to the primary image
+     * dimensions (PRIMARY_IMAGE_WIDTH x PRIMARY_IMAGE_HEIGHT).
+     *
+     * The original file on disk is overwritten so every WooCommerce-generated
+     * sub-size is regenerated from a correctly-proportioned source.
+     *
+     * @param int      $attachment_id Attachment post ID.
+     * @param int|null $width         Override target width.
+     * @param int|null $height        Override target height.
+     * @return bool True on success or when already correctly sized.
+     */
+    public static function crop_to_primary_size($attachment_id, $width = null, $height = null)
+    {
+        if (empty($attachment_id)) {
+            return false;
+        }
+
+        $width  = $width  ? (int) $width  : self::PRIMARY_IMAGE_WIDTH;
+        $height = $height ? (int) $height : self::PRIMARY_IMAGE_HEIGHT;
+
+        require_once ABSPATH . 'wp-admin/includes/image.php';
+
+        $file_path = get_attached_file($attachment_id);
+        if (!$file_path || !file_exists($file_path)) {
+            return false;
+        }
+
+        $editor = wp_get_image_editor($file_path);
+        if (is_wp_error($editor)) {
+            return false;
+        }
+
+        $current = $editor->get_size();
+        if (!empty($current['width']) && !empty($current['height'])
+            && (int) $current['width'] === $width
+            && (int) $current['height'] === $height) {
+            return true;
+        }
+
+        $resized = $editor->resize($width, $height, true);
+        if (is_wp_error($resized)) {
+            return false;
+        }
+
+        $saved = $editor->save($file_path);
+        if (is_wp_error($saved)) {
+            return false;
+        }
+
+        $attach_data = wp_generate_attachment_metadata($attachment_id, $file_path);
+        if (!is_wp_error($attach_data) && !empty($attach_data)) {
+            wp_update_attachment_metadata($attachment_id, $attach_data);
+        }
+
+        update_post_meta($attachment_id, '_dms_primary_cropped', $width . 'x' . $height);
+
+        return true;
+    }
+
+    /**
+     * Count products that have a featured image (for bulk progress reporting).
+     *
+     * @return int
+     */
+    public static function count_products_with_featured_image()
+    {
+        $query = new WP_Query(array(
+            'post_type'      => 'product',
+            'post_status'    => 'any',
+            'posts_per_page' => 1,
+            'fields'         => 'ids',
+            'no_found_rows'  => false,
+            'meta_query'     => array(
+                array(
+                    'key'     => '_thumbnail_id',
+                    'compare' => 'EXISTS',
+                ),
+            ),
+        ));
+
+        return (int) $query->found_posts;
+    }
+
+    /**
+     * Recrop featured images for a batch of existing products.
+     *
+     * @param int $offset     Offset into the product set.
+     * @param int $batch_size Number of products to process per call.
+     * @return array Batch stats + completion info.
+     */
+    public static function recrop_featured_images_batch($offset = 0, $batch_size = 10)
+    {
+        $offset     = max(0, (int) $offset);
+        $batch_size = max(1, (int) $batch_size);
+
+        $query = new WP_Query(array(
+            'post_type'      => 'product',
+            'post_status'    => 'any',
+            'posts_per_page' => $batch_size,
+            'offset'         => $offset,
+            'orderby'        => 'ID',
+            'order'          => 'ASC',
+            'fields'         => 'ids',
+            'no_found_rows'  => false,
+            'meta_query'     => array(
+                array(
+                    'key'     => '_thumbnail_id',
+                    'compare' => 'EXISTS',
+                ),
+            ),
+        ));
+
+        $product_ids = $query->posts;
+        $total       = (int) $query->found_posts;
+
+        $processed = 0;
+        $skipped   = 0;
+        $errors    = 0;
+
+        foreach ($product_ids as $product_id) {
+            $thumbnail_id = (int) get_post_thumbnail_id($product_id);
+            if (!$thumbnail_id) {
+                $skipped++;
+                continue;
+            }
+
+            $ok = self::crop_to_primary_size($thumbnail_id);
+            if ($ok) {
+                $processed++;
+            } else {
+                $errors++;
+            }
+        }
+
+        $next_offset = $offset + count($product_ids);
+
+        return array(
+            'processed'   => $processed,
+            'skipped'     => $skipped,
+            'errors'      => $errors,
+            'batch_count' => count($product_ids),
+            'total'       => $total,
+            'offset'      => $next_offset,
+            'done'        => $next_offset >= $total || empty($product_ids),
+            'width'       => self::PRIMARY_IMAGE_WIDTH,
+            'height'      => self::PRIMARY_IMAGE_HEIGHT,
+        );
     }
 
     /**

@@ -55,6 +55,35 @@ require_once TIGON_DMS_PLUGIN_DIR . 'vendor/autoload.php';
 
 /**
  * ============================================================================
+ * PRIMARY IMAGE RECROP (AJAX)
+ * Batches existing WooCommerce products and crops each featured image to the
+ * standard primary-image dimensions defined on DMS_Sync.
+ * ============================================================================
+ */
+function tigon_dms_recrop_primary_images() {
+    check_ajax_referer('tigon_dms_run_import_nonce', 'nonce');
+
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error(array('message' => 'Unauthorized'), 403);
+    }
+
+    if (!class_exists('DMS_Sync')) {
+        wp_send_json_error(array('message' => 'DMS_Sync unavailable'), 500);
+    }
+
+    $offset     = isset($_POST['offset'])     ? (int) $_POST['offset']     : 0;
+    $batch_size = isset($_POST['batch_size']) ? (int) $_POST['batch_size'] : 10;
+    $batch_size = max(1, min(50, $batch_size));
+
+    @set_time_limit(0);
+
+    $result = DMS_Sync::recrop_featured_images_batch($offset, $batch_size);
+    wp_send_json_success($result);
+}
+add_action('wp_ajax_tigon_dms_recrop_primary_images', 'tigon_dms_recrop_primary_images');
+
+/**
+ * ============================================================================
  * LAZY WOOCOMMERCE PRODUCT CREATION
  * Route: /dms/cart/{id} → Creates/updates WooCommerce product → Redirects
  * ============================================================================
