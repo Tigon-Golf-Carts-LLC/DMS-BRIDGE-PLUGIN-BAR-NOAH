@@ -952,6 +952,9 @@ class Admin_Page
         $dup_sku_nonce = wp_create_nonce('tigon_dms_dup_sku_cleanup_nonce');
         $health_check_nonce = wp_create_nonce('tigon_dms_health_check_nonce');
         $draft_imageless_nonce = wp_create_nonce('tigon_dms_draft_imageless_nonce');
+        $recrop_nonce = wp_create_nonce('tigon_dms_run_import_nonce');
+        $recrop_width  = class_exists('\DMS_Sync') ? \DMS_Sync::PRIMARY_IMAGE_WIDTH  : 715;
+        $recrop_height = class_exists('\DMS_Sync') ? \DMS_Sync::PRIMARY_IMAGE_HEIGHT : 953;
 
         self::page_header();
 
@@ -1200,6 +1203,21 @@ class Admin_Page
                         <span id="dms-draft-imageless-spinner" class="spinner" style="float:none; margin-top:0;"></span>
                     </div>
                     <div id="dms-draft-imageless-results" style="display:none; width:100%;"></div>
+                </div>
+            </div>
+
+            <!-- ====== PRIMARY IMAGE SIZE ====== -->
+            <div class="action-box-group" style="grid-template-columns:1fr; grid-template-rows:auto;">
+                <div class="action-box primary" style="flex-direction:column; gap:1rem; align-items:flex-start; border-left:4px solid #6f42c1;">
+                    <h2 style="margin:0; color:#6f42c1;">Primary Image Size</h2>
+                    <p>Every new product sync generates a <strong>' . $recrop_width . ' &times; ' . $recrop_height . ' px</strong> cropped copy of the first DMS image and sets that copy as the featured image. Run this tool to bring existing inventory in line with the same standard — originals are left untouched in the media library.</p>
+                    <p style="margin:0; font-size:0.85rem; color:#555;">Scans every WooCommerce product that has a featured image, creates a center-cropped copy as a separate attachment, and sets it as the featured image. Products already pointed at a correctly-sized cropped copy are skipped.</p>
+
+                    <div style="display:flex; align-items:center; gap:0.75rem;">
+                        <button type="button" id="dms-recrop-btn" class="button button-primary" style="height:auto; padding:0.6rem 2rem; font-size:14px; background-color:#6f42c1; border-color:#6f42c1; color:#fff;">Recrop All Primary Images</button>
+                        <span id="dms-recrop-spinner" class="spinner" style="float:none; margin-top:0;"></span>
+                    </div>
+                    <div id="dms-recrop-results" style="display:none; width:100%;"></div>
                 </div>
             </div>
         </div>
@@ -2252,6 +2270,91 @@ class Admin_Page
                 html += "</div>";
                 $results.html(html).show();
             }
+
+            /* ─── Primary Image Recrop ──────────────────────────── */
+            var recropNonce = ' . wp_json_encode($recrop_nonce) . ';
+            var $recropBtn = $("#dms-recrop-btn");
+            var $recropSpinner = $("#dms-recrop-spinner");
+            var $recropResults = $("#dms-recrop-results");
+
+            $recropBtn.on("click", function(){
+                if (!window.confirm("This will create a cropped copy of every featured image and update products to use the copy. Originals are preserved. Continue?")) return;
+
+                $recropBtn.prop("disabled", true).text("Cropping...");
+                $recropSpinner.addClass("is-active");
+                $recropResults.hide().html("");
+
+                var totals = { processed: 0, skipped: 0, errors: 0 };
+                var offset = 0;
+
+                function renderProgress(data) {
+                    var total = data.total || 0;
+                    var seen = data.offset || 0;
+                    var pct = total > 0 ? Math.min(100, Math.round((seen / total) * 1000) / 10) : 100;
+                    $recropResults.show().html(
+                        "<div class=\"sync-progress\" style=\"display:block;\">" +
+                            "<div class=\"sync-progress-bar-wrap\">" +
+                                "<div class=\"sync-progress-bar\" style=\"width:" + pct + "%;\"></div>" +
+                                "<div class=\"sync-progress-text\">" + seen + " / " + total + " (" + pct + "%)</div>" +
+                            "</div>" +
+                            "<div class=\"sync-progress-status\">Cropping primary images to " + (data.width || "") + "×" + (data.height || "") + " px</div>" +
+                            "<div class=\"sync-live-stats\">" +
+                                "<span class=\"created\">Cropped: " + totals.processed + "</span>" +
+                                "<span class=\"skipped\">Skipped: " + totals.skipped + "</span>" +
+                                "<span class=\"errors\">Errors: " + totals.errors + "</span>" +
+                            "</div>" +
+                        "</div>"
+                    );
+                }
+
+                function finish(message, isError) {
+                    $recropBtn.prop("disabled", false).text("Recrop All Primary Images");
+                    $recropSpinner.removeClass("is-active");
+                    var color = isError ? "#dc3545" : "#28a745";
+                    $recropResults.show().append(
+                        "<div style=\"margin-top:0.75rem; padding:0.75rem; background:#f8f9fa; border-left:4px solid " + color + ";\">" +
+                            "<strong>" + message + "</strong> &mdash; " +
+                            "Cropped: " + totals.processed + ", Skipped: " + totals.skipped + ", Errors: " + totals.errors +
+                        "</div>"
+                    );
+                }
+
+                function processBatch() {
+                    $.ajax({
+                        url: ajaxurl,
+                        type: "POST",
+                        dataType: "json",
+                        timeout: 300000,
+                        data: {
+                            action: "tigon_dms_recrop_primary_images",
+                            nonce: recropNonce,
+                            offset: offset,
+                            batch_size: 10
+                        }
+                    }).done(function(response){
+                        if (!response || !response.success) {
+                            finish("Recrop failed at offset " + offset, true);
+                            return;
+                        }
+                        var data = response.data || {};
+                        totals.processed += data.processed || 0;
+                        totals.skipped   += data.skipped   || 0;
+                        totals.errors    += data.errors    || 0;
+                        renderProgress(data);
+
+                        if (data.done) {
+                            finish("Primary image recrop complete", false);
+                            return;
+                        }
+                        offset = data.offset;
+                        processBatch();
+                    }).fail(function(){
+                        finish("Network error at offset " + offset, true);
+                    });
+                }
+
+                processBatch();
+            });
         });
         </script>
         ';

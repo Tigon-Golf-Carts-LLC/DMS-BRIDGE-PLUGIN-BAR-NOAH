@@ -14,6 +14,14 @@ if (!defined('ABSPATH')) {
 class DMS_Sync
 {
     /**
+     * Target dimensions for the primary (featured) product image.
+     * All featured images are resized + center-cropped to these pixels so
+     * every product card renders at the same size.
+     */
+    const PRIMARY_IMAGE_WIDTH  = 715;
+    const PRIMARY_IMAGE_HEIGHT = 953;
+
+    /**
      * Image base URL for DMS images
      * Now uses centralized URL from DMS_API class
      *
@@ -449,9 +457,11 @@ class DMS_Sync
             }
         }
 
-        // Set featured image
+        // Set featured image, using a separate cropped copy so the original
+        // attachment is preserved untouched in the media library.
         if ($featured_image_id) {
-            set_post_thumbnail($product_id, $featured_image_id);
+            $cropped_id = self::ensure_cropped_copy($featured_image_id);
+            set_post_thumbnail($product_id, $cropped_id ?: $featured_image_id);
         }
 
         // Set gallery images (all images except featured)
@@ -568,6 +578,217 @@ class DMS_Sync
         update_post_meta($attachment_id, '_dms_image_url', $image_url);
 
         return $attachment_id;
+    }
+
+    /**
+     * Ensure a cropped copy exists for the given attachment and return its ID.
+     *
+     * The original attachment file is left untouched. When the original already
+     * matches the target dimensions, the original ID is returned and no copy
+     * is created. When a cropped copy has previously been generated for this
+     * source at the target size, it is reused.
+     *
+     * @param int      $attachment_id Source attachment post ID.
+     * @param int|null $width         Override target width.
+     * @param int|null $height        Override target height.
+     * @return int|false Attachment ID of the cropped copy (or original if already sized), or false on failure.
+     */
+    public static function ensure_cropped_copy($attachment_id, $width = null, $height = null)
+    {
+        $attachment_id = (int) $attachment_id;
+        if ($attachment_id <= 0) {
+            return false;
+        }
+
+        $width  = $width  ? (int) $width  : self::PRIMARY_IMAGE_WIDTH;
+        $height = $height ? (int) $height : self::PRIMARY_IMAGE_HEIGHT;
+        $size_key = '_dms_cropped_version_' . $width . 'x' . $height;
+
+        // If this attachment is already a cropped copy at the target size, use it as-is.
+        $source_of_crop = (int) get_post_meta($attachment_id, '_dms_cropped_from', true);
+        if ($source_of_crop) {
+            $self_meta = wp_get_attachment_metadata($attachment_id);
+            if (!empty($self_meta['width']) && !empty($self_meta['height'])
+                && (int) $self_meta['width'] === $width
+                && (int) $self_meta['height'] === $height) {
+                return $attachment_id;
+            }
+        }
+
+        // Reuse a previously-generated crop for this source if it still exists.
+        $existing_crop = (int) get_post_meta($attachment_id, $size_key, true);
+        if ($existing_crop > 0 && get_post($existing_crop)) {
+            return $existing_crop;
+        }
+
+        // If the original already matches the target size, no copy needed.
+        $meta = wp_get_attachment_metadata($attachment_id);
+        if (!empty($meta['width']) && !empty($meta['height'])
+            && (int) $meta['width'] === $width
+            && (int) $meta['height'] === $height) {
+            return $attachment_id;
+        }
+
+        require_once ABSPATH . 'wp-admin/includes/image.php';
+
+        $original_path = get_attached_file($attachment_id);
+        if (!$original_path || !file_exists($original_path)) {
+            return false;
+        }
+
+        $pathinfo  = pathinfo($original_path);
+        $ext       = isset($pathinfo['extension']) ? $pathinfo['extension'] : 'jpg';
+        $basename  = $pathinfo['filename'] . '-' . $width . 'x' . $height . '.' . $ext;
+        $directory = $pathinfo['dirname'];
+        $basename  = wp_unique_filename($directory, $basename);
+        $new_path  = trailingslashit($directory) . $basename;
+
+        $editor = wp_get_image_editor($original_path);
+        if (is_wp_error($editor)) {
+            return false;
+        }
+
+        $resized = $editor->resize($width, $height, true);
+        if (is_wp_error($resized)) {
+            return false;
+        }
+
+        $saved = $editor->save($new_path);
+        if (is_wp_error($saved) || empty($saved['path']) || !file_exists($saved['path'])) {
+            return false;
+        }
+
+        $saved_path = $saved['path'];
+        $filetype   = wp_check_filetype($saved_path);
+        $parent_id  = (int) wp_get_post_parent_id($attachment_id);
+
+        $attachment_data = array(
+            'post_mime_type' => $filetype['type'],
+            'post_title'     => sanitize_file_name(pathinfo($saved_path, PATHINFO_FILENAME)),
+            'post_content'   => '',
+            'post_status'    => 'inherit',
+        );
+
+        $new_id = wp_insert_attachment($attachment_data, $saved_path, $parent_id);
+        if (is_wp_error($new_id) || !$new_id) {
+            @unlink($saved_path);
+            return false;
+        }
+
+        $new_meta = wp_generate_attachment_metadata($new_id, $saved_path);
+        if (!is_wp_error($new_meta) && !empty($new_meta)) {
+            wp_update_attachment_metadata($new_id, $new_meta);
+        }
+
+        update_post_meta($new_id, '_dms_cropped_from', $attachment_id);
+        update_post_meta($new_id, '_dms_primary_cropped', $width . 'x' . $height);
+        update_post_meta($attachment_id, $size_key, $new_id);
+
+        // Propagate DMS source URL so dedup logic can still trace origin.
+        $source_url = get_post_meta($attachment_id, '_dms_image_url', true);
+        if ($source_url) {
+            update_post_meta($new_id, '_dms_image_url_source', $source_url);
+        }
+
+        return $new_id;
+    }
+
+    /**
+     * Count products that have a featured image (for bulk progress reporting).
+     *
+     * @return int
+     */
+    public static function count_products_with_featured_image()
+    {
+        $query = new WP_Query(array(
+            'post_type'      => 'product',
+            'post_status'    => 'any',
+            'posts_per_page' => 1,
+            'fields'         => 'ids',
+            'no_found_rows'  => false,
+            'meta_query'     => array(
+                array(
+                    'key'     => '_thumbnail_id',
+                    'compare' => 'EXISTS',
+                ),
+            ),
+        ));
+
+        return (int) $query->found_posts;
+    }
+
+    /**
+     * Recrop featured images for a batch of existing products.
+     *
+     * @param int $offset     Offset into the product set.
+     * @param int $batch_size Number of products to process per call.
+     * @return array Batch stats + completion info.
+     */
+    public static function recrop_featured_images_batch($offset = 0, $batch_size = 10)
+    {
+        $offset     = max(0, (int) $offset);
+        $batch_size = max(1, (int) $batch_size);
+
+        $query = new WP_Query(array(
+            'post_type'      => 'product',
+            'post_status'    => 'any',
+            'posts_per_page' => $batch_size,
+            'offset'         => $offset,
+            'orderby'        => 'ID',
+            'order'          => 'ASC',
+            'fields'         => 'ids',
+            'no_found_rows'  => false,
+            'meta_query'     => array(
+                array(
+                    'key'     => '_thumbnail_id',
+                    'compare' => 'EXISTS',
+                ),
+            ),
+        ));
+
+        $product_ids = $query->posts;
+        $total       = (int) $query->found_posts;
+
+        $processed = 0;
+        $skipped   = 0;
+        $errors    = 0;
+
+        foreach ($product_ids as $product_id) {
+            $thumbnail_id = (int) get_post_thumbnail_id($product_id);
+            if (!$thumbnail_id) {
+                $skipped++;
+                continue;
+            }
+
+            $cropped_id = self::ensure_cropped_copy($thumbnail_id);
+            if (!$cropped_id) {
+                $errors++;
+                continue;
+            }
+
+            if ($cropped_id === $thumbnail_id) {
+                // Already at target size or thumbnail already is the cropped copy.
+                $skipped++;
+                continue;
+            }
+
+            set_post_thumbnail($product_id, $cropped_id);
+            $processed++;
+        }
+
+        $next_offset = $offset + count($product_ids);
+
+        return array(
+            'processed'   => $processed,
+            'skipped'     => $skipped,
+            'errors'      => $errors,
+            'batch_count' => count($product_ids),
+            'total'       => $total,
+            'offset'      => $next_offset,
+            'done'        => $next_offset >= $total || empty($product_ids),
+            'width'       => self::PRIMARY_IMAGE_WIDTH,
+            'height'      => self::PRIMARY_IMAGE_HEIGHT,
+        );
     }
 
     /**
