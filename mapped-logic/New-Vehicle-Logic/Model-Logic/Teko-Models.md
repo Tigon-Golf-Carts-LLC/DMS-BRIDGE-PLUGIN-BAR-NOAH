@@ -102,7 +102,7 @@ All values inherit.
 | `pa_fender-flares` | inherit (`YES`) |
 | `pa_led-accents` | **NO** |
 | `pa_lift-kit` | From API payload |
-| `pa_location` | inherit |
+| `pa_vehicle-location` | inherit |
 | `pa_cart-color` | From API payload |
 | `pa_seat-color` | From API payload |
 | `pa_sound-system` | `TEKO EV(R) SOUND SYSTEM` |

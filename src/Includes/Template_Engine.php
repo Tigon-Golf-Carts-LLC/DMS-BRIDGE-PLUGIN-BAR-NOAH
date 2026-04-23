@@ -284,14 +284,14 @@ class Template_Engine
         if (!empty($cart_data['odometer']))  $specs['Odometer']      = $cart_data['odometer'];
         if (!empty($cart_data['hour']))      $specs['Hours']         = $cart_data['hour'];
 
-        // Location
+        // Vehicle Location
         if (!empty($cart_data['cartLocation'])) {
             $store_id = $cart_data['cartLocation']['locationId'] ?? '';
             if ($store_id && class_exists('DMS_API')) {
                 $loc = \DMS_API::get_city_and_state_by_store_id($store_id);
                 $parts = array_filter([$loc['city'] ?? '', $loc['state'] ?? '']);
                 if (!empty($parts)) {
-                    $specs['Location'] = implode(', ', $parts);
+                    $specs['Vehicle Location'] = implode(', ', $parts);
                 }
             }
         }

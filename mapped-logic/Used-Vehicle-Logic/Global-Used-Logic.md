@@ -294,7 +294,7 @@ Identical to new vehicles.
 | `pa_fender-flares` | `YES` | Always |
 | `pa_led-accents` | `YES` + `LIGHT BAR` / `NO` | YES: Denago. NO: all others |
 | `pa_lift-kit` | `3 INCH` / `NO` | From `isLifted` |
-| `pa_location` | `{City} {State}` | Always |
+| `pa_vehicle-location` | `{City} {State}` | Always |
 | `pa_{make}-cart-colors` | `{cartColor}` | Known brands only |
 | `pa_{make}-seat-colors` | `{seatColor}` | Known brands only |
 | `pa_cart-color` | `{cartColor}` | Unknown brands fallback |
@@ -319,8 +319,8 @@ Identical rules to new vehicles. Same make-based logic for all attributes.
 
 | Taxonomy | Value |
 |---|---|
-| Location (city) | City term ID |
-| Location (state) | State term ID |
+| Vehicle Location (city) | City term ID |
+| Vehicle Location (state) | State term ID |
 | Manufacturer | Make term (aliases: Swift EV->SWIFT, Star->STAR EV) |
 | Model | `{MAKE} {MODEL}` term (aliases: DS->DS ELECTRIC, etc.) |
 | Sound System | `{MAKE} SOUND SYSTEM` term |

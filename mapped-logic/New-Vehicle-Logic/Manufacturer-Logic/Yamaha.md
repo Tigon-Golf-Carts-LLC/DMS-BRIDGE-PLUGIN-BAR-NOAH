@@ -165,7 +165,7 @@ These override the global attribute defaults from Global-New-Logic.md:
 | `pa_fender-flares` | inherit (`YES`) | |
 | `pa_led-accents` | **NO** | Non-Denago brand |
 | `pa_lift-kit` | inherit | |
-| `pa_location` | inherit | |
+| `pa_vehicle-location` | inherit | |
 | `pa_yamaha-cart-colors` | `{cartColor}` from Yamaha palette | Yamaha-specific attribute slug |
 | `pa_yamaha-seat-colors` | `{seatColor}` from Yamaha palette | Yamaha-specific attribute slug |
 | `pa_sound-system` | `YAMAHA(R) SOUND SYSTEM` | Brand-specific |
@@ -219,8 +219,8 @@ Categories are determined by DMS data (no converter defaults):
 
 | Taxonomy | Value |
 |---|---|
-| Location (city) | inherit |
-| Location (state) | inherit |
+| Vehicle Location (city) | inherit |
+| Vehicle Location (state) | inherit |
 | Manufacturer | `YAMAHA(R)` |
 | Model | `YAMAHA(R) {MODEL}` (uses model aliases, see below) |
 | Sound System | `YAMAHA(R) SOUND SYSTEM` |

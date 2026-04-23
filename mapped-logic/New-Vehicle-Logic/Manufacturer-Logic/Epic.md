@@ -157,7 +157,7 @@ These override the global attribute defaults from Global-New-Logic.md:
 | `pa_fender-flares` | inherit (`YES`) | |
 | `pa_led-accents` | **NO** | Epic override (Abstract_Cart.php:947-951) |
 | `pa_lift-kit` | inherit | |
-| `pa_location` | inherit | |
+| `pa_vehicle-location` | inherit | |
 | `pa_epic-cart-colors` | `{cartColor}` from Epic palette | Epic-specific attribute slug |
 | `pa_epic-seat-colors` | `{seatColor}` from Epic palette | Epic-specific attribute slug |
 | `pa_sound-system` | `EPIC(R) SOUND SYSTEM` | Epic override |
@@ -221,8 +221,8 @@ All Epic models receive these categories (based on shared defaults: `isElectric=
 
 | Taxonomy | Value |
 |---|---|
-| Location (city) | inherit |
-| Location (state) | inherit |
+| Vehicle Location (city) | inherit |
+| Vehicle Location (state) | inherit |
 | Manufacturer | `EPIC(R)` |
 | Model | `EPIC(R) {MODEL}` |
 | Sound System | `EPIC(R) SOUND SYSTEM` |

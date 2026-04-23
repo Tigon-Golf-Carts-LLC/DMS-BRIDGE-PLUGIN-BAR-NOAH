@@ -160,7 +160,7 @@ These override the global attribute defaults from Global-New-Logic.md:
 | `pa_fender-flares` | inherit (`YES`) | |
 | `pa_led-accents` | **NO** | Non-Denago brand |
 | `pa_lift-kit` | inherit | |
-| `pa_location` | inherit | |
+| `pa_vehicle-location` | inherit | |
 | `pa_bintelli-cart-colors` | `{cartColor}` from Bintelli palette | Bintelli-specific attribute slug |
 | `pa_bintelli-seat-colors` | `{seatColor}` from Bintelli palette | Bintelli-specific attribute slug |
 | `pa_sound-system` | `BINTELLI(R) SOUND SYSTEM` | Brand-specific |
@@ -214,8 +214,8 @@ Categories are determined by DMS data (no converter defaults):
 
 | Taxonomy | Value |
 |---|---|
-| Location (city) | inherit |
-| Location (state) | inherit |
+| Vehicle Location (city) | inherit |
+| Vehicle Location (state) | inherit |
 | Manufacturer | `BINTELLI(R)` |
 | Model | `BINTELLI(R) {MODEL}` |
 | Sound System | `BINTELLI(R) SOUND SYSTEM` |

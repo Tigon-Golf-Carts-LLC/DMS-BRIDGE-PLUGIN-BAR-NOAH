@@ -107,7 +107,7 @@ All values inherit.
 | `pa_fender-flares` | inherit (`YES`) |
 | `pa_led-accents` | **NO** |
 | `pa_lift-kit` | From API payload |
-| `pa_location` | inherit |
+| `pa_vehicle-location` | inherit |
 | `pa_ezgo-cart-colors` | From API payload |
 | `pa_ezgo-seat-colors` | From API payload |
 | `pa_sound-system` | `EZGO(R) SOUND SYSTEM` |

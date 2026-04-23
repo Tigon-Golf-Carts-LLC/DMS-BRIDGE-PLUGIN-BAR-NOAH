@@ -167,7 +167,7 @@ These override the global attribute defaults from Global-New-Logic.md:
 | `pa_fender-flares` | inherit (`YES`) | |
 | `pa_led-accents` | **NO** | Non-Denago brand |
 | `pa_lift-kit` | inherit | |
-| `pa_location` | inherit | |
+| `pa_vehicle-location` | inherit | |
 | `pa_ezgo-cart-colors` | `{cartColor}` from EZGO palette | E-Z-GO-specific attribute slug (uses `ezgo`, not `ez-go`) |
 | `pa_ezgo-seat-colors` | `{seatColor}` from EZGO palette | E-Z-GO-specific attribute slug (uses `ezgo`, not `ez-go`) |
 | `pa_sound-system` | `EZGO(R) SOUND SYSTEM` | Brand-specific |
@@ -223,8 +223,8 @@ Categories are determined by DMS data (no converter defaults).
 
 | Taxonomy | Value |
 |---|---|
-| Location (city) | inherit |
-| Location (state) | inherit |
+| Vehicle Location (city) | inherit |
+| Vehicle Location (state) | inherit |
 | Manufacturer | `EZGO(R)` |
 | Model | `EZ-GO(R) {MODEL}` (uses `EZ-GO(R)` prefix, not `EZGO(R)`) |
 | Sound System | `EZGO(R) SOUND SYSTEM` |

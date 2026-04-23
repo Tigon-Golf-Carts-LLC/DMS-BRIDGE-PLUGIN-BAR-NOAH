@@ -138,7 +138,7 @@ Below is the COMPLETE per-model mapping. Every meta key is listed with either th
 | `pa_fender-flares` | inherit (`YES`) |
 | `pa_led-accents` | inherit (`YES` + `LIGHT BAR`) |
 | `pa_lift-kit` | `NO` |
-| `pa_location` | inherit |
+| `pa_vehicle-location` | inherit |
 | `pa_denago-cart-colors` | `{cartColor}` |
 | `pa_denago-seat-colors` | inherit (`Stone`) |
 | `pa_sound-system` | inherit (`DENAGO(R) SOUND SYSTEM`) |
@@ -303,7 +303,7 @@ Black, Blue, Champagne, Gray, Lava, White
 | `pa_fender-flares` | inherit (`YES`) |
 | `pa_led-accents` | inherit (`YES` + `LIGHT BAR`) |
 | `pa_lift-kit` | `3 INCH` |
-| `pa_location` | inherit |
+| `pa_vehicle-location` | inherit |
 | `pa_denago-cart-colors` | `{cartColor}` |
 | `pa_denago-seat-colors` | inherit (`Stone`) |
 | `pa_sound-system` | inherit (`DENAGO(R) SOUND SYSTEM`) |
@@ -468,7 +468,7 @@ Black, Blue, Gray, Lava, White, Verdant
 | `pa_fender-flares` | inherit (`YES`) |
 | `pa_led-accents` | inherit (`YES` + `LIGHT BAR`) |
 | `pa_lift-kit` | `3 INCH` |
-| `pa_location` | inherit |
+| `pa_vehicle-location` | inherit |
 | `pa_denago-cart-colors` | `{cartColor}` |
 | `pa_denago-seat-colors` | inherit (`Stone`) |
 | `pa_sound-system` | inherit (`DENAGO(R) SOUND SYSTEM`) |
@@ -595,7 +595,7 @@ All values inherit.
 | `pa_fender-flares` | inherit (`YES`) |
 | `pa_led-accents` | inherit (`YES` + `LIGHT BAR`) |
 | `pa_lift-kit` | From API payload |
-| `pa_location` | inherit |
+| `pa_vehicle-location` | inherit |
 | `pa_denago-cart-colors` | From API payload |
 | `pa_denago-seat-colors` | From API payload |
 | `pa_sound-system` | inherit (`DENAGO(R) SOUND SYSTEM`) |
@@ -713,7 +713,7 @@ All values inherit.
 | `pa_fender-flares` | inherit (`YES`) |
 | `pa_led-accents` | inherit (`YES` + `LIGHT BAR`) |
 | `pa_lift-kit` | From API payload |
-| `pa_location` | inherit |
+| `pa_vehicle-location` | inherit |
 | `pa_denago-cart-colors` | From API payload |
 | `pa_denago-seat-colors` | From API payload |
 | `pa_sound-system` | inherit (`DENAGO(R) SOUND SYSTEM`) |
@@ -831,7 +831,7 @@ All values inherit.
 | `pa_fender-flares` | inherit (`YES`) |
 | `pa_led-accents` | inherit (`YES` + `LIGHT BAR`) |
 | `pa_lift-kit` | From API payload |
-| `pa_location` | inherit |
+| `pa_vehicle-location` | inherit |
 | `pa_denago-cart-colors` | From API payload |
 | `pa_denago-seat-colors` | From API payload |
 | `pa_sound-system` | inherit (`DENAGO(R) SOUND SYSTEM`) |
@@ -949,7 +949,7 @@ All values inherit.
 | `pa_fender-flares` | inherit (`YES`) |
 | `pa_led-accents` | inherit (`YES` + `LIGHT BAR`) |
 | `pa_lift-kit` | From API payload |
-| `pa_location` | inherit |
+| `pa_vehicle-location` | inherit |
 | `pa_denago-cart-colors` | From API payload |
 | `pa_denago-seat-colors` | From API payload |
 | `pa_sound-system` | inherit (`DENAGO(R) SOUND SYSTEM`) |
@@ -1067,7 +1067,7 @@ All values inherit.
 | `pa_fender-flares` | inherit (`YES`) |
 | `pa_led-accents` | inherit (`YES` + `LIGHT BAR`) |
 | `pa_lift-kit` | From API payload |
-| `pa_location` | inherit |
+| `pa_vehicle-location` | inherit |
 | `pa_denago-cart-colors` | From API payload |
 | `pa_denago-seat-colors` | From API payload |
 | `pa_sound-system` | inherit (`DENAGO(R) SOUND SYSTEM`) |

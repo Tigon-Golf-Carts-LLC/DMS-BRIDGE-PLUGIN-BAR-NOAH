@@ -157,7 +157,7 @@ These override the global attribute defaults from Global-New-Logic.md:
 | `pa_fender-flares` | inherit (`YES`) | |
 | `pa_led-accents` | **NO** | Evolution override (Abstract_Cart.php:947-951) |
 | `pa_lift-kit` | inherit | |
-| `pa_location` | inherit | |
+| `pa_vehicle-location` | inherit | |
 | `pa_evolution-cart-colors` | `{cartColor}` from Evolution palette | Evolution-specific attribute slug |
 | `pa_evolution-seat-colors` | `{seatColor}` from Evolution palette | Evolution-specific attribute slug |
 | `pa_sound-system` | `EVOLUTION(R) SOUND SYSTEM` | Evolution override |
@@ -219,8 +219,8 @@ All Evolution models receive these categories (based on shared defaults: `isElec
 
 | Taxonomy | Value |
 |---|---|
-| Location (city) | inherit |
-| Location (state) | inherit |
+| Vehicle Location (city) | inherit |
+| Vehicle Location (state) | inherit |
 | Manufacturer | `EVOLUTION(R)` |
 | Model | `EVOLUTION(R) {MODEL}` |
 | Sound System | `EVOLUTION(R) SOUND SYSTEM` |

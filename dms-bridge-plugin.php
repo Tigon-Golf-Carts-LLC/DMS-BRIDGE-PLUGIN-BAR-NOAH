@@ -4267,7 +4267,14 @@ function tigon_dms_get_dms_product_data($product_id) {
     $specs = get_post_meta($product_id, '_dms_cart_specs', true);
     $images = get_post_meta($product_id, '_dms_cart_images', true);
     $warranty = get_post_meta($product_id, '_dms_cart_warranty', true);
-    
+
+    // Rename legacy spec key after the attribute rename (Location -> Vehicle Location)
+    if (is_array($specs) && isset($specs['Location']) && !isset($specs['Vehicle Location'])) {
+        $specs['Vehicle Location'] = $specs['Location'];
+        unset($specs['Location']);
+        update_post_meta($product_id, '_dms_cart_specs', $specs);
+    }
+
     // Fallback: If structured meta doesn't exist, parse from full payload
     if (empty($specs) || empty($images)) {
         $payload_json = get_post_meta($product_id, '_dms_payload', true);
@@ -5478,3 +5485,92 @@ function tigon_dms_admin_sync_trigger()
 // Hook after all taxonomies are registered (priority 99) so custom taxonomies are available
 add_action('admin_init', 'tigon_dms_admin_sync_trigger', 99);
 add_action('init', 'tigon_dms_admin_sync_trigger', 99);
+
+/**
+ * Admin-only migration: rewrite stale _product_attributes meta after the
+ * pa_location -> pa_vehicle-location attribute rename in WooCommerce.
+ *
+ * WooCommerce's "rename attribute" UI updates wp_term_taxonomy.taxonomy and
+ * keeps term relationships intact, but it does NOT touch the serialized
+ * _product_attributes postmeta on each product. That postmeta still has
+ * pa_location as the array key, which makes the product appear to have no
+ * Vehicle Location on the storefront even though the term relationship exists.
+ *
+ * Visit /wp-admin/?run_dms_location_attribute_migration=1 while logged in as
+ * an admin to run it. Safe to re-run (idempotent).
+ */
+function tigon_dms_location_attribute_migration()
+{
+    if (!isset($_GET['run_dms_location_attribute_migration']) || $_GET['run_dms_location_attribute_migration'] !== '1') {
+        return;
+    }
+
+    if (!is_admin() && !defined('WP_DEBUG')) {
+        return;
+    }
+
+    if (!is_user_logged_in() || !current_user_can('manage_options')) {
+        wp_die('You do not have permission to run this migration.');
+    }
+
+    if (!headers_sent()) {
+        header('Content-Type: text/plain; charset=utf-8');
+        status_header(200);
+    }
+
+    $old_taxonomy = 'pa_location';
+    $new_taxonomy = 'pa_vehicle-location';
+    $old_spec_key = 'Location';
+    $new_spec_key = 'Vehicle Location';
+
+    $product_ids = get_posts(array(
+        'post_type'      => 'product',
+        'post_status'    => 'any',
+        'posts_per_page' => -1,
+        'fields'         => 'ids',
+        'no_found_rows'  => true,
+    ));
+
+    echo "DMS Location Attribute Migration\n";
+    echo "================================\n\n";
+    echo "Scanning " . count($product_ids) . " products...\n\n";
+
+    $attrs_migrated = 0;
+    $specs_migrated = 0;
+
+    foreach ($product_ids as $product_id) {
+        // 1. Rewrite serialized _product_attributes key pa_location -> pa_vehicle-location
+        $product_attributes = get_post_meta($product_id, '_product_attributes', true);
+        if (is_array($product_attributes) && isset($product_attributes[$old_taxonomy])) {
+            $entry = $product_attributes[$old_taxonomy];
+            if (isset($entry['name']) && $entry['name'] === $old_taxonomy) {
+                $entry['name'] = $new_taxonomy;
+            }
+            unset($product_attributes[$old_taxonomy]);
+            if (!isset($product_attributes[$new_taxonomy])) {
+                $product_attributes[$new_taxonomy] = $entry;
+            }
+            update_post_meta($product_id, '_product_attributes', $product_attributes);
+            $attrs_migrated++;
+        }
+
+        // 2. Rewrite _dms_cart_specs key Location -> Vehicle Location
+        $specs = get_post_meta($product_id, '_dms_cart_specs', true);
+        if (is_array($specs) && isset($specs[$old_spec_key]) && !isset($specs[$new_spec_key])) {
+            $specs[$new_spec_key] = $specs[$old_spec_key];
+            unset($specs[$old_spec_key]);
+            update_post_meta($product_id, '_dms_cart_specs', $specs);
+            $specs_migrated++;
+        }
+    }
+
+    echo "SUCCESS\n\n";
+    echo "_product_attributes rewritten:    $attrs_migrated\n";
+    echo "_dms_cart_specs rewritten:        $specs_migrated\n";
+    echo "\nNote: term relationships in wp_term_relationships are handled\n";
+    echo "automatically by WooCommerce when the attribute was renamed.\n";
+
+    exit;
+}
+add_action('admin_init', 'tigon_dms_location_attribute_migration', 1);
+add_action('init', 'tigon_dms_location_attribute_migration', 1);

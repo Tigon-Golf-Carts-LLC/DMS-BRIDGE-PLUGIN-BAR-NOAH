@@ -164,7 +164,7 @@ These override the global attribute defaults from Global-New-Logic.md:
 | `pa_fender-flares` | inherit (`YES`) | |
 | `pa_led-accents` | **NO** | Non-Denago brand |
 | `pa_lift-kit` | inherit | |
-| `pa_location` | inherit | |
+| `pa_vehicle-location` | inherit | |
 | `pa_club-car-cart-colors` | `{cartColor}` from Club Car palette | Club Car-specific attribute slug |
 | `pa_club-car-seat-colors` | `{seatColor}` from Club Car palette | Club Car-specific attribute slug |
 | `pa_sound-system` | `CLUB CAR(R) SOUND SYSTEM` | Brand-specific |
@@ -218,8 +218,8 @@ Categories are determined by DMS data (no converter defaults):
 
 | Taxonomy | Value |
 |---|---|
-| Location (city) | inherit |
-| Location (state) | inherit |
+| Vehicle Location (city) | inherit |
+| Vehicle Location (state) | inherit |
 | Manufacturer | `CLUB CAR(R)` |
 | Model | `CLUB CAR(R) {MODEL}` (uses model aliases, see below) |
 | Sound System | `CLUB CAR(R) SOUND SYSTEM` |

@@ -267,7 +267,7 @@ The table below lists every meta key in the Database_Object and indicates whethe
 | `pa_fender-flares` | No | `YES` |
 | `pa_led-accents` | No | Make-driven (YES: Denago. NO: all others) |
 | `pa_lift-kit` | No | From DMS `isLifted` |
-| `pa_location` | No | `{City} {State}` |
+| `pa_vehicle-location` | No | `{City} {State}` |
 | `pa_{make}-cart-colors` | No | From DMS `cartColor` |
 | `pa_{make}-seat-colors` | No | From DMS `seatColor` |
 | `pa_cart-color` | No | From DMS (unknown brands fallback) |
@@ -288,8 +288,8 @@ The table below lists every meta key in the Database_Object and indicates whethe
 
 | Taxonomy | Model-Affected? | Value |
 |---|---|---|
-| Location (city) | No | City term ID |
-| Location (state) | No | State term ID |
+| Vehicle Location (city) | No | City term ID |
+| Vehicle Location (state) | No | State term ID |
 | Manufacturer | No | Make term |
 | Model | **YES** | `{MAKE} {MODEL}` term (with aliases) |
 | Sound System | No | `{MAKE} SOUND SYSTEM` term |

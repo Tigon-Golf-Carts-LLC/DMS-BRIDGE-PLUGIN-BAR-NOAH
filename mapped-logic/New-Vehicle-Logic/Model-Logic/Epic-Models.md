@@ -172,7 +172,7 @@ Black, Charcoal Gray, Dark Blue, Light Blue, Matte Black, Red Pearl, Silver, Whi
 | `pa_fender-flares` | `YES` |
 | `pa_led-accents` | `NO` |
 | `pa_lift-kit` | `3 INCH` |
-| `pa_location` | `{City} {State}` |
+| `pa_vehicle-location` | `{City} {State}` |
 | `pa_epic-cart-colors` | `{CART_COLOR}` UPPERCASED |
 | `pa_epic-seat-colors` | `BLACK` |
 | `pa_sound-system` | `EPIC(R) SOUND SYSTEM` |
@@ -250,8 +250,8 @@ Black, Charcoal Gray, Dark Blue, Light Blue, Matte Black, Red Pearl, Silver, Whi
 
 | Taxonomy | Value |
 |---|---|
-| Location (city) | City term ID |
-| Location (state) | State term ID |
+| Vehicle Location (city) | City term ID |
+| Vehicle Location (state) | State term ID |
 | Manufacturer | `EPIC(R)` |
 | Model | `EPIC(R) E40L` |
 | Sound System | `EPIC(R) SOUND SYSTEM` |
@@ -433,7 +433,7 @@ Black, Charcoal Gray, Dark Blue, Light Blue, Matte Black, Red Pearl, Silver, Whi
 | `pa_fender-flares` | `YES` |
 | `pa_led-accents` | `NO` |
 | `pa_lift-kit` | `NO` |
-| `pa_location` | `{City} {State}` |
+| `pa_vehicle-location` | `{City} {State}` |
 | `pa_epic-cart-colors` | `{CART_COLOR}` UPPERCASED |
 | `pa_epic-seat-colors` | `BLACK` |
 | `pa_sound-system` | `EPIC(R) SOUND SYSTEM` |
@@ -511,8 +511,8 @@ Black, Charcoal Gray, Dark Blue, Light Blue, Matte Black, Red Pearl, Silver, Whi
 
 | Taxonomy | Value |
 |---|---|
-| Location (city) | City term ID |
-| Location (state) | State term ID |
+| Vehicle Location (city) | City term ID |
+| Vehicle Location (state) | State term ID |
 | Manufacturer | `EPIC(R)` |
 | Model | `EPIC(R) E60` |
 | Sound System | `EPIC(R) SOUND SYSTEM` |
@@ -694,7 +694,7 @@ Black, Charcoal Gray, Dark Blue, Light Blue, Matte Black, Red Pearl, Silver, Whi
 | `pa_fender-flares` | `YES` |
 | `pa_led-accents` | `NO` |
 | `pa_lift-kit` | `3 INCH` |
-| `pa_location` | `{City} {State}` |
+| `pa_vehicle-location` | `{City} {State}` |
 | `pa_epic-cart-colors` | `{CART_COLOR}` UPPERCASED |
 | `pa_epic-seat-colors` | `BLACK` |
 | `pa_sound-system` | `EPIC(R) SOUND SYSTEM` |
@@ -772,8 +772,8 @@ Black, Charcoal Gray, Dark Blue, Light Blue, Matte Black, Red Pearl, Silver, Whi
 
 | Taxonomy | Value |
 |---|---|
-| Location (city) | City term ID |
-| Location (state) | State term ID |
+| Vehicle Location (city) | City term ID |
+| Vehicle Location (state) | State term ID |
 | Manufacturer | `EPIC(R)` |
 | Model | `EPIC(R) E60L` |
 | Sound System | `EPIC(R) SOUND SYSTEM` |

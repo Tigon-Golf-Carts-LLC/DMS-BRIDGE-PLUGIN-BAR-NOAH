@@ -62,7 +62,7 @@ class Product_Archive_Extension
 
         if (wp_doing_ajax() && isset($prdctfltr_global['active_filters'])) {
 
-            $location = $prdctfltr_global['active_filters']['location'] ?? [''];
+            $location = $prdctfltr_global['active_filters']['vehicle-location'] ?? [''];
             switch($location[0] ?? '') {
                 case 'hatfield':
                 case 'pocono':
@@ -110,7 +110,7 @@ class Product_Archive_Extension
         }
 
         if ((!is_admin() && is_archive() && $query->get('posts_per_page') === '16')) {
-            $location = $query->get('location') ?? [''];
+            $location = $query->get('vehicle-location') ?? [''];
             switch($location[0] ?? '') {
                 case 'hatfield':
                 case 'pocono':
