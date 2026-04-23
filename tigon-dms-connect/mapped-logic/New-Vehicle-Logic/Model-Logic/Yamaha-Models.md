@@ -103,7 +103,7 @@ All values inherit.
 | `pa_fender-flares` | inherit (`YES`) |
 | `pa_led-accents` | **NO** |
 | `pa_lift-kit` | From API payload |
-| `pa_location` | inherit |
+| `pa_vehicle-location` | inherit |
 | `pa_yamaha-cart-colors` | From API payload |
 | `pa_yamaha-seat-colors` | From API payload |
 | `pa_sound-system` | `YAMAHA(R) SOUND SYSTEM` |

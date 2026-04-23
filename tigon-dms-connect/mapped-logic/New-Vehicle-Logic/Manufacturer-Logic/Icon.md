@@ -162,7 +162,7 @@ These override the global attribute defaults from Global-New-Logic.md:
 | `pa_fender-flares` | inherit (`YES`) | |
 | `pa_led-accents` | **NO** | Icon override (Abstract_Cart.php:947-951) |
 | `pa_lift-kit` | inherit | |
-| `pa_location` | inherit | |
+| `pa_vehicle-location` | inherit | |
 | `pa_icon-cart-colors` | `{cartColor}` from Icon palette | Icon-specific attribute slug |
 | `pa_icon-seat-colors` | `{seatColor}` from Icon palette | Icon-specific attribute slug |
 | `pa_sound-system` | `ICON(R) SOUND SYSTEM` | Icon override |
@@ -235,8 +235,8 @@ Icon categories vary by series. The table below shows which categories apply to 
 
 | Taxonomy | Value |
 |---|---|
-| Location (city) | inherit |
-| Location (state) | inherit |
+| Vehicle Location (city) | inherit |
+| Vehicle Location (state) | inherit |
 | Manufacturer | `ICON(R)` |
 | Model | `ICON(R) {MODEL}` |
 | Sound System | `ICON(R) SOUND SYSTEM` |

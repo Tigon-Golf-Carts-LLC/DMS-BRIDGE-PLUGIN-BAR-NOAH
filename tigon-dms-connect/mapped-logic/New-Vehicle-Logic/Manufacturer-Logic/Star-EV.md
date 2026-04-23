@@ -167,7 +167,7 @@ These override the global attribute defaults from Global-New-Logic.md:
 | `pa_fender-flares` | inherit (`YES`) | |
 | `pa_led-accents` | **NO** | Non-Denago brand |
 | `pa_lift-kit` | inherit | |
-| `pa_location` | inherit | |
+| `pa_vehicle-location` | inherit | |
 | `pa_star-ev-cart-colors` | `{cartColor}` from Star EV palette | Star EV-specific attribute slug |
 | `pa_star-ev-seat-colors` | `{seatColor}` from Star EV palette | Star EV-specific attribute slug |
 | `pa_sound-system` | `STAR(R) SOUND SYSTEM` | Brand-specific |
@@ -221,8 +221,8 @@ Categories are determined by DMS data (no converter defaults):
 
 | Taxonomy | Value |
 |---|---|
-| Location (city) | inherit |
-| Location (state) | inherit |
+| Vehicle Location (city) | inherit |
+| Vehicle Location (state) | inherit |
 | Manufacturer | `STAR EV(R)` (alias: Star -> `STAR EV(R)`) |
 | Model | `STAR EV(R) {MODEL}` (uses `STAR EV(R)` prefix) |
 | Sound System | `STAR(R) SOUND SYSTEM` |

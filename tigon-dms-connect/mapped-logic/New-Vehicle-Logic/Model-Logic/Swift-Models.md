@@ -141,7 +141,7 @@ Battery brand is `ECO` (not CATL as mentioned in manufacturer doc - the converte
 | `pa_fender-flares` | inherit (`YES`) |
 | `pa_led-accents` | inherit (`NO`) |
 | `pa_lift-kit` | `3 INCH` |
-| `pa_location` | inherit |
+| `pa_vehicle-location` | inherit |
 | `pa_swift-cart-colors` | `{cartColor}` |
 | `pa_swift-seat-colors` | `2 Tone` |
 | `pa_sound-system` | `NO` |
@@ -312,7 +312,7 @@ Black, Blue, Champagne, Red, White
 | `pa_fender-flares` | inherit (`YES`) |
 | `pa_led-accents` | inherit (`NO`) |
 | `pa_lift-kit` | `NO` |
-| `pa_location` | inherit |
+| `pa_vehicle-location` | inherit |
 | `pa_swift-cart-colors` | `{cartColor}` |
 | `pa_swift-seat-colors` | `2 Tone` |
 | `pa_sound-system` | `NO` |
@@ -483,7 +483,7 @@ Black, Blue, Champagne, Red, Yellow
 | `pa_fender-flares` | inherit (`YES`) |
 | `pa_led-accents` | inherit (`NO`) |
 | `pa_lift-kit` | `3 INCH` |
-| `pa_location` | inherit |
+| `pa_vehicle-location` | inherit |
 | `pa_swift-cart-colors` | `{cartColor}` |
 | `pa_swift-seat-colors` | `2 Tone` |
 | `pa_sound-system` | `NO` |
@@ -654,7 +654,7 @@ Black, Blue, Champagne, Red, Yellow
 | `pa_fender-flares` | inherit (`YES`) |
 | `pa_led-accents` | inherit (`NO`) |
 | `pa_lift-kit` | `NO` |
-| `pa_location` | inherit |
+| `pa_vehicle-location` | inherit |
 | `pa_swift-cart-colors` | `{cartColor}` |
 | `pa_swift-seat-colors` | `2 Tone` |
 | `pa_sound-system` | `NO` |

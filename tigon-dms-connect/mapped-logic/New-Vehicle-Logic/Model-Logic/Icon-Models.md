@@ -108,7 +108,7 @@ All values inherit.
 | `pa_fender-flares` | inherit (`YES`) |
 | `pa_led-accents` | **NO** |
 | `pa_lift-kit` | From converter |
-| `pa_location` | inherit |
+| `pa_vehicle-location` | inherit |
 | `pa_icon-cart-colors` | From i-Series palette (13 colors) |
 | `pa_icon-seat-colors` | `2 Tone` |
 | `pa_sound-system` | `ICON(R) SOUND SYSTEM` |

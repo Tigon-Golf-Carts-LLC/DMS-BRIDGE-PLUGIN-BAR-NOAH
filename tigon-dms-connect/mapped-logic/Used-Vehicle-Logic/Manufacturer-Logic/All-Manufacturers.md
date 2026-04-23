@@ -112,7 +112,7 @@ The manufacturer-specific logic that applies to used carts is **identical** to n
 | `pa_extended-top` | From DMS | Inherited |
 | `pa_fender-flares` | `YES` | Inherited |
 | `pa_lift-kit` | From DMS `isLifted` | Inherited |
-| `pa_location` | `{City} {State}` | Inherited |
+| `pa_vehicle-location` | `{City} {State}` | Inherited |
 | `pa_passengers` | `{N} SEATER` | Inherited |
 | `pa_receiver-hitch` | `NO` | Inherited |
 | `pa_return-policy` | `90 DAY` + `YES` | Inherited |

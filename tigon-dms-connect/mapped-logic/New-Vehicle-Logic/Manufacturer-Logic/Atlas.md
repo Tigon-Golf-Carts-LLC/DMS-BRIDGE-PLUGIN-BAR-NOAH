@@ -161,7 +161,7 @@ These override the global attribute defaults from Global-New-Logic.md:
 | `pa_fender-flares` | inherit (`YES`) | |
 | `pa_led-accents` | **NO** | Non-Denago brand |
 | `pa_lift-kit` | inherit | |
-| `pa_location` | inherit | |
+| `pa_vehicle-location` | inherit | |
 | `pa_cart-color` | `{cartColor}` | Generic fallback (no dedicated Atlas palette) |
 | `pa_seat-color` | `{seatColor}` | Generic fallback (no dedicated Atlas palette) |
 | `pa_sound-system` | `ATLAS(R) SOUND SYSTEM` | Brand-specific |
@@ -215,8 +215,8 @@ Categories are determined by DMS data (no converter defaults):
 
 | Taxonomy | Value |
 |---|---|
-| Location (city) | inherit |
-| Location (state) | inherit |
+| Vehicle Location (city) | inherit |
+| Vehicle Location (state) | inherit |
 | Manufacturer | `ATLAS(R)` |
 | Model | `ATLAS(R) {MODEL}` |
 | Sound System | `ATLAS(R) SOUND SYSTEM` |

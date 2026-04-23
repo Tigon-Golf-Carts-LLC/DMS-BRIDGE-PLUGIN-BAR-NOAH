@@ -153,7 +153,7 @@ Source: `Abstract_Cart.php`, `New_Cart_Converter.php`
 | `pa_fender-flares` | `YES` (inherit) |
 | `pa_led-accents` | **`YES` + `LIGHT BAR`** |
 | `pa_lift-kit` | Model-specific |
-| `pa_location` | inherit |
+| `pa_vehicle-location` | inherit |
 | `pa_denago-cart-colors` | `{cartColor}` from Denago palette: Black, Blue, Champagne, Gray, Lava, White, Verdant |
 | `pa_denago-seat-colors` | `{seatColor}` (default: Stone) |
 | `pa_sound-system` | `DENAGO(R) SOUND SYSTEM` |

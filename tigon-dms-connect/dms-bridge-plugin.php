@@ -304,7 +304,7 @@ function tigon_dms_parse_cart_specs($cart_data) {
         $specs['Hours'] = $cart_data['hour'];
     }
     
-    // Location
+    // Vehicle Location
     if (!empty($cart_data['cartLocation'])) {
         $store_id = $cart_data['cartLocation']['locationId'] ?? '';
         if ($store_id && class_exists('DMS_API')) {
@@ -318,7 +318,7 @@ function tigon_dms_parse_cart_specs($cart_data) {
                     $location_parts[] = $location_data['state'];
                 }
                 if (!empty($location_parts)) {
-                    $specs['Location'] = implode(', ', $location_parts);
+                    $specs['Vehicle Location'] = implode(', ', $location_parts);
                 }
             }
         }
@@ -925,7 +925,14 @@ function tigon_dms_get_dms_product_data($product_id) {
     $specs = get_post_meta($product_id, '_dms_cart_specs', true);
     $images = get_post_meta($product_id, '_dms_cart_images', true);
     $warranty = get_post_meta($product_id, '_dms_cart_warranty', true);
-    
+
+    // Rename legacy spec key after the attribute rename (Location -> Vehicle Location)
+    if (is_array($specs) && isset($specs['Location']) && !isset($specs['Vehicle Location'])) {
+        $specs['Vehicle Location'] = $specs['Location'];
+        unset($specs['Location']);
+        update_post_meta($product_id, '_dms_cart_specs', $specs);
+    }
+
     // Fallback: If structured meta doesn't exist, parse from full payload
     if (empty($specs) || empty($images)) {
         $payload_json = get_post_meta($product_id, '_dms_payload', true);
@@ -1084,7 +1091,7 @@ function tigon_dms_render_additional_info_tab($product_id) {
         'Sound System', 'Lift Kit', 'Receiver Hitch', 'Extended Top',
         'Vehicle Power', 'Vehicle Status', 
         'Serial Number', 'VIN', 'Odometer', 'Hours',
-        'Location', 'Year of Vehicle',
+        'Vehicle Location', 'Year of Vehicle',
         'Drivetrain', 'Passengers' // These may appear in both tabs if needed
     );
     

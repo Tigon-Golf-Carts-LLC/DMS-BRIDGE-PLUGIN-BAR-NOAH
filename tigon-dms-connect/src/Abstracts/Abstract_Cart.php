@@ -958,12 +958,12 @@ abstract class Abstract_Cart
             $this->generated_attributes->attributes['lift-kit']['options'][($this->cart['cartAttributes']['isLifted'] ? '3 INCH' : 'NO')]
         );
 
-        // Location
-        $this->attributes['pa_location'] = $this->generated_attributes->attributes['location']['object'];
+        // Vehicle Location
+        $this->attributes['pa_vehicle-location'] = $this->generated_attributes->attributes['vehicle-location']['object'];
         array_push(
             $this->taxonomy_terms,
-            $this->generated_attributes->attributes['location']['options'][strtoupper(Attributes::$locations[$this->location_id]['city'] . ' ' . Attributes::$locations[$this->location_id]['state'])],
-            $this->generated_attributes->attributes['location']['options'][strtoupper(Attributes::$locations[$this->location_id]['state'])]
+            $this->generated_attributes->attributes['vehicle-location']['options'][strtoupper(Attributes::$locations[$this->location_id]['city'] . ' ' . Attributes::$locations[$this->location_id]['state'])],
+            $this->generated_attributes->attributes['vehicle-location']['options'][strtoupper(Attributes::$locations[$this->location_id]['state'])]
         );
 
         // Make Colors / Seat Colors

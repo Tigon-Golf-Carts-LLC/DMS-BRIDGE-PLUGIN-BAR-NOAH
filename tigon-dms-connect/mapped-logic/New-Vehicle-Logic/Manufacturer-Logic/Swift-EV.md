@@ -163,7 +163,7 @@ These override the global attribute defaults from Global-New-Logic.md:
 | `pa_fender-flares` | inherit (`YES`) | |
 | `pa_led-accents` | **NO** | Swift EV override (Abstract_Cart.php:947-951) |
 | `pa_lift-kit` | inherit | |
-| `pa_location` | inherit | |
+| `pa_vehicle-location` | inherit | |
 | `pa_swift-cart-colors` | `{cartColor}` from Swift palette | Swift-specific attribute slug (uses `swift`, not `swift-ev`) |
 | `pa_swift-seat-colors` | `{seatColor}` from Swift palette | Swift-specific attribute slug (uses `swift`, not `swift-ev`) |
 | `pa_sound-system` | `SWIFT EV(R) SOUND SYSTEM` | Swift EV override |
@@ -225,8 +225,8 @@ All Swift EV models receive these categories (based on shared defaults: `isElect
 
 | Taxonomy | Value |
 |---|---|
-| Location (city) | inherit |
-| Location (state) | inherit |
+| Vehicle Location (city) | inherit |
+| Vehicle Location (state) | inherit |
 | Manufacturer | `SWIFT` (alias: Swift EV -> SWIFT) |
 | Model | `SWIFT EV(R) {MODEL}` |
 | Sound System | `SWIFT EV(R) SOUND SYSTEM` |
