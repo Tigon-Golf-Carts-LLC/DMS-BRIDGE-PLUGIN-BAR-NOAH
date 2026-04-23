@@ -2,8 +2,6 @@
 
 namespace Tigon\DmsConnect\Includes;
 
-use ftp;
-
 class Product_Fields
 {
     /**

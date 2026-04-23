@@ -23,13 +23,17 @@
 
     const cartId = dmsWooData.cartId;
     const imageUrls = dmsWooData.imageUrls || [];
-    
-    // Get S3 URLs from API service (with fallback)
-    const s3CartBase = (window.DMSApiService && window.DMSApiService.s3Urls) 
-        ? window.DMSApiService.s3Urls.carts 
-        : 'https://s3.amazonaws.com/prod.docs.s3/carts/'; // Fallback
-    const s3StickerBase = (window.DMSApiService && window.DMSApiService.s3Urls) 
-        ? window.DMSApiService.s3Urls.windowStickers 
+    // Local WordPress attachment URLs (already downloaded during sync)
+    const localImageUrls = dmsWooData.localImageUrls || [];
+    const hasLocalImages = localImageUrls.length > 0;
+
+    // Get S3 URLs from API service (with fallback) — only used for window stickers
+    // and as a last-resort fallback when no local images exist
+    const s3CartBase = (window.DMSApiService && window.DMSApiService.s3Urls)
+        ? window.DMSApiService.s3Urls.carts
+        : 'https://s3.amazonaws.com/test.docs.s3/carts/'; // Fallback
+    const s3StickerBase = (window.DMSApiService && window.DMSApiService.s3Urls)
+        ? window.DMSApiService.s3Urls.windowStickers
         : 'https://s3.amazonaws.com/prod.docs.s3/cart-window-stickers/'; // Fallback
     const windowStickerUrl = s3StickerBase + cartId + '.pdf';
 
@@ -124,9 +128,21 @@
     }
 
     /**
-     * Inject cart images into the Product Image gallery
+     * Inject cart images into the Product Image gallery.
+     *
+     * When WooCommerce already has locally-downloaded images attached to the
+     * product (featured + gallery), we leave them alone — no injection needed.
+     * The DMS gallery injection only runs as a fallback when no local images
+     * exist but we still have S3 filenames from the DMS payload.
      */
     function injectProductImages() {
+        // If WooCommerce already has local images attached, skip injection
+        // entirely — the native gallery works fine with downloaded images.
+        if (hasLocalImages) {
+            console.log('DMS: Local WooCommerce images present — skipping S3 gallery injection');
+            return true;
+        }
+
         if (!imageUrls.length) {
             return false;
         }
@@ -142,9 +158,12 @@
             return true;
         }
 
+        // Fallback: no local images, use S3 URLs from DMS payload
+        console.log('DMS: No local images — injecting S3 gallery as fallback');
+
         // Build the gallery HTML
         let html = '<div class="dms-product-gallery">';
-        
+
         // Main image (first image selected by default)
         const mainImageUrl = s3CartBase + imageUrls[0];
         html += '<div class="dms-product-main-image">';
@@ -186,7 +205,7 @@
                 if (mainImg && fullUrl) {
                     mainImg.src = fullUrl;
                     mainImg.parentElement.href = fullUrl;
-                    
+
                     // Update active state
                     document.querySelectorAll('.dms-product-thumb').forEach(function(t) {
                         t.classList.remove('active');
@@ -199,7 +218,7 @@
         // Add zoom functionality to main image
         initImageZoom();
 
-        console.log('DMS: Product images injected');
+        console.log('DMS: Product images injected from S3 fallback');
         return true;
     }
 

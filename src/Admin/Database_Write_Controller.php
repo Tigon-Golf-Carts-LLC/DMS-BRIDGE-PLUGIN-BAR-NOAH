@@ -42,13 +42,19 @@ final class Database_Write_Controller {
 
         $unique_slug = wp_unique_post_slug(
             $posts['post_name'],
-            $posts['ID'],
+            $post_id,
             $posts['post_status'],
             $posts['post_type'],
             null
         );
         if($unique_slug !== $posts['post_name']) {
             $wpdb->update($wpdb->prefix.'posts', ['post_name' => $unique_slug], ['ID' => $post_id]);
+        }
+
+        // Update WooCommerce product lookup table so prices, stock, and
+        // other meta are visible on the frontend (raw SQL writes bypass WC hooks).
+        if ($post_id && function_exists('tigon_dms_refresh_wc_product_data')) {
+            tigon_dms_refresh_wc_product_data($post_id);
         }
 
         return $post_id;
@@ -65,6 +71,8 @@ final class Database_Write_Controller {
         $result = self::write_database_object($database_object);
 
         if($result) {
+            // Mark product as featured and visible
+            wp_set_object_terms($result, array('featured'), 'product_visibility');
             return ['pid' => $result, 'onWebsite' => true, 'websiteUrl' => get_permalink($result)];
         }
         return new \WP_Error(
@@ -84,6 +92,8 @@ final class Database_Write_Controller {
         $result = self::write_database_object($database_object);
 
         if($result) {
+            // Mark product as featured and visible
+            wp_set_object_terms($result, array('featured'), 'product_visibility');
             return ['pid' => $result, 'onWebsite' => true, 'websiteUrl' => get_permalink($result)];
         }
         return new \WP_Error(

@@ -10,24 +10,37 @@ class Ajax_Settings_Controller
 
     public static function save_settings($input)
     {
+        check_ajax_referer('tigon_dms_run_import_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
         if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest') {
             header("Content-Type: application/json; charset=utf-8", true);
             global $wpdb;
             $table_name = $wpdb->prefix . 'tigon_dms_config';
 
-           // Data from AJAX request
+            // Data from AJAX request
             // AJAX produces unwanted slashes
-            $github_token = stripcslashes($_REQUEST['data']['github_token']);
+            $github_token = stripcslashes($_REQUEST['data']['github_token'] ?? '');
             
-            $dms_url = strtolower(stripcslashes($_REQUEST['data']['dms_url']));
+            $dms_url = strtolower(stripcslashes($_REQUEST['data']['dms_url'] ?? ''));
             if($dms_url && substr($dms_url,0,4) !== 'http') $dms_url = 'https://'.$dms_url;
             if(substr($dms_url,-1) === '/') $dms_url = substr_replace($dms_url,'',-1);
 
-            $user_token = stripcslashes($_REQUEST['data']['user_token']);
+            $user_token = stripcslashes($_REQUEST['data']['user_token'] ?? '');
 
-            $file_source = stripcslashes($_REQUEST['data']['file_source']);
+            $file_source = stripcslashes($_REQUEST['data']['file_source'] ?? '');
             if($file_source && substr($file_source,0,4) !== 'http') $file_source = 'https://'.$file_source;
             if(substr($file_source,-1) === '/') $file_source = substr_replace($file_source,'',-1);
+
+            // Schema templates
+            $schema_name              = stripcslashes($_REQUEST['data']['schema_name'] ?? '');
+            $schema_slug              = stripcslashes($_REQUEST['data']['schema_slug'] ?? '');
+            $schema_image_name        = stripcslashes($_REQUEST['data']['schema_image_name'] ?? '');
+            $schema_monroney_name     = stripcslashes($_REQUEST['data']['schema_monroney_name'] ?? '');
+            $schema_description       = stripcslashes($_REQUEST['data']['schema_description'] ?? '');
+            $schema_short_description = stripcslashes($_REQUEST['data']['schema_short_description'] ?? '');
 
             // Ensure rows exist
             if(!$wpdb->query("SELECT * FROM $table_name WHERE option_name = 'github_token'"))
@@ -45,6 +58,24 @@ class Ajax_Settings_Controller
             if(!$wpdb->query("SELECT * FROM $table_name WHERE option_name = 'file_source'"))
                 $wpdb->insert($table_name, ['option_name' => 'file_source']);
 
+            if(!$wpdb->query("SELECT * FROM $table_name WHERE option_name = 'schema_name'"))
+                $wpdb->insert($table_name, ['option_name' => 'schema_name']);
+
+            if(!$wpdb->query("SELECT * FROM $table_name WHERE option_name = 'schema_slug'"))
+                $wpdb->insert($table_name, ['option_name' => 'schema_slug']);
+
+            if(!$wpdb->query("SELECT * FROM $table_name WHERE option_name = 'schema_image_name'"))
+                $wpdb->insert($table_name, ['option_name' => 'schema_image_name']);
+
+            if(!$wpdb->query("SELECT * FROM $table_name WHERE option_name = 'schema_monroney_name'"))
+                $wpdb->insert($table_name, ['option_name' => 'schema_monroney_name']);
+
+            if(!$wpdb->query("SELECT * FROM $table_name WHERE option_name = 'schema_description'"))
+                $wpdb->insert($table_name, ['option_name' => 'schema_description']);
+
+            if(!$wpdb->query("SELECT * FROM $table_name WHERE option_name = 'schema_short_description'"))
+                $wpdb->insert($table_name, ['option_name' => 'schema_short_description']);
+
             // Write setting to DB
             if(!empty($github_token)) {
                 $wpdb->update($table_name, ['option_value' => $github_token], ['option_name' => 'github_token']);
@@ -60,6 +91,26 @@ class Ajax_Settings_Controller
                 $wpdb->update($table_name, ['option_value' => $file_source], ['option_name' => 'file_source']);
             }
 
+            // Write schema templates to DB (empty values are ignored to avoid clobbering)
+            if($schema_name !== '') {
+                $wpdb->update($table_name, ['option_value' => $schema_name], ['option_name' => 'schema_name']);
+            }
+            if($schema_slug !== '') {
+                $wpdb->update($table_name, ['option_value' => $schema_slug], ['option_name' => 'schema_slug']);
+            }
+            if($schema_image_name !== '') {
+                $wpdb->update($table_name, ['option_value' => $schema_image_name], ['option_name' => 'schema_image_name']);
+            }
+            if($schema_monroney_name !== '') {
+                $wpdb->update($table_name, ['option_value' => $schema_monroney_name], ['option_name' => 'schema_monroney_name']);
+            }
+            if($schema_description !== '') {
+                $wpdb->update($table_name, ['option_value' => $schema_description], ['option_name' => 'schema_description']);
+            }
+            if($schema_short_description !== '') {
+                $wpdb->update($table_name, ['option_value' => $schema_short_description], ['option_name' => 'schema_short_description']);
+            }
+
             echo true;
         } else {
             header("Location: " . $_SERVER["HTTP_REFERER"]);
@@ -68,8 +119,61 @@ class Ajax_Settings_Controller
         exit;
     }
 
+    /**
+     * AJAX handler — save showcase locations and inventory category slugs.
+     */
+    public static function save_locations()
+    {
+        check_ajax_referer('tigon_dms_run_import_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
+        $new_inv_slug  = sanitize_text_field(wp_unslash($_REQUEST['data']['new_inventory_term_slug'] ?? ''));
+        $used_inv_slug = sanitize_text_field(wp_unslash($_REQUEST['data']['used_inventory_term_slug'] ?? ''));
+
+        if ($new_inv_slug !== '') {
+            tigon_dms_set_config('new_inventory_term_slug', $new_inv_slug);
+        }
+        if ($used_inv_slug !== '') {
+            tigon_dms_set_config('used_inventory_term_slug', $used_inv_slug);
+        }
+
+        // Build locations array from submitted rows
+        $raw_locations = $_REQUEST['data']['locations'] ?? [];
+        $locations = [];
+        if (is_array($raw_locations)) {
+            foreach ($raw_locations as $loc) {
+                $key = sanitize_key($loc['key'] ?? '');
+                if ($key === '') {
+                    continue;
+                }
+                $not_in = [];
+                if (!empty($loc['archive_not_in'])) {
+                    $not_in = array_map('intval', array_filter(explode(',', $loc['archive_not_in'])));
+                }
+                $locations[$key] = [
+                    'landing_page'   => intval($loc['landing_page'] ?? 0),
+                    'archive'        => intval($loc['archive'] ?? 0),
+                    'archive_not_in' => $not_in,
+                ];
+            }
+        }
+
+        if (!empty($locations)) {
+            tigon_dms_set_config('showcase_locations', wp_json_encode($locations));
+        }
+
+        wp_send_json_success(['saved' => true]);
+    }
+
     public static function get_dms_props()
     {
+        check_ajax_referer('tigon_dms_run_import_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
         $boolean_svg = preg_replace(
             '/#000000/',
             '#333333',
@@ -207,8 +311,95 @@ class Ajax_Settings_Controller
                 </ul>
             </li>
             <li class="dms-value" code="{pid}">'.$number_svg.'PID</li>
-        </ul> 
+        </ul>
         ';
         exit;
+    }
+
+    /**
+     * Fetch carts from the DMS API and merge into a unified schema.
+     *
+     * Returns every key found across all carts with its observed unique values.
+     */
+    public static function get_full_schema()
+    {
+        check_ajax_referer('tigon_dms_run_import_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
+        $response = wp_remote_post('https://api.tigondms.com/wp-website/get-carts', [
+            'headers' => ['Content-Type' => 'application/json'],
+            'body'    => wp_json_encode(['pageNumber' => 0, 'pageSize' => 20]),
+            'timeout' => 30,
+        ]);
+
+        if (is_wp_error($response)) {
+            wp_send_json_error(['message' => $response->get_error_message()]);
+        }
+
+        $carts = json_decode(wp_remote_retrieve_body($response), true);
+
+        if (!is_array($carts) || empty($carts)) {
+            wp_send_json_error(['message' => 'No carts returned from the API.']);
+        }
+
+        $merged = [];
+        foreach ($carts as $cart) {
+            if (is_object($cart)) {
+                $cart = (array) $cart;
+            }
+            if (is_array($cart)) {
+                self::merge_into($merged, $cart);
+            }
+        }
+
+        wp_send_json_success([
+            'cartCount' => count($carts),
+            'schema'    => $merged,
+        ]);
+    }
+
+    /**
+     * Recursively merge a single cart into the combined schema.
+     */
+    private static function merge_into(array &$target, array $source): void
+    {
+        foreach ($source as $key => $value) {
+            if (is_object($value)) {
+                $value = (array) $value;
+            }
+
+            // Nested associative object — recurse
+            if (is_array($value) && !empty($value) && self::is_assoc($value)) {
+                if (!isset($target[$key]) || !is_array($target[$key]) || isset($target[$key]['_v'])) {
+                    $target[$key] = [];
+                }
+                self::merge_into($target[$key], $value);
+                continue;
+            }
+
+            // Leaf value (primitive or sequential array)
+            if (!isset($target[$key]) || !is_array($target[$key]) || !isset($target[$key]['_v'])) {
+                $target[$key] = ['_v' => []];
+            }
+
+            if (is_array($value)) {
+                foreach ($value as $v) {
+                    if (!in_array($v, $target[$key]['_v'], true)) {
+                        $target[$key]['_v'][] = $v;
+                    }
+                }
+            } else {
+                if (!in_array($value, $target[$key]['_v'], true)) {
+                    $target[$key]['_v'][] = $value;
+                }
+            }
+        }
+    }
+
+    private static function is_assoc(array $arr): bool
+    {
+        return array_keys($arr) !== range(0, count($arr) - 1);
     }
 }

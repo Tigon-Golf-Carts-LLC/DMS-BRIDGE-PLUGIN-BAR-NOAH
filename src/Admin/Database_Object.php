@@ -28,7 +28,12 @@ class Database_Object
             '_thumbnail_id' => ['meta_key' => '_thumbnail_id'],
             '_product_image_gallery' => ['meta_key' => '_product_image_gallery'],
             '_regular_price' => ['meta_key' => '_regular_price'],
+            '_sale_price' => ['meta_key' => '_sale_price'],
             '_price' => ['meta_key' => '_price'],
+            '_weight' => ['meta_key' => '_weight'],
+            '_length' => ['meta_key' => '_length'],
+            '_width' => ['meta_key' => '_width'],
+            '_height' => ['meta_key' => '_height'],
             // Yoast SEO
             '_yoast_wpseo_title' => ['meta_key' => '_yoast_wpseo_title'],
             '_yoast_wpseo_metadesc' => ['meta_key' => '_yoast_wpseo_metadesc'],
@@ -73,6 +78,8 @@ class Database_Object
             '_wc_facebook_sync_enabled' => ['meta_key' => '_wc_facebook_sync_enabled'],
             '_wc_fb_visibility' => ['meta_key' => '_wc_fb_visibility'],
             // Tigon specific
+            '_dms_cart_id' => ['meta_key' => '_dms_cart_id'],
+            '_dms_readiness_missing' => ['meta_key' => '_dms_readiness_missing'],
             'monroney_sticker' => ['meta_key' => 'monroney_sticker'],
             '_monroney_sticker' => ['meta_key' => '_monroney_sticker'],
             'tigonwm' => ['meta_key' => '_tigonwm'],
@@ -139,6 +146,8 @@ class Database_Object
         ?string $facebook_sync = null,
         ?string $facebook_visibility = null,
 
+        ?string $dms_cart_id = null,
+        ?string $dms_readiness_missing = null,
         ?string $monroney_sticker = null,
         ?string $monroney_container_id = null,
         ?string $tigonwm_text = null,
@@ -154,9 +163,12 @@ class Database_Object
         }, str_split($sku))), -14, 14);
         $gui = str_pad($gui, 14, '0', STR_PAD_LEFT);
 
-        // Get first image as main image
+        // Get first image as main image; fall back to placeholder (ID 204304)
         $images = $images??[];
         $featured_image = array_shift($images);
+        if (empty($featured_image)) {
+            $featured_image = 204304;
+        }
         $featured_image_url = wp_get_attachment_image_url($featured_image);
         $images_list = implode(',', $images);
 
@@ -194,8 +206,28 @@ class Database_Object
         if (!empty($attributes)) $this->data['postmeta']['_product_attributes']['meta_value'] = $attributes;
         if (!empty($featured_image)) $this->data['postmeta']['_thumbnail_id']['meta_value'] = $featured_image;
         if (!empty($images_list)) $this->data['postmeta']['_product_image_gallery']['meta_value'] = $images_list;
-        if (!empty($price)) $this->data['postmeta']['_regular_price']['meta_value'] = $price;
-        if (!empty($sale_price)) $this->data['postmeta']['_price']['meta_value'] = $sale_price;
+        // Skip price writes entirely when the Pricing admin page is
+        // managing this product's price (marker meta: _tigon_price_source).
+        $price_managed = ($id && function_exists('tigon_dms_is_price_managed'))
+            ? tigon_dms_is_price_managed($id)
+            : false;
+        if (!$price_managed) {
+            if ($price !== null && $price !== '' && floatval($price) > 0) {
+                $formatted_price = number_format(floatval($price), 2, '.', '');
+                $this->data['postmeta']['_regular_price']['meta_value'] = $formatted_price;
+                $this->data['postmeta']['_price']['meta_value'] = $formatted_price;
+            }
+            if ($sale_price !== null && $sale_price !== '' && floatval($sale_price) > 0 && floatval($sale_price) < floatval($price)) {
+                $formatted_sale = number_format(floatval($sale_price), 2, '.', '');
+                $this->data['postmeta']['_sale_price']['meta_value'] = $formatted_sale;
+                $this->data['postmeta']['_price']['meta_value'] = $formatted_sale;
+            }
+        }
+        // Shipping dimensions (placeholder for golf carts)
+        $this->data['postmeta']['_weight']['meta_value'] = '500';
+        $this->data['postmeta']['_length']['meta_value'] = '96';
+        $this->data['postmeta']['_width']['meta_value'] = '48';
+        $this->data['postmeta']['_height']['meta_value'] = '72';
         // Yoast SEO
         if (!empty($yoast_seo_title)) $this->data['postmeta']['_yoast_wpseo_title']['meta_value'] = $yoast_seo_title;
         if (!empty($meta_description)) $this->data['postmeta']['_yoast_wpseo_metadesc']['meta_value'] = $meta_description;
@@ -240,6 +272,13 @@ class Database_Object
         if (!empty($facebook_sync)) $this->data['postmeta']['_wc_facebook_sync_enabled']['meta_value'] = $facebook_sync;
         if (!empty($facebook_visibility)) $this->data['postmeta']['_wc_fb_visibility']['meta_value'] = $facebook_visibility;
         // Tigon specific
+        if (!empty($dms_cart_id)) $this->data['postmeta']['_dms_cart_id']['meta_value'] = $dms_cart_id;
+        // Track missing readiness fields; clear when product is ready
+        if (!empty($dms_readiness_missing)) {
+            $this->data['postmeta']['_dms_readiness_missing']['meta_value'] = $dms_readiness_missing;
+        } else {
+            $this->data['postmeta']['_dms_readiness_missing']['meta_value'] = '';
+        }
         if (!empty($monroney_sticker)) $this->data['postmeta']['monroney_sticker']['meta_value'] = $monroney_sticker;
         if (!empty($monroney_container_id)) $this->data['postmeta']['_monroney_sticker']['meta_value'] = $monroney_container_id;
         if (!empty($tigonwm_text)) $this->data['postmeta']['tigonwm']['meta_value'] = $tigonwm_text;
@@ -303,19 +342,23 @@ class Database_Object
         global $wpdb;
         require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
 
-        $posts = $wpdb->get_row('SELECT * FROM '.$wpdb->prefix.'_posts WHERE ID = '.$id.';', ARRAY_A);
+        $posts = $wpdb->get_row('SELECT * FROM '.$wpdb->prefix.'posts WHERE ID = '.$id.';', ARRAY_A);
         foreach($posts as $column => $value) {
             $database_object->set_value('posts', $value, $column);
         }
 
-        $postmeta = $wpdb->get_results('SELECT * FROM '.$wpdb->prefix.'_postmeta WHERE post_id = '.$id.';', ARRAY_A);
-        foreach($postmeta as $row) {
-            foreach($row as $column => $value) {
-                $database_object->set_value('postmeta', $value, $column);
+        $postmeta = $wpdb->get_results('SELECT * FROM '.$wpdb->prefix.'postmeta WHERE post_id = '.$id.';', ARRAY_A);
+        foreach ($postmeta as $row) {
+            $meta_key   = $row['meta_key']   ?? null;
+            $meta_value = $row['meta_value'] ?? null;
+
+            // Only map keys that exist in the Database_Object template
+            if ($meta_key !== null && array_key_exists($meta_key, $database_object->data['postmeta'])) {
+                $database_object->set_value('postmeta', $meta_value, $meta_key);
             }
         }
 
-        $term_relationships = $wpdb->get_results('SELECT * FROM '.$wpdb->prefix.'_term_relationships WHERE object_id = '.$id.';', ARRAY_A);
+        $term_relationships = $wpdb->get_results('SELECT * FROM '.$wpdb->prefix.'term_relationships WHERE object_id = '.$id.';', ARRAY_A);
         $terms = [];
         foreach($term_relationships as $row) {
             array_push($terms, $row['term_taxonomy_id']);

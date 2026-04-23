@@ -6,6 +6,7 @@ use Automattic\WooCommerce\Blocks\Utils\Utils;
 use ErrorException;
 use Tigon\DmsConnect\Admin\Used\Cart as UsedCart;
 use Tigon\DmsConnect\Admin\New\Cart as NewCart;
+use Tigon\DmsConnect\Includes\Product_Media;
 use Tigon\DmsConnect\Includes\Utilities;
 use WP_Error;
 use WP_REST_Response;
@@ -18,6 +19,36 @@ class REST_Routes
     }
 
     /**
+     * Resolve a product ID from a request, falling back to SKU lookup.
+     *
+     * @param array $data Request data with 'pid', 'vinNo', 'serialNo'.
+     * @return \WC_Product|null The product, or null if not found.
+     */
+    private static function resolve_product(array &$data): ?\WC_Product
+    {
+        if (!empty($data['pid'])) {
+            $product = wc_get_product($data['pid']);
+            if ($product !== false) {
+                return $product;
+            }
+
+            // PID didn't resolve — try SKU fallback
+            $sku = !empty($data['vinNo']) ? $data['vinNo'] : ($data['serialNo'] ?? '');
+            if ($sku) {
+                $data['pid'] = wc_get_product_id_by_sku($sku);
+                $product = wc_get_product($data['pid']);
+                if ($product !== false) {
+                    return $product;
+                }
+            }
+
+            $data['pid'] = null;
+        }
+
+        return null;
+    }
+
+    /**
      * REST Callback for used CREATABLE
      *
      * @param array|WP_REST_Request $request
@@ -25,11 +56,10 @@ class REST_Routes
      */
     public static function push_used_cart($request)
     {
-        require_once(ABSPATH . 'wp-admin/includes/media.php');
-        require_once(ABSPATH . 'wp-admin/includes/file.php');
-        require_once(ABSPATH . 'wp-admin/includes/image.php');
+        Product_Media::require_media_functions();
         $processed_request = (get_class($request) == 'WP_REST_Request') ? json_decode($request->get_body(), true) : $request;
         if (isset($processed_request['_id']) || isset($processed_request['pid'])) {
+            // If cart is not eligible for website, delete it
             if (
                 !$processed_request['isInStock'] ||
                 !$processed_request['advertising']['needOnWebsite'] ||
@@ -38,28 +68,10 @@ class REST_Routes
                 return self::delete_used_cart($processed_request);
             }
 
-            if ($processed_request['pid']) {
-                $product = wc_get_product($processed_request['pid']);
-                if($product===false) {
-                    $processed_request['pid'] = wc_get_product_id_by_sku($processed_request['vinNo']?$processed_request['vinNo']:$processed_request['serialNo']);
-                    $product = wc_get_product(
-                        $processed_request['pid']
-                    );
-                }
-
-                if($product) {
-                    $featured_image = get_post_thumbnail_id($processed_request['pid']);
-                    wp_delete_post($featured_image, true);
-
-                    $images = $product?->get_gallery_image_ids()??[];
-                    foreach ($images as $i) {
-                        wp_delete_post($i, true);
-                    }
-
-                    $monroney_url = explode('"', get_post_meta($processed_request['pid'])['monroney_sticker'][0])[1];
-                    $monroney = attachment_url_to_postid($monroney_url);
-                    wp_delete_post($monroney, true);
-                } else $processed_request['pid'] = null;
+            // Clear existing media before re-import
+            $product = self::resolve_product($processed_request);
+            if ($product) {
+                Product_Media::delete_product_media((int) $processed_request['pid']);
             }
 
             $used_cart = new UsedCart($processed_request);
@@ -99,61 +111,31 @@ class REST_Routes
     /**
      * REST Callback for used DELETABLE
      *
+     * Fully deletes the product and all associated media.
+     *
      * @param array|WP_REST_Request $request
      * @return WP_REST_Response|WP_Error
      */
     public static function delete_used_cart($request)
     {
-        require_once(ABSPATH . 'wp-admin/includes/media.php');
-        require_once(ABSPATH . 'wp-admin/includes/file.php');
-        require_once(ABSPATH . 'wp-admin/includes/image.php');
+        Product_Media::require_media_functions();
         if (isset($request['pid']) || isset($request['vinNo']) || isset($request['serialNo'])) {
-            // Get attached images
-            $featured = get_post_thumbnail_id($request['pid']);
-            $product = wc_get_product($request['pid']);
-            if($product===false) {
-                $request['pid'] = wc_get_product_id_by_sku($request['vinNo']?$request['vinNo']:$request['serialNo']);
-                $product = wc_get_product(
-                    $request['pid']
-                );
-            }
-            if(!$product) {
+            $product = self::resolve_product($request);
+            if (!$product) {
                 return new \WP_REST_Response('No fight left to fight', 410);
             }
-            $images = $product?->get_gallery_image_ids()??[];
 
-            // Get Monroney PDF
-            $monroney_url = explode('"', get_post_meta($request['pid'])['monroney_sticker'][0])[1];
-            $monroney = attachment_url_to_postid($monroney_url);
+            $pid = (int) $request['pid'];
 
-            array_push($images, $featured);
-            array_push($images, $monroney);
-
-            $result = \Tigon\DmsConnect\Admin\REST_Import_Controller::import_delete(new Database_Object(id: $request['pid']));
-            if (isset($result['errors'])) {
-                $code = 500;
-                $message = $result;
-            } else {
-                // Delete associated images on success
-                foreach ($images as $i) {
-                    wp_delete_post($i, false);
-                }
-                $code = 200;
-                $message = [
-                    'message' => 'Post '.$request['pid'].' deleted successfully',
-                    'pid' => $request['pid'],
-                    'isOnWebsite'=>false
-                ];
-            }
-
-            if (is_wp_error($result)) {
-                return new \WP_Error(500, ['pid' => 0, 'error' => 'Deletion failure', $converted->get_value()]);
-            }
-
-            $result = json_decode($result, true);
+            // Fully delete product and all its media
+            Product_Media::delete_product($pid);
 
             REST_Import_Controller::process_post_import();
-            return new \WP_REST_Response($message, $code);
+            return new \WP_REST_Response([
+                'message'     => 'Post ' . $pid . ' deleted successfully',
+                'pid'         => $pid,
+                'isOnWebsite' => false,
+            ], 200);
         } else
             return new \WP_Error(400, 'Bad Request: Body must be of the form {"pid":######}', $request);
     }
@@ -166,9 +148,7 @@ class REST_Routes
      */
     public static function push_new_cart($request)
     {
-        require_once(ABSPATH . 'wp-admin/includes/media.php');
-        require_once(ABSPATH . 'wp-admin/includes/file.php');
-        require_once(ABSPATH . 'wp-admin/includes/image.php');
+        Product_Media::require_media_functions();
         $processed_request = (is_object($request) && get_class($request) == 'WP_REST_Request') ? json_decode($request->get_body(), true) : $request;
         if (isset($processed_request['_id']) && isset($processed_request['pid']) && (isset($processed_request['vinNo']) || isset($processed_request['serialNo']))) {
             $result = \Tigon\DmsConnect\Admin\REST_Import_Controller::replace_new($processed_request);
@@ -195,6 +175,132 @@ class REST_Routes
             return new \WP_Error(400, 'Bad Request: Body must contain {"advertising": {"websiteUrl": ********} }', $request);
     }
 
+    // ─────────────────────────────────────────────────────────────
+    //  Single-Cart Instant Push — DMS → WooCommerce
+    //
+    //  Accepts one cart payload from the DMS when a cart is updated
+    //  or changed.  Runs it through the full import pipeline
+    //  (images, categories, attributes, schema templates, AND
+    //  user-configured field mappings) then returns the resulting
+    //  WooCommerce product ID and permalink.
+    //
+    //  POST /wp-json/tigon-dms-connect/v1/push
+    //  Body: a single DMS cart object (JSON)
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * REST Callback — single cart instant push / update from DMS.
+     *
+     * @param \WP_REST_Request|array $request
+     * @return WP_REST_Response|WP_Error
+     */
+    public static function push_single_cart($request)
+    {
+        Product_Media::require_media_functions();
+
+        $cart = (is_object($request) && get_class($request) === 'WP_REST_Request')
+            ? json_decode($request->get_body(), true)
+            : $request;
+
+        // ── Validate: need at least an _id ─────────────────────────
+        if (empty($cart) || !is_array($cart)) {
+            return new \WP_Error(
+                'bad_request',
+                'Request body must be a JSON object representing a single DMS cart.',
+                ['status' => 400]
+            );
+        }
+        if (!isset($cart['_id']) && !isset($cart['pid'])) {
+            return new \WP_Error(
+                'missing_id',
+                'Cart payload must contain at least an _id or pid field.',
+                ['status' => 400]
+            );
+        }
+
+        try {
+            // Ensure constants are loaded for the import pipeline
+            \Tigon\DmsConnect\Includes\Product_Fields::define_constants();
+
+            // Determine cart type: used or new
+            $is_used = !empty($cart['isUsed']);
+
+            if ($is_used) {
+                // ── Used-cart path (same pipeline as POST /used) ────
+                $used_cart = new UsedCart($cart);
+                $converted = $used_cart->convert();
+
+                if (is_wp_error($converted)) {
+                    return $converted;
+                }
+
+                if ($converted->get_value('method') === 'create') {
+                    $result = REST_Import_Controller::import_create($converted);
+                    $code   = 201;
+                } else {
+                    $result = REST_Import_Controller::import_update($converted);
+                    $code   = 200;
+                }
+            } else {
+                // ── New-cart path (Abstract_Import_Controller) ──────
+                $result = \Tigon\DmsConnect\Abstracts\Abstract_Import_Controller::import_new($cart, 0);
+
+                if (is_wp_error($result)) {
+                    return $result;
+                }
+
+                // import_new returns an array, not JSON
+                $pid  = $result['pid'] ?? 0;
+                $code = $pid ? 200 : 201;
+
+                // Apply user-configured field mappings on top
+                if ($pid && function_exists('tigon_dms_apply_custom_mappings')) {
+                    tigon_dms_apply_custom_mappings($pid, $cart);
+                }
+
+                REST_Import_Controller::process_post_import();
+
+                return new WP_REST_Response([
+                    'success' => true,
+                    'pid'     => $pid,
+                    'url'     => $pid ? get_permalink($pid) : null,
+                    'action'  => $code === 201 ? 'created' : 'updated',
+                ], $code);
+            }
+
+            // ── Handle result for used-cart path ───────────────────
+            if (is_wp_error($result)) {
+                return new \WP_Error('import_failed', 'Import failed', ['status' => 500]);
+            }
+
+            if (is_string($result)) {
+                $result = json_decode($result, true);
+            }
+
+            $pid = $result['pid'] ?? 0;
+
+            // Apply user-configured field mappings on top
+            if ($pid && function_exists('tigon_dms_apply_custom_mappings')) {
+                tigon_dms_apply_custom_mappings($pid, $cart);
+            }
+
+            REST_Import_Controller::process_post_import();
+
+            return new WP_REST_Response([
+                'success' => true,
+                'pid'     => $pid,
+                'url'     => $pid ? get_permalink($pid) : null,
+                'action'  => $code === 201 ? 'created' : 'updated',
+            ], $code);
+        } catch (\Throwable $e) {
+            return new \WP_Error(
+                'push_error',
+                $e->getMessage(),
+                ['status' => 500]
+            );
+        }
+    }
+
     /**
      * REST Callback for showcase CREATABLE
      *
@@ -205,44 +311,17 @@ class REST_Routes
     {
         $processed_request = (is_object($request) && get_class($request) == 'WP_REST_Request') ? json_decode($request->get_body(), true) : $request;
         if (isset($processed_request['data']) && isset($processed_request['key'])) {
-            switch ($processed_request['key']) {
-                case 'national':
-                    $landing_page = 741;
-                    $archive = 0;
-                    $archive_not_in = array(61168,61188,61183,61186,72286);
-                    break;
-                    
-                // Locations
-                case 'tigon_hatfield':
-                    $landing_page = 59477;
-                    $archive = 61168;
-                    $archive_not_in = array();
-                    break;
-                case 'tigon_ocean_view':
-                    $landing_page = 59498;
-                    $archive = 61188;
-                    $archive_not_in = array();
-                    break;
-                case 'tigon_pocono':
-                    $landing_page = 59487;
-                    $archive = 61183;
-                    $archive_not_in = array();
-                    break;
-                case 'tigon_dover':
-                    $landing_page = 59509;
-                    $archive = 61186;
-                    $archive_not_in = array();
-                    break;
-                case 'tigon_scranton':
-                    $landing_page = 71302;
-                    $archive = 72286;
-                    $archive_not_in = array();
-                    break;
+            $locations = tigon_dms_get_showcase_locations();
+            $key = $processed_request['key'];
 
-                // Page does not exist
-                default:
-                    return new \WP_Error('Bad Request', 'Invalid showcase name', $processed_request['key']);
+            if (!isset($locations[$key])) {
+                return new \WP_Error('Bad Request', 'Invalid showcase name', $key);
             }
+
+            $loc = $locations[$key];
+            $landing_page   = (int) ($loc['landing_page'] ?? 0);
+            $archive        = (int) ($loc['archive'] ?? 0);
+            $archive_not_in = array_map('intval', $loc['archive_not_in'] ?? []);
 
             $result = \Tigon\DmsConnect\Admin\REST_Product_Grid_Controller::set(
                 landing_page: $landing_page,

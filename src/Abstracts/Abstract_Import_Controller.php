@@ -81,7 +81,7 @@ abstract class Abstract_Import_Controller
 
         $new_cart = new \Tigon\DmsConnect\Admin\New\Cart($data);
 
-        $converted_cart = $new_cart->convert(SKU ^ PRICE ^ SALE_PRICE ^ IN_STOCK ^ MONRONEY_STICKER);
+        $converted_cart = $new_cart->convert(SKU | PRICE | SALE_PRICE | IN_STOCK | MONRONEY_STICKER);
 
         // Get old monroney ID
         $monroney_url = explode('"', get_post_meta($data['pid'])['monroney_sticker'][0])[1];
@@ -146,15 +146,17 @@ abstract class Abstract_Import_Controller
 
         // Generate possible slugs
         $location_id = $data['cartLocation']['locationId'];
-        $city = \Tigon\DmsConnect\Admin\Attributes::$locations[$location_id]['city_short'] ??
-            \Tigon\DmsConnect\Admin\Attributes::$locations[$location_id]['city'];
+        if (!isset(\Tigon\DmsConnect\Admin\Attributes::$locations[$location_id])) {
+            return new \WP_Error(400, ['pid' => 0, 'error' => "Unknown location: $location_id"]);
+        }
+        $loc = \Tigon\DmsConnect\Admin\Attributes::$locations[$location_id];
+        $city = $loc['city_short'] ?? $loc['city'];
 
         $make = preg_replace('/\s+/', '-', trim(preg_replace('/\+/', ' plus ', $data['cartType']['make'])));
         $model = preg_replace('/\s+/', '-', trim(preg_replace('/\+/', ' plus ', $data['cartType']['model'])));
         $color = preg_replace('/\s+/', '-', $data['cartAttributes']['cartColor']);
         $seat = preg_replace('/\s+/', '-', $data['cartAttributes']['seatColor']);
-        $location = preg_replace('/\s+/', '-', $city . "-"
-            . \Tigon\DmsConnect\Admin\Attributes::$locations[$location_id]['st']);
+        $location = preg_replace('/\s+/', '-', $city . "-" . $loc['st']);
         $year = preg_replace('/\s+/', '-', $data['cartType']['year']);
 
         $base_slug = strtolower("$make-$model-$color-seat-$seat-$location");
@@ -383,24 +385,21 @@ abstract class Abstract_Import_Controller
             }
 
             // Check if the page currently contains a valid cart
-            $srl_exists = count(json_decode(\Tigon\DmsConnect\Includes\DMS_Connector::request(
-                '{
-                    "serialNo":"' . $post_sku . '",
-                    "isInBoneyard":false,
-                    "isInStock":true
-                }',
+            $srl_raw = \Tigon\DmsConnect\Includes\DMS_Connector::request(
+                '{"serialNo":"' . $post_sku . '","isInBoneyard":false,"isInStock":true}',
                 '/chimera/lookup',
                 'POST'
-            ))) > 0;
-            $vin_exists = count(json_decode(\Tigon\DmsConnect\Includes\DMS_Connector::request(
-                '{
-                    "vinNo":"' . $post_sku . '",
-                    "isInBoneyard":false,
-                    "isInStock":true
-                }',
+            );
+            $srl_decoded = $srl_raw ? json_decode($srl_raw, true) : [];
+            $srl_exists = is_array($srl_decoded) && count($srl_decoded) > 0;
+
+            $vin_raw = \Tigon\DmsConnect\Includes\DMS_Connector::request(
+                '{"vinNo":"' . $post_sku . '","isInBoneyard":false,"isInStock":true}',
                 '/chimera/lookup',
                 'POST'
-            ))) > 0;
+            );
+            $vin_decoded = $vin_raw ? json_decode($vin_raw, true) : [];
+            $vin_exists = is_array($vin_decoded) && count($vin_decoded) > 0;
 
             // If it is invalid, replace it
             if (($srl_exists || $vin_exists) === false || substr($post_sku, 0, 5) === 'TIGON') {
@@ -484,5 +483,10 @@ abstract class Abstract_Import_Controller
      */
     public static function process_post_import() {
         wc_update_product_lookup_tables();
-    } 
+
+        // Clear DMS API caches so frontend serves fresh data
+        if (class_exists('DMS_API')) {
+            \DMS_API::clear_caches();
+        }
+    }
 }

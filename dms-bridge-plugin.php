@@ -1,11 +1,12 @@
 <?php
 /**
- * Plugin Name: DMS Bridge Plugin
- * Description: Tigon DMS Connect — fetches, imports, maps and displays golf carts from the DMS into WooCommerce.
- * Version: 2.0.0
- * Author: Tigon Golf Carts
- * Author URI: https://tigongolfcarts.com/
+ * Plugin Name: TIGON DMS Connect
+ * Description: TIGON DMS Connect — fetches, imports, maps and displays golf carts from the DMS into WooCommerce.
+ * Version: 3.1.7
+ * Author: Jaslow Digital | Noah Jaslow
+ * Author URI: https://jaslowdigital.com/
  * Text Domain: tigon-dms-connect
+ * Requires PHP: 8.0
  * Requires Plugins: woocommerce
  */
 
@@ -16,8 +17,18 @@ if (!defined('ABSPATH')) {
 /**
  * Plugin constants
  */
-define('TIGON_DMS_VERSION', '2.0.0');
+define('TIGON_DMS_VERSION', '3.1.7');
 define('TIGON_DMS_PLUGIN_DIR', plugin_dir_path(__FILE__));
+
+/**
+ * Default S3 prefix for cart image downloads. Used when the
+ * file_source option in tigon_dms_config is empty.
+ *
+ * The Settings page still lets admins override this, but if they
+ * clear the field (or never save one), the plugin falls back to
+ * this value so image sync always works out of the box.
+ */
+define('TIGON_DMS_DEFAULT_FILE_SOURCE', 'https://s3.amazonaws.com/prod.docs.s3/carts/');
 define('TIGON_DMS_PLUGIN_URL', plugin_dir_url(__FILE__));
 
 /**
@@ -55,10 +66,446 @@ require_once TIGON_DMS_PLUGIN_DIR . 'vendor/autoload.php';
 
 /**
  * ============================================================================
+ * PRIMARY IMAGE RECROP (AJAX)
+ * Batches existing WooCommerce products and crops each featured image to the
+ * standard primary-image dimensions defined on DMS_Sync.
+ * ============================================================================
+ */
+function tigon_dms_recrop_primary_images() {
+    check_ajax_referer('tigon_dms_run_import_nonce', 'nonce');
+
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error(array('message' => 'Unauthorized'), 403);
+    }
+
+    if (!class_exists('DMS_Sync')) {
+        wp_send_json_error(array('message' => 'DMS_Sync unavailable'), 500);
+    }
+
+    $offset     = isset($_POST['offset'])     ? (int) $_POST['offset']     : 0;
+    $batch_size = isset($_POST['batch_size']) ? (int) $_POST['batch_size'] : 10;
+    $batch_size = max(1, min(50, $batch_size));
+
+    @set_time_limit(0);
+
+    $result = DMS_Sync::recrop_featured_images_batch($offset, $batch_size);
+    wp_send_json_success($result);
+}
+add_action('wp_ajax_tigon_dms_recrop_primary_images', 'tigon_dms_recrop_primary_images');
+
+/**
+ * ============================================================================
+ * SEO & STRUCTURED DATA FIXES
+ * Fixes Google Search Console errors for Product structured data (JSON-LD):
+ * - Invalid floating point number in "price"
+ * - Missing field "image"
+ * - Missing field "hasMerchantReturnPolicy"
+ * - Missing field "shippingDetails"
+ * - Missing field "priceValidUntil"
+ * - Ensures all DMS product images are indexable by search engines
+ * ============================================================================
+ */
+
+/**
+ * Filter WooCommerce Product structured data to fix Google validation errors.
+ *
+ * Hooks into woocommerce_structured_data_product to ensure:
+ * 1. Price is a valid decimal string (e.g. "7995.00" not 7995)
+ * 2. Image field is always present
+ * 3. Return policy and shipping details are included
+ * 4. priceValidUntil is set for offers
+ */
+function tigon_dms_fix_product_structured_data($markup) {
+    // 1. Fix price format — must be a valid decimal string like "7995.00"
+    if (isset($markup['offers']) && is_array($markup['offers'])) {
+        // Single offer
+        if (isset($markup['offers']['@type'])) {
+            $markup['offers'] = tigon_dms_fix_offer_schema($markup['offers']);
+        } else {
+            // Array of offers
+            foreach ($markup['offers'] as &$offer) {
+                if (is_array($offer)) {
+                    $offer = tigon_dms_fix_offer_schema($offer);
+                }
+            }
+            unset($offer);
+        }
+    }
+
+    // 2. Ensure image field is present
+    if (empty($markup['image'])) {
+        global $post;
+        $product_id = isset($post->ID) ? $post->ID : 0;
+        if ($product_id) {
+            $image_url = get_the_post_thumbnail_url($product_id, 'full');
+            if ($image_url) {
+                $markup['image'] = $image_url;
+            } else {
+                // Use the WooCommerce placeholder if no featured image
+                $placeholder = function_exists('wc_placeholder_img_src') ? wc_placeholder_img_src('full') : '';
+                if ($placeholder) {
+                    $markup['image'] = $placeholder;
+                }
+            }
+        }
+    }
+
+    // 3. Ensure brand is set
+    if (empty($markup['brand'])) {
+        global $post;
+        $product_id = isset($post->ID) ? $post->ID : 0;
+        if ($product_id) {
+            $brand = get_post_meta($product_id, '_wc_gla_brand', true);
+            if (!empty($brand)) {
+                $markup['brand'] = array(
+                    '@type' => 'Brand',
+                    'name'  => $brand,
+                );
+            }
+        }
+    }
+
+    return $markup;
+}
+add_filter('woocommerce_structured_data_product', 'tigon_dms_fix_product_structured_data', 99);
+
+/**
+ * Fix a single offer in structured data.
+ *
+ * - Formats price as a proper decimal string
+ * - Sets priceCurrency to USD
+ * - Adds priceValidUntil (1 year from now)
+ * - Adds hasMerchantReturnPolicy
+ * - Adds shippingDetails
+ * - Fixes availability to a valid schema.org enum
+ */
+function tigon_dms_fix_offer_schema($offer) {
+    // Fix price format: must be decimal string like "7995.00", not int/float
+    if (isset($offer['price'])) {
+        $price_val = $offer['price'];
+        if (is_numeric($price_val) && floatval($price_val) > 0) {
+            $offer['price'] = number_format(floatval($price_val), 2, '.', '');
+        }
+    }
+
+    // Ensure priceCurrency is set
+    if (empty($offer['priceCurrency'])) {
+        $offer['priceCurrency'] = 'USD';
+    }
+
+    // Add priceValidUntil (1 year from now) if not set
+    if (empty($offer['priceValidUntil'])) {
+        $offer['priceValidUntil'] = date('Y-m-d', strtotime('+1 year'));
+    }
+
+    // Fix availability to valid schema.org URL
+    if (isset($offer['availability'])) {
+        $avail = $offer['availability'];
+        // Normalize to schema.org URL format
+        if (strpos($avail, 'http') !== 0) {
+            $avail_map = array(
+                'instock'     => 'https://schema.org/InStock',
+                'outofstock'  => 'https://schema.org/OutOfStock',
+                'onbackorder' => 'https://schema.org/BackOrder',
+                'preorder'    => 'https://schema.org/PreOrder',
+            );
+            $normalized = strtolower(str_replace(array(' ', '-', '_'), '', $avail));
+            if (isset($avail_map[$normalized])) {
+                $offer['availability'] = $avail_map[$normalized];
+            } else {
+                $offer['availability'] = 'https://schema.org/InStock';
+            }
+        }
+    } else {
+        $offer['availability'] = 'https://schema.org/InStock';
+    }
+
+    // Add hasMerchantReturnPolicy
+    if (empty($offer['hasMerchantReturnPolicy'])) {
+        $offer['hasMerchantReturnPolicy'] = array(
+            '@type'                => 'MerchantReturnPolicy',
+            'applicableCountry'    => 'US',
+            'returnPolicyCategory' => 'https://schema.org/MerchantReturnNotPermitted',
+        );
+    }
+
+    // Add shippingDetails
+    if (empty($offer['shippingDetails'])) {
+        $offer['shippingDetails'] = array(
+            '@type'            => 'OfferShippingDetails',
+            'shippingRate'     => array(
+                '@type'    => 'MonetaryAmount',
+                'value'    => '0',
+                'currency' => 'USD',
+            ),
+            'shippingDestination' => array(
+                '@type'          => 'DefinedRegion',
+                'addressCountry' => 'US',
+            ),
+            'deliveryTime'     => array(
+                '@type'            => 'ShippingDeliveryTime',
+                'handlingTime'     => array(
+                    '@type'    => 'QuantitativeValue',
+                    'minValue' => 1,
+                    'maxValue' => 5,
+                    'unitCode' => 'DAY',
+                ),
+                'transitTime'      => array(
+                    '@type'    => 'QuantitativeValue',
+                    'minValue' => 3,
+                    'maxValue' => 14,
+                    'unitCode' => 'DAY',
+                ),
+            ),
+        );
+    }
+
+    return $offer;
+}
+
+/**
+ * Filter Yoast SEO schema to enhance Product graph piece.
+ *
+ * Adds missing fields that Yoast doesn't include by default:
+ * - image (if missing)
+ * - offers.hasMerchantReturnPolicy
+ * - offers.shippingDetails
+ * - offers.priceValidUntil
+ */
+function tigon_dms_fix_yoast_product_schema($data) {
+    if (!is_array($data) || empty($data['@graph'])) {
+        return $data;
+    }
+
+    foreach ($data['@graph'] as &$piece) {
+        if (!isset($piece['@type'])) {
+            continue;
+        }
+
+        $type = $piece['@type'];
+        $is_product = ($type === 'Product')
+            || (is_array($type) && in_array('Product', $type, true));
+
+        if (!$is_product) {
+            continue;
+        }
+
+        // Ensure image is set
+        if (empty($piece['image'])) {
+            global $post;
+            if (isset($post->ID)) {
+                $img_url = get_the_post_thumbnail_url($post->ID, 'full');
+                if ($img_url) {
+                    $piece['image'] = $img_url;
+                }
+            }
+        }
+
+        // Fix offers
+        if (isset($piece['offers']) && is_array($piece['offers'])) {
+            if (isset($piece['offers']['@type'])) {
+                $piece['offers'] = tigon_dms_fix_offer_schema($piece['offers']);
+            } elseif (isset($piece['offers'][0])) {
+                foreach ($piece['offers'] as &$yoast_offer) {
+                    if (is_array($yoast_offer)) {
+                        $yoast_offer = tigon_dms_fix_offer_schema($yoast_offer);
+                    }
+                }
+                unset($yoast_offer);
+            }
+        }
+
+        // Add brand if missing
+        if (empty($piece['brand'])) {
+            global $post;
+            if (isset($post->ID)) {
+                $brand = get_post_meta($post->ID, '_wc_gla_brand', true);
+                if (!empty($brand)) {
+                    $piece['brand'] = array(
+                        '@type' => 'Brand',
+                        'name'  => $brand,
+                    );
+                }
+            }
+        }
+    }
+    unset($piece);
+
+    return $data;
+}
+add_filter('wpseo_schema_graph', 'tigon_dms_fix_yoast_product_schema', 99);
+
+/**
+ * Ensure DMS product images are not blocked from search engine indexing.
+ *
+ * Adds image objects to Yoast's sitemap for WooCommerce products
+ * that have DMS images attached.
+ */
+function tigon_dms_add_images_to_sitemap($images, $post_id) {
+    $post = get_post($post_id);
+    if (!$post || $post->post_type !== 'product') {
+        return $images;
+    }
+
+    // Add featured image if not already included
+    $featured_id = get_post_thumbnail_id($post_id);
+    if ($featured_id) {
+        $featured_url = wp_get_attachment_image_url($featured_id, 'full');
+        $featured_alt = get_post_meta($featured_id, '_wp_attachment_image_alt', true);
+        $featured_title = get_the_title($featured_id);
+
+        if ($featured_url) {
+            $already_included = false;
+            foreach ($images as $img) {
+                if (isset($img['src']) && $img['src'] === $featured_url) {
+                    $already_included = true;
+                    break;
+                }
+            }
+            if (!$already_included) {
+                $images[] = array(
+                    'src'   => $featured_url,
+                    'title' => $featured_title ?: get_the_title($post_id),
+                    'alt'   => $featured_alt ?: get_the_title($post_id),
+                );
+            }
+        }
+    }
+
+    // Add gallery images
+    $gallery_ids_str = get_post_meta($post_id, '_product_image_gallery', true);
+    if (!empty($gallery_ids_str)) {
+        $gallery_ids = array_filter(array_map('intval', explode(',', $gallery_ids_str)));
+        foreach ($gallery_ids as $gal_id) {
+            $gal_url = wp_get_attachment_image_url($gal_id, 'full');
+            if (!$gal_url) {
+                continue;
+            }
+            $already_included = false;
+            foreach ($images as $img) {
+                if (isset($img['src']) && $img['src'] === $gal_url) {
+                    $already_included = true;
+                    break;
+                }
+            }
+            if (!$already_included) {
+                $gal_alt = get_post_meta($gal_id, '_wp_attachment_image_alt', true);
+                $gal_title = get_the_title($gal_id);
+                $images[] = array(
+                    'src'   => $gal_url,
+                    'title' => $gal_title ?: get_the_title($post_id),
+                    'alt'   => $gal_alt ?: get_the_title($post_id),
+                );
+            }
+        }
+    }
+
+    return $images;
+}
+add_filter('wpseo_sitemap_urlimages', 'tigon_dms_add_images_to_sitemap', 10, 2);
+
+/**
+ * Ensure DMS product images and attachment pages are indexable.
+ *
+ * Prevents any accidental noindex on product image attachment pages
+ * so Google Image Search can discover them.
+ */
+function tigon_dms_allow_image_indexing($robots) {
+    if (is_attachment()) {
+        $parent_id = wp_get_post_parent_id(get_the_ID());
+        if ($parent_id) {
+            $parent = get_post($parent_id);
+            if ($parent && $parent->post_type === 'product') {
+                // Allow indexing for product image attachments
+                $robots['index']  = true;
+                $robots['follow'] = true;
+                unset($robots['noindex']);
+            }
+        }
+    }
+    return $robots;
+}
+add_filter('wp_robots', 'tigon_dms_allow_image_indexing', 99);
+
+/**
+ * ============================================================================
  * LAZY WOOCOMMERCE PRODUCT CREATION
  * Route: /dms/cart/{id} → Creates/updates WooCommerce product → Redirects
  * ============================================================================
  */
+
+/**
+ * Register all custom taxonomies used by the DMS product sync.
+ *
+ * These taxonomies may also be registered by other plugins (e.g., the theme or
+ * a custom taxonomy plugin).  Calling register_taxonomy() for an already-registered
+ * taxonomy is safe — WordPress silently returns the existing taxonomy object.
+ * Registering them here ensures they are always available during WP-Cron
+ * background syncs and admin-triggered syncs regardless of plugin load order.
+ */
+function tigon_dms_register_product_taxonomies() {
+    $taxonomies = array(
+        'manufacturers' => array(
+            'label'        => 'Manufacturers',
+            'hierarchical' => false,
+        ),
+        'models' => array(
+            'label'        => 'Models',
+            'hierarchical' => false,
+        ),
+        'location' => array(
+            'label'        => 'Location',
+            'hierarchical' => true,
+        ),
+        'sound-systems' => array(
+            'label'        => 'Sound Systems',
+            'hierarchical' => false,
+        ),
+        'added-features' => array(
+            'label'        => 'Added Features',
+            'hierarchical' => false,
+        ),
+        'vehicle-class' => array(
+            'label'        => 'Vehicle Class',
+            'hierarchical' => false,
+        ),
+        'drivetrain' => array(
+            'label'        => 'Drivetrain',
+            'hierarchical' => false,
+        ),
+        'inventory-status' => array(
+            'label'        => 'Inventory Status',
+            'hierarchical' => false,
+        ),
+        'rims' => array(
+            'label'        => 'Rims',
+            'hierarchical' => false,
+        ),
+        'product-brand' => array(
+            'label'        => 'Brands',
+            'hierarchical' => false,
+        ),
+        'fb_product_set' => array(
+            'label'        => 'Facebook Product Sets',
+            'hierarchical' => false,
+        ),
+    );
+
+    foreach ($taxonomies as $slug => $args) {
+        if (!taxonomy_exists($slug)) {
+            register_taxonomy($slug, 'product', array(
+                'label'             => $args['label'],
+                'hierarchical'      => $args['hierarchical'],
+                'public'            => true,
+                'show_ui'           => true,
+                'show_in_rest'      => true,
+                'show_admin_column' => true,
+                'rewrite'           => array('slug' => $slug),
+            ));
+        }
+    }
+}
+add_action('init', 'tigon_dms_register_product_taxonomies', 5);
 
 /**
  * Add rewrite rule for /dms/cart/{id}
@@ -128,16 +575,113 @@ add_action('template_redirect', 'tigon_dms_handle_cart_route', 5);
  * @return string Normalized title with " In "
  */
 function tigon_dms_normalize_title($title) {
-    // Convert en-dash (–) to " In "
-    $normalized = str_replace(' – ', ' In ', $title);
-    
-    // Convert regular hyphen (-) to " In "
-    $normalized = str_replace(' - ', ' In ', $normalized);
-    
-    // Normalize whitespace (collapse multiple spaces)
-    $normalized = preg_replace('/\s+/', ' ', $normalized);
-    
-    return trim($normalized);
+    return \Tigon\DmsConnect\Includes\Template_Engine::normalize_title($title);
+}
+
+/**
+ * Load schema templates from tigon_dms_config for lazy WooCommerce product creation.
+ *
+ * @return array<string,string>
+ */
+function tigon_dms_get_schema_templates() {
+    return \Tigon\DmsConnect\Includes\Template_Engine::get_schema_templates();
+}
+
+/**
+ * Convert a US state name to its two-letter abbreviation.
+ *
+ * @param string $state_name Full state name (e.g. "Pennsylvania")
+ * @return string Two-letter abbreviation (e.g. "PA"), or the original string if not found
+ */
+function tigon_dms_state_abbreviation($state_name) {
+    return \Tigon\DmsConnect\Includes\Template_Engine::state_abbreviation($state_name);
+}
+
+/**
+ * Check whether the Pricing admin page is managing this product's price.
+ * When true, DMS create / update / field-mapping paths must leave the
+ * `_regular_price`, `_sale_price`, and `_price` meta alone.
+ *
+ * @param int $product_id
+ * @return bool
+ */
+function tigon_dms_is_price_managed($product_id) {
+    if (!$product_id) return false;
+    return (bool) get_post_meta((int) $product_id, '_tigon_price_source', true);
+}
+
+/**
+ * Apply user-configured field mappings from the admin Field Mapping page
+ * to a product after all built-in mappings have been set.
+ *
+ * @param int   $product_id  WooCommerce product ID.
+ * @param array $cart_data   Full DMS cart payload.
+ */
+function tigon_dms_apply_custom_mappings($product_id, array $cart_data) {
+    if (!class_exists('\Tigon\DmsConnect\Admin\Field_Mapping')) {
+        return;
+    }
+
+    $resolved = \Tigon\DmsConnect\Admin\Field_Mapping::apply($cart_data);
+
+    $price_managed = tigon_dms_is_price_managed($product_id);
+    $price_keys    = ['_regular_price', '_sale_price', '_price'];
+
+    // Apply postmeta overrides (skip price keys if Pricing page owns the price)
+    foreach ($resolved['postmeta'] as $key => $value) {
+        if ($price_managed && in_array($key, $price_keys, true)) {
+            continue;
+        }
+        update_post_meta($product_id, $key, $value);
+    }
+
+    // Apply post field overrides
+    if (!empty($resolved['post'])) {
+        $update = ['ID' => $product_id];
+        foreach ($resolved['post'] as $field => $value) {
+            $update[$field] = $value;
+        }
+        wp_update_post($update);
+    }
+
+    // Apply taxonomy term assignments
+    foreach ($resolved['taxonomy'] as $taxonomy => $term_names) {
+        $term_ids = [];
+        foreach ($term_names as $term_name) {
+            $term = get_term_by('name', $term_name, $taxonomy);
+            if (!$term) {
+                $term = get_term_by('slug', sanitize_title($term_name), $taxonomy);
+            }
+            if ($term && !is_wp_error($term)) {
+                $term_ids[] = $term->term_id;
+            }
+        }
+        if (!empty($term_ids)) {
+            wp_set_object_terms($product_id, $term_ids, $taxonomy, true);
+        }
+    }
+}
+
+/**
+ * Build a flat variable map for template substitution from DMS cart data.
+ *
+ * @param array $cart_data
+ * @return array<string,mixed>
+ */
+function tigon_dms_build_template_variables_from_cart(array $cart_data) {
+    return \Tigon\DmsConnect\Includes\Template_Engine::build_template_variables($cart_data);
+}
+
+/**
+ * Evaluate a schema template ({var} / {^var}) against vars.
+ *
+ * @param string $template
+ * @param array<string,mixed> $vars
+ * @param bool $slugify
+ * @return string
+ */
+function tigon_dms_evaluate_template($template, array $vars, $slugify = false) {
+    return \Tigon\DmsConnect\Includes\Template_Engine::evaluate($template, $vars, $slugify);
 }
 
 /**
@@ -150,186 +694,7 @@ function tigon_dms_normalize_title($title) {
  * @return array Parsed specs array with Feature => Description pairs
  */
 function tigon_dms_parse_cart_specs($cart_data) {
-    $specs = array();
-    
-    // ========== DESCRIPTION TAB FIELDS ==========
-    
-    // Cart Type: Make, Model, Year
-    if (!empty($cart_data['cartType'])) {
-        $cart_type = $cart_data['cartType'];
-        if (!empty($cart_type['make'])) {
-            $specs['Make'] = $cart_type['make'];
-        }
-        if (!empty($cart_type['model'])) {
-            $specs['Model'] = $cart_type['model'];
-        }
-        if (!empty($cart_type['year'])) {
-            $specs['Year'] = $cart_type['year'];
-        }
-    }
-    
-    // Street Legal (from title.isStreetLegal)
-    if (isset($cart_data['title']['isStreetLegal'])) {
-        $specs['Street Legal'] = $cart_data['title']['isStreetLegal'] ? 'Fully Street Legal' : 'No';
-    }
-    
-    // Cart Attributes
-    if (!empty($cart_data['cartAttributes'])) {
-        $attrs = $cart_data['cartAttributes'];
-        
-        // Color
-        if (!empty($attrs['cartColor'])) {
-            $specs['Color'] = $attrs['cartColor'];
-        }
-        
-        // Seat Color
-        if (!empty($attrs['seatColor'])) {
-            $specs['Seat Color'] = $attrs['seatColor'];
-        }
-        
-        // Tires (tireType field)
-        if (!empty($attrs['tireType'])) {
-            $specs['Tires'] = $attrs['tireType'];
-        }
-        
-        // Rims (tireRimSize field)
-        if (!empty($attrs['tireRimSize'])) {
-            $specs['Rims'] = $attrs['tireRimSize'] . '"';
-        }
-        
-        // Drivetrain
-        if (!empty($attrs['driveTrain'])) {
-            $specs['Drivetrain'] = $attrs['driveTrain'];
-        }
-        
-        // Passengers
-        if (!empty($attrs['passengers'])) {
-            $specs['Passengers'] = $attrs['passengers'];
-        }
-        
-        // Sound System (hasSoundSystem)
-        if (isset($attrs['hasSoundSystem']) && $attrs['hasSoundSystem'] !== null) {
-            $specs['Sound System'] = $attrs['hasSoundSystem'] ? 'Yes' : 'No';
-        }
-        
-        // Lift Kit (isLifted)
-        if (isset($attrs['isLifted']) && $attrs['isLifted'] !== null) {
-            $specs['Lift Kit'] = $attrs['isLifted'] ? 'Yes' : 'No';
-        }
-        
-        // Receiver Hitch (hasHitch)
-        if (isset($attrs['hasHitch']) && $attrs['hasHitch'] !== null) {
-            $specs['Receiver Hitch'] = $attrs['hasHitch'] ? 'Yes' : 'No';
-        }
-        
-        // Extended Top (hasExtendedTop)
-        if (isset($attrs['hasExtendedTop']) && $attrs['hasExtendedTop'] !== null) {
-            $specs['Extended Top'] = $attrs['hasExtendedTop'] ? 'Yes' : 'No';
-        }
-    }
-    
-    // Battery Information
-    if (!empty($cart_data['battery']) && is_array($cart_data['battery'])) {
-        $battery = $cart_data['battery'];
-        
-        if (!empty($battery['type'])) {
-            $specs['Battery Type'] = $battery['type'];
-        }
-        if (!empty($battery['brand'])) {
-            $specs['Battery Brand'] = $battery['brand'];
-        }
-        if (!empty($battery['year'])) {
-            $specs['Battery Year'] = $battery['year'];
-        }
-        if (!empty($battery['ampHours'])) {
-            $specs['Capacity'] = $battery['ampHours'] . ' Amp Hours';
-        }
-        if (!empty($battery['batteryVoltage'])) {
-            $specs['Battery Voltage'] = $battery['batteryVoltage'] . 'V';
-        }
-        if (!empty($battery['warrantyLength'])) {
-            $specs['Battery Warranty'] = $battery['warrantyLength'];
-        }
-    }
-    
-    // Engine Information (for gas carts)
-    if (!empty($cart_data['engine']) && is_array($cart_data['engine'])) {
-        $engine = $cart_data['engine'];
-        
-        if (!empty($engine['make'])) {
-            $specs['Engine'] = $engine['make'];
-        }
-        if (!empty($engine['horsepower'])) {
-            $specs['Horsepower'] = $engine['horsepower'] . ' HP';
-        }
-        if (!empty($engine['stroke'])) {
-            $specs['Stroke'] = $engine['stroke'];
-        }
-    }
-    
-    // Vehicle Warranty (top-level warrantyLength)
-    if (!empty($cart_data['warrantyLength'])) {
-        $specs['Warranty'] = $cart_data['warrantyLength'];
-    }
-    
-    // ========== ADDITIONAL INFORMATION FIELDS ==========
-    
-    // Vehicle Power (isElectric)
-    if (isset($cart_data['isElectric'])) {
-        $specs['Vehicle Power'] = $cart_data['isElectric'] ? 'ELECTRIC' : 'GAS';
-    }
-    
-    // Vehicle Status (isUsed)
-    if (isset($cart_data['isUsed'])) {
-        $specs['Vehicle Status'] = $cart_data['isUsed'] ? 'USED' : 'NEW';
-    }
-    
-    // Serial Number
-    if (!empty($cart_data['serialNo'])) {
-        $specs['Serial Number'] = $cart_data['serialNo'];
-    }
-    
-    // VIN Number
-    if (!empty($cart_data['vinNo'])) {
-        $specs['VIN'] = $cart_data['vinNo'];
-    }
-    
-    // Odometer
-    if (!empty($cart_data['odometer'])) {
-        $specs['Odometer'] = $cart_data['odometer'];
-    }
-    
-    // Hours
-    if (!empty($cart_data['hour'])) {
-        $specs['Hours'] = $cart_data['hour'];
-    }
-    
-    // Vehicle Location
-    if (!empty($cart_data['cartLocation'])) {
-        $store_id = $cart_data['cartLocation']['locationId'] ?? '';
-        if ($store_id && class_exists('DMS_API')) {
-            $location_data = DMS_API::get_city_and_state_by_store_id($store_id);
-            if (!empty($location_data['city']) || !empty($location_data['state'])) {
-                $location_parts = array();
-                if (!empty($location_data['city'])) {
-                    $location_parts[] = $location_data['city'];
-                }
-                if (!empty($location_data['state'])) {
-                    $location_parts[] = $location_data['state'];
-                }
-                if (!empty($location_parts)) {
-                    $specs['Vehicle Location'] = implode(', ', $location_parts);
-                }
-            }
-        }
-    }
-    
-    // Year of Vehicle (duplicate for Additional Info format)
-    if (!empty($cart_data['cartType']['year'])) {
-        $specs['Year of Vehicle'] = $cart_data['cartType']['year'];
-    }
-    
-    return $specs;
+    return \Tigon\DmsConnect\Includes\Template_Engine::parse_cart_specs($cart_data);
 }
 
 /**
@@ -339,7 +704,7 @@ function tigon_dms_parse_cart_specs($cart_data) {
  * @return array Array of image filenames/URLs
  */
 function tigon_dms_parse_cart_images($cart_data) {
-    return $cart_data['imageUrls'] ?? array();
+    return \Tigon\DmsConnect\Includes\Template_Engine::parse_cart_images($cart_data);
 }
 
 /**
@@ -349,84 +714,367 @@ function tigon_dms_parse_cart_images($cart_data) {
  * @return array Warranty data array
  */
 function tigon_dms_parse_cart_warranty($cart_data) {
-    $warranty = array();
-
-    // Extract any warranty-related fields from cart data
-    // Adjust these keys based on actual DMS payload structure
-    if (!empty($cart_data['warranty'])) {
-        $warranty = $cart_data['warranty'];
-    }
-
-    return $warranty;
+    return \Tigon\DmsConnect\Includes\Template_Engine::parse_cart_warranty($cart_data);
 }
 
 /**
- * Convert a state name to its 2-letter USPS abbreviation.
- * Accepts an already-abbreviated 2-letter code as pass-through.
+ * Retrieve the file_source (S3 bucket base URL) from plugin config.
  *
- * @param string $state State name or 2-letter code
- * @return string 2-letter uppercase code, or original string if not recognized
+ * @return string Base URL (no trailing slash) or empty string
  */
-function tigon_dms_get_state_abbr($state) {
-    $state = trim((string) $state);
-    if ($state === '') {
+function tigon_dms_get_file_source() {
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'tigon_dms_config';
+    $value = $wpdb->get_var("SELECT option_value FROM $table_name WHERE option_name = 'file_source'");
+    // Fall back to the plugin's default S3 prefix when the option is empty
+    // or unset. Admins can override via Settings, but image sync will always
+    // have a working base URL out of the box.
+    if (empty($value) && defined('TIGON_DMS_DEFAULT_FILE_SOURCE')) {
+        $value = TIGON_DMS_DEFAULT_FILE_SOURCE;
+    }
+    return $value ? rtrim($value, '/') : '';
+}
+
+/**
+ * Build the full S3 URL for a single DMS image filename.
+ *
+ * The plugin's file_source setting can be configured two ways:
+ *   - "https://s3.amazonaws.com/bucket"               → we append /carts/<name>
+ *   - "https://s3.amazonaws.com/bucket/carts/"        → we append <name> directly
+ *   - "https://s3.amazonaws.com/bucket/carts"         → we append /<name>
+ *
+ * If the image filename itself is already a full URL (starts with http),
+ * it's returned as-is (supports pre-signed / absolute-URL deliveries).
+ *
+ * @param string $file_source Configured file_source base URL.
+ * @param string $image_name  Single image filename or relative path from imageUrls.
+ * @return string Full URL ready for download.
+ */
+function tigon_dms_build_image_url($file_source, $image_name) {
+    $image_name = ltrim(trim((string) $image_name), '/');
+    if ($image_name === '') {
         return '';
     }
-    if (strlen($state) === 2) {
-        return strtoupper($state);
+    // Image is already a full URL (pre-signed, absolute): use as-is.
+    if (preg_match('~^https?://~i', $image_name)) {
+        return $image_name;
     }
-    $map = array(
-        'Alabama' => 'AL', 'Alaska' => 'AK', 'Arizona' => 'AZ', 'Arkansas' => 'AR',
-        'California' => 'CA', 'Colorado' => 'CO', 'Connecticut' => 'CT', 'Delaware' => 'DE',
-        'Florida' => 'FL', 'Georgia' => 'GA', 'Hawaii' => 'HI', 'Idaho' => 'ID',
-        'Illinois' => 'IL', 'Indiana' => 'IN', 'Iowa' => 'IA', 'Kansas' => 'KS',
-        'Kentucky' => 'KY', 'Louisiana' => 'LA', 'Maine' => 'ME', 'Maryland' => 'MD',
-        'Massachusetts' => 'MA', 'Michigan' => 'MI', 'Minnesota' => 'MN', 'Mississippi' => 'MS',
-        'Missouri' => 'MO', 'Montana' => 'MT', 'Nebraska' => 'NE', 'Nevada' => 'NV',
-        'New Hampshire' => 'NH', 'New Jersey' => 'NJ', 'New Mexico' => 'NM', 'New York' => 'NY',
-        'North Carolina' => 'NC', 'North Dakota' => 'ND', 'Ohio' => 'OH', 'Oklahoma' => 'OK',
-        'Oregon' => 'OR', 'Pennsylvania' => 'PA', 'Rhode Island' => 'RI', 'South Carolina' => 'SC',
-        'South Dakota' => 'SD', 'Tennessee' => 'TN', 'Texas' => 'TX', 'Utah' => 'UT',
-        'Vermont' => 'VT', 'Virginia' => 'VA', 'Washington' => 'WA', 'West Virginia' => 'WV',
-        'Wisconsin' => 'WI', 'Wyoming' => 'WY', 'District of Columbia' => 'DC',
-    );
-    $key = ucwords(strtolower($state));
-    return $map[$key] ?? $state;
+    $base = rtrim((string) $file_source, '/');
+    if ($base === '') {
+        return '';
+    }
+    // If file_source already ends in /carts, don't double-append.
+    if (preg_match('~/carts$~i', $base)) {
+        return $base . '/' . $image_name;
+    }
+    return $base . '/carts/' . $image_name;
 }
 
 /**
- * Compute the location watermark text (_tigonwm) for a DMS cart.
- * Matches the legacy mapped-logic format: "{City Short} {ST}" or "TIGON® RENTALS" for rentals.
+ * Read a single option from the tigon_dms_config table.
  *
- * @param array $cart_data Full DMS cart payload
- * @return string Watermark text (e.g., "Lecanto FL", "South Bend IN", "TIGON® RENTALS")
+ * @param string      $option_name  Option key
+ * @param string|null $default      Fallback when row is missing or empty
+ * @return string|null
  */
-function tigon_dms_get_watermark_text($cart_data) {
-    if (!empty($cart_data['isRental'])) {
-        return 'TIGON® RENTALS';
-    }
-
-    $store_id = $cart_data['cartLocation']['locationId'] ?? '';
-    if (empty($store_id) || !class_exists('DMS_API')) {
-        return 'TIGON®';
-    }
-
-    $location_data = DMS_API::get_city_and_state_by_store_id($store_id);
-    $city = $location_data['city'] ?? '';
-    $state = $location_data['state'] ?? '';
-
-    if ($city === '' && $state === '') {
-        return 'TIGON®';
-    }
-
-    // Short-name overrides for cities with long/compound names.
-    $city_short_map = array(
-        'Scranton Wilkes-Barre' => 'Scranton',
+function tigon_dms_get_config($option_name, $default = null) {
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'tigon_dms_config';
+    $value = $wpdb->get_var(
+        $wpdb->prepare("SELECT option_value FROM {$table_name} WHERE option_name = %s LIMIT 1", $option_name)
     );
-    $city_short = $city_short_map[$city] ?? $city;
-    $state_abbr = tigon_dms_get_state_abbr($state);
+    return ($value !== null && $value !== '') ? $value : $default;
+}
 
-    return trim($city_short . ' ' . $state_abbr);
+/**
+ * Write a single option to the tigon_dms_config table (upsert).
+ *
+ * @param string $option_name
+ * @param string $option_value
+ */
+function tigon_dms_set_config($option_name, $option_value) {
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'tigon_dms_config';
+    $exists = $wpdb->get_var(
+        $wpdb->prepare("SELECT COUNT(*) FROM {$table_name} WHERE option_name = %s", $option_name)
+    );
+    if ($exists) {
+        $wpdb->update($table_name, ['option_value' => $option_value], ['option_name' => $option_name]);
+    } else {
+        $wpdb->insert($table_name, ['option_name' => $option_name, 'option_value' => $option_value]);
+    }
+}
+
+/**
+ * Get the showcase locations configuration.
+ *
+ * Returns an associative array keyed by location slug (e.g. 'national',
+ * 'tigon_hatfield') with 'landing_page', 'archive', and 'archive_not_in'
+ * for each location.
+ *
+ * Priority: stored config → slug-based page lookup → empty (skip).
+ *
+ * @return array<string, array{landing_page: int, archive: int, archive_not_in: int[]}>
+ */
+function tigon_dms_get_showcase_locations() {
+    $json = tigon_dms_get_config('showcase_locations', '');
+    $locations = $json ? json_decode($json, true) : null;
+    if (is_array($locations) && !empty($locations)) {
+        return $locations;
+    }
+
+    // Fallback: slug-based page lookup for known locations
+    $location_slugs = [
+        'national'        => ['landing_slug' => 'shop',               'archive_slug' => ''],
+        'tigon_hatfield'  => ['landing_slug' => 'tigon-hatfield',     'archive_slug' => 'tigon-hatfield-archive'],
+        'tigon_ocean_view'=> ['landing_slug' => 'tigon-ocean-view',   'archive_slug' => 'tigon-ocean-view-archive'],
+        'tigon_pocono'    => ['landing_slug' => 'tigon-pocono',       'archive_slug' => 'tigon-pocono-archive'],
+        'tigon_dover'     => ['landing_slug' => 'tigon-dover',        'archive_slug' => 'tigon-dover-archive'],
+        'tigon_scranton'  => ['landing_slug' => 'tigon-scranton',     'archive_slug' => 'tigon-scranton-archive'],
+    ];
+
+    $locations = [];
+    $all_archive_ids = [];
+
+    foreach ($location_slugs as $key => $slugs) {
+        $landing_page = 0;
+        $archive      = 0;
+
+        if (!empty($slugs['landing_slug'])) {
+            $page = get_page_by_path($slugs['landing_slug']);
+            $landing_page = $page ? (int) $page->ID : 0;
+        }
+        if (!empty($slugs['archive_slug'])) {
+            $page = get_page_by_path($slugs['archive_slug']);
+            $archive = $page ? (int) $page->ID : 0;
+        }
+
+        if ($archive) {
+            $all_archive_ids[] = $archive;
+        }
+
+        $locations[$key] = [
+            'landing_page'   => $landing_page,
+            'archive'        => $archive,
+            'archive_not_in' => [],
+        ];
+    }
+
+    // National's archive_not_in = all location archive IDs
+    if (isset($locations['national'])) {
+        $locations['national']['archive_not_in'] = $all_archive_ids;
+    }
+
+    return $locations;
+}
+
+/**
+ * Get the WooCommerce product_cat term_taxonomy_id for the "new active inventory" category.
+ *
+ * Priority: stored config → slug lookup → 0.
+ *
+ * @return int
+ */
+function tigon_dms_get_new_inventory_term_taxonomy_id() {
+    $stored = tigon_dms_get_config('new_inventory_term_slug', '');
+
+    // If stored value is numeric, treat as direct term_taxonomy_id
+    if ($stored !== '' && is_numeric($stored)) {
+        return (int) $stored;
+    }
+
+    // Slug-based lookup
+    $slug = ($stored !== '') ? $stored : 'local-new-active-inventory';
+    $term = get_term_by('slug', $slug, 'product_cat');
+    if ($term) {
+        return (int) $term->term_taxonomy_id;
+    }
+
+    // Try by name as final fallback
+    $term = get_term_by('name', 'Local New Active Inventory', 'product_cat');
+    return $term ? (int) $term->term_taxonomy_id : 0;
+}
+
+/**
+ * Get the WooCommerce product_cat term_taxonomy_id for the "used active inventory" category.
+ *
+ * Priority: stored config → slug lookup → 0.
+ *
+ * @return int
+ */
+function tigon_dms_get_used_inventory_term_taxonomy_id() {
+    $stored = tigon_dms_get_config('used_inventory_term_slug', '');
+
+    if ($stored !== '' && is_numeric($stored)) {
+        return (int) $stored;
+    }
+
+    $slug = ($stored !== '') ? $stored : 'local-used-active-inventory';
+    $term = get_term_by('slug', $slug, 'product_cat');
+    if ($term) {
+        return (int) $term->term_taxonomy_id;
+    }
+
+    $term = get_term_by('name', 'Local Used Active Inventory', 'product_cat');
+    return $term ? (int) $term->term_taxonomy_id : 0;
+}
+
+/**
+ * Download DMS cart images from S3 and attach them to a WooCommerce product.
+ *
+ * Sets _thumbnail_id (featured image) and _product_image_gallery (gallery)
+ * so images display natively through WooCommerce.
+ *
+ * @param int    $product_id  WooCommerce product ID
+ * @param array  $image_names Array of image filenames from DMS (imageUrls)
+ * @param string $title       Product title (used for image alt/title text)
+ * @param array  $cart_data   Full DMS cart payload (for template variables)
+ */
+function tigon_dms_download_and_attach_images($product_id, $image_names, $title, $cart_data = array()) {
+    // WooCommerce placeholder image attachment ID (used when DMS has no images)
+    $placeholder_image_id = 204304;
+
+    if (empty($image_names) || !is_array($image_names)) {
+        // No images from DMS — use WooCommerce placeholder image
+        $current_thumb = get_post_thumbnail_id($product_id);
+        if (!$current_thumb || (int) $current_thumb === $placeholder_image_id) {
+            set_post_thumbnail($product_id, $placeholder_image_id);
+            update_post_meta($product_id, '_product_image_gallery', '');
+        }
+        return;
+    }
+
+    // Real images arrived — remove placeholder if it was the featured image
+    $current_thumb = get_post_thumbnail_id($product_id);
+    if ((int) $current_thumb === $placeholder_image_id) {
+        delete_post_thumbnail($product_id);
+    }
+
+    $file_source = tigon_dms_get_file_source();
+    if (empty($file_source)) {
+        error_log('DMS Sync: Cannot download images — file_source not configured.');
+        return;
+    }
+
+    \Tigon\DmsConnect\Includes\Product_Media::require_media_functions();
+
+    // Build image name from schema template
+    $templates = tigon_dms_get_schema_templates();
+    $vars      = !empty($cart_data) ? tigon_dms_build_template_variables_from_cart($cart_data) : array();
+    $image_tpl = isset($templates['schema_image_name']) && $templates['schema_image_name'] !== ''
+        ? $templates['schema_image_name']
+        : '{^make} {^model} {cartColor} in {city}, {stateAbbr} image';
+
+    // ────────────────────────────────────────────────────────────
+    // Safe image sync: download-first, swap, then cleanup.
+    //
+    // The old code deleted all existing media BEFORE downloading
+    // replacements, which left products imageless if the download
+    // failed. Now we:
+    //   1. Remember which attachment IDs the product currently owns
+    //   2. Download all new images into fresh attachments
+    //   3. Only if we got at least one successful download, swap
+    //      the product to use the new attachments and delete the
+    //      old ones. Otherwise, leave the old images in place and
+    //      log a warning so the admin knows a sync cycle failed.
+    // ────────────────────────────────────────────────────────────
+
+    // Snapshot the currently-attached media so we can delete it later
+    // ONLY if new downloads succeed. Excludes the shared placeholder
+    // image — we never want to delete that.
+    $old_ids = array();
+    $old_featured = (int) get_post_thumbnail_id($product_id);
+    if ($old_featured && $old_featured !== \Tigon\DmsConnect\Includes\Product_Media::PLACEHOLDER_IMAGE_ID) {
+        $old_ids[] = $old_featured;
+    }
+    $old_gallery_str = get_post_meta($product_id, '_product_image_gallery', true);
+    if (!empty($old_gallery_str)) {
+        foreach (array_filter(array_map('intval', explode(',', $old_gallery_str))) as $gid) {
+            if ($gid !== \Tigon\DmsConnect\Includes\Product_Media::PLACEHOLDER_IMAGE_ID) {
+                $old_ids[] = $gid;
+            }
+        }
+    }
+
+    $attachment_ids = array();
+    $i = 0;
+    $download_failures = 0;
+
+    foreach ($image_names as $remote_image_name) {
+        if (empty($remote_image_name)) {
+            continue;
+        }
+
+        $url = tigon_dms_build_image_url($file_source, $remote_image_name);
+        if ($url === '') {
+            continue;
+        }
+
+        // Generate descriptive filename from schema template
+        $vars['index'] = $i + 1;
+        $image_name = tigon_dms_evaluate_template($image_tpl, $vars, false);
+        $image_filename = preg_replace('/\s+/', '-', strtolower($image_name));
+
+        $image_data = array(
+            'post_title'   => $image_name,
+            'post_content' => $title,
+            'post_excerpt' => $title,
+        );
+        $image_meta = array(
+            '_wp_attachment_image_alt' => $title,
+            '_dms_image_url'           => $url,
+        );
+
+        $att_id = \Tigon\DmsConnect\Includes\Somatic::attach_external_image(
+            url: $url,
+            post_id: $product_id,
+            filename: $image_filename,
+            post_data: $image_data,
+            metadata: $image_meta
+        );
+
+        if (!is_wp_error($att_id)) {
+            $attachment_ids[] = $att_id;
+        } else {
+            $download_failures++;
+            error_log('DMS Sync: Failed to download image ' . $url . ' for product ' . $product_id . ': ' . $att_id->get_error_message());
+        }
+
+        $i++;
+    }
+
+    // If NO new images succeeded, abort: keep existing images intact.
+    // The sync will try again next cycle.
+    if (empty($attachment_ids)) {
+        if ($download_failures > 0) {
+            error_log('DMS Sync: All ' . $download_failures . ' image downloads failed for product ' . $product_id . '. Keeping existing images.');
+            update_post_meta($product_id, '_dms_image_sync_last_error', time());
+        }
+        return;
+    }
+
+    // Swap: apply new featured + gallery
+    $new_ids  = $attachment_ids; // copy before array_shift mutates
+    $featured = array_shift($attachment_ids);
+    set_post_thumbnail($product_id, $featured);
+
+    if (!empty($attachment_ids)) {
+        update_post_meta($product_id, '_product_image_gallery', implode(',', $attachment_ids));
+    } else {
+        delete_post_meta($product_id, '_product_image_gallery');
+    }
+
+    // Cleanup old attachments — only those not reused by the new set
+    // (defensive: in case attach_external_image ever returns the same ID)
+    $new_set = array_flip($new_ids);
+    foreach ($old_ids as $old_id) {
+        if (!isset($new_set[$old_id])) {
+            wp_delete_attachment($old_id, true);
+        }
+    }
+
+    // Clear any previous failure marker now that sync succeeded
+    delete_post_meta($product_id, '_dms_image_sync_last_error');
 }
 
 /**
@@ -449,44 +1097,48 @@ function tigon_dms_ensure_woo_product($cart_data, $cart_id) {
     $retail_price = $cart_data['retailPrice'] ?? 0;
     $store_id     = $cart_data['cartLocation']['locationId'] ?? '';
     
-    // Get location info
-    $location_data = DMS_API::get_city_and_state_by_store_id($store_id);
-    $city = $location_data['city'];
-    $state = $location_data['state'];
-    $location_string = trim($city . ', ' . $state, ', ');
-    
-    // Build product title with ® between make and model (using " In " for location separator)
-    $title_parts = array();
-    if (!empty($make) && !empty($model)) {
-        $title_parts[] = $make . '® ' . $model;
-    } elseif (!empty($make)) {
-        $title_parts[] = $make;
-    } elseif (!empty($model)) {
-        $title_parts[] = $model;
-    }
-    if (!empty($color)) {
-        $title_parts[] = $color;
-    }
-    $title = trim(implode(' ', $title_parts));
-    if (!empty($location_string)) {
-        $title .= ' In ' . $location_string;
-    }
+    // Build title using schema template
+    $templates = tigon_dms_get_schema_templates();
+    $vars      = tigon_dms_build_template_variables_from_cart($cart_data);
+    $name_tpl  = isset($templates['schema_name']) && $templates['schema_name'] !== ''
+        ? $templates['schema_name']
+        : '{^make}® {^model} {cartColor} in {city}, {stateAbbr}';
+
+    $title = tigon_dms_evaluate_template($name_tpl, $vars, false);
     
     // Parse DMS cart data for meta storage
     $specs = tigon_dms_parse_cart_specs($cart_data);
     $images = tigon_dms_parse_cart_images($cart_data);
     $warranty = tigon_dms_parse_cart_warranty($cart_data);
     
-    // Check if product already exists
-    $existing_product_id = tigon_dms_get_product_by_cart_id($cart_id);
-    
+    // ── Find existing product (pid → cart_id → SKU/vinNo) ──────
+    $existing_product_id = tigon_dms_find_existing_product($cart_id, $cart_data);
+
     if ($existing_product_id) {
+        // Ensure _dms_cart_id meta is set so future syncs find it faster
+        update_post_meta($existing_product_id, '_dms_cart_id', sanitize_text_field($cart_id));
         // Update existing product
-        return tigon_dms_update_woo_product($existing_product_id, $title, $retail_price, $cart_data, $specs, $images, $warranty);
+        $pid = tigon_dms_update_woo_product($existing_product_id, $title, $retail_price, $cart_data, $specs, $images, $warranty);
+    } else {
+        // Create new product only when no existing match was found
+        $pid = tigon_dms_create_woo_product($cart_id, $title, $retail_price, $cart_data, $specs, $images, $warranty);
     }
-    
-    // Create new product
-    return tigon_dms_create_woo_product($cart_id, $title, $retail_price, $cart_data, $specs, $images, $warranty);
+
+    // Auto-apply any matching Global Pricing Rule. This ensures that
+    // newly-imported products (and existing unmanaged ones) pick up
+    // their rule-defined price immediately, without waiting for a
+    // manual rule refresh. Products already managed by the Pricing
+    // page had their DMS price skipped above, so the rule price stays.
+    if ($pid && class_exists('\Tigon\DmsConnect\Admin\Pricing_Page')) {
+        try {
+            \Tigon\DmsConnect\Admin\Pricing_Page::apply_matching_rule((int) $pid);
+        } catch (\Throwable $e) {
+            // Non-fatal: sync should never fail because pricing rule application failed.
+            error_log('[DMS Pricing] apply_matching_rule failed for product ' . $pid . ': ' . $e->getMessage());
+        }
+    }
+
+    return $pid;
 }
 
 /**
@@ -500,22 +1152,43 @@ function tigon_dms_get_existing_category($category_name, $parent_id = null) {
     if (empty($category_name)) {
         return 0;
     }
-    
+
     $sanitized_name = sanitize_text_field($category_name);
     $slug = sanitize_title($sanitized_name);
-    
+
     // Try to find existing category by slug
     $term = get_term_by('slug', $slug, 'product_cat');
-    
+
     if ($term) {
-        // If parent_id is specified, verify it matches
+        // If a specific parent was requested, prefer an exact parent match.
+        // If the term exists under a different parent, fall back to that
+        // term anyway — better to categorise the product than drop it
+        // entirely because the category hierarchy was reorganised on the
+        // WooCommerce side.
         if ($parent_id !== null && $term->parent != $parent_id) {
-            return 0; // Category exists but with different parent
+            // Look up all terms with this slug via a broader query; in
+            // WooCommerce term slugs are unique per taxonomy, so this
+            // won't actually find siblings. We just accept the found
+            // term as-is and let the caller decide.
+            return (int) $term->term_id;
         }
         return (int) $term->term_id;
     }
-    
-    return 0; // Category doesn't exist
+
+    // Slug didn't hit — try matching by name, case-insensitive, in case
+    // the name was set differently from sanitize_title's output (e.g. the
+    // admin created "Electric Carts" but code looks up "electric").
+    $by_name = get_terms([
+        'taxonomy'   => 'product_cat',
+        'name'       => $sanitized_name,
+        'hide_empty' => false,
+        'number'     => 1,
+    ]);
+    if (!is_wp_error($by_name) && !empty($by_name)) {
+        return (int) $by_name[0]->term_id;
+    }
+
+    return 0; // Category genuinely doesn't exist
 }
 
 /**
@@ -540,6 +1213,50 @@ function tigon_dms_get_product_by_cart_id($cart_id) {
 }
 
 /**
+ * Find an existing WooCommerce product using a three-layer lookup:
+ *   1. pid from DMS cart payload (previously reported back)
+ *   2. _dms_cart_id post-meta
+ *   3. WooCommerce SKU matching vinNo or serialNo
+ *
+ * @param string $cart_id   DMS cart _id
+ * @param array  $cart_data Full DMS cart payload
+ * @return int|false Product ID or false if not found
+ */
+function tigon_dms_find_existing_product($cart_id, $cart_data = array()) {
+    // Layer 1: pid from DMS
+    if (!empty($cart_data['pid'])) {
+        $product = wc_get_product($cart_data['pid']);
+        if ($product !== false) {
+            return (int) $cart_data['pid'];
+        }
+    }
+
+    // Layer 2: _dms_cart_id meta
+    $found = tigon_dms_get_product_by_cart_id($cart_id);
+    if ($found) {
+        return $found;
+    }
+
+    // Layer 3: SKU (vinNo > serialNo)
+    if (function_exists('wc_get_product_id_by_sku')) {
+        $lookup_sku = '';
+        if (!empty($cart_data['vinNo'])) {
+            $lookup_sku = $cart_data['vinNo'];
+        } elseif (!empty($cart_data['serialNo'])) {
+            $lookup_sku = $cart_data['serialNo'];
+        }
+        if ($lookup_sku !== '') {
+            $sku_product_id = wc_get_product_id_by_sku($lookup_sku);
+            if ($sku_product_id) {
+                return (int) $sku_product_id;
+            }
+        }
+    }
+
+    return false;
+}
+
+/**
  * Create a new WooCommerce product from DMS cart
  *
  * @param string $cart_id    DMS cart ID
@@ -554,26 +1271,46 @@ function tigon_dms_get_product_by_cart_id($cart_id) {
 function tigon_dms_create_woo_product($cart_id, $title, $price, $cart_data, $specs = array(), $images = array(), $warranty = array()) {
     // Normalize title for consistency (e.g., "In" → "-")
     $normalized_title = tigon_dms_normalize_title($title);
-    
-    // Create product post
+
+    // Build template variables from cart data for slug generation
+    $templates = tigon_dms_get_schema_templates();
+    $vars      = tigon_dms_build_template_variables_from_cart($cart_data);
+
+    // Use slug schema template when available, otherwise derive from title
+    $slug_tpl = isset($templates['schema_slug']) && $templates['schema_slug'] !== ''
+        ? $templates['schema_slug']
+        : '{make}-{model}-{cartColor}-seat-{seatColor}-{city}-{state}';
+    $slug = tigon_dms_evaluate_template($slug_tpl, $vars, true);
+
+    // Evaluate product readiness: draft if required mappings are missing
+    $readiness = \Tigon\DmsConnect\Includes\Product_Readiness::evaluate($cart_data);
+    $post_status = $readiness['status'];
+
     $product_id = wp_insert_post(array(
-        'post_title'   => sanitize_text_field($normalized_title),
-        'post_name'    => sanitize_title($normalized_title),
-        'post_status'  => 'publish',
-        'post_type'    => 'product',
-        'post_content' => '', // Content comes from DMS payload via template
+        'post_title'     => sanitize_text_field($normalized_title),
+        'post_name'      => $slug,
+        'post_status'    => $post_status,
+        'post_type'      => 'product',
+        'post_content'   => '', // Content comes from DMS payload via template
+        'comment_status' => 'open',
+        'ping_status'    => 'closed',
+        'post_author'    => 3,
     ));
-    
+
     if (is_wp_error($product_id) || !$product_id) {
         return false;
     }
-    
+
+    // Store readiness state so we can re-evaluate on subsequent syncs
+    if ($post_status === 'draft') {
+        update_post_meta($product_id, '_dms_readiness_missing', wp_json_encode($readiness['missing']));
+    }
+
     // Set product type to simple
     wp_set_object_terms($product_id, 'simple', 'product_type');
     
-    // Make product visible in catalog (needed for inventory page)
-    // Set visibility to 'visible' (appears in both catalog and search)
-    wp_set_object_terms($product_id, array('visible'), 'product_visibility');
+    // Make product visible in catalog and featured
+    wp_set_object_terms($product_id, array('featured'), 'product_visibility');
     
     // Assign product categories (only use existing categories, don't create new ones)
     $categories = array();
@@ -670,7 +1407,7 @@ function tigon_dms_create_woo_product($cart_id, $title, $price, $cart_data, $spe
         $store_data = DMS_API::get_city_and_state_by_store_id($store_id);
         $city = $store_data['city'] ?? '';
         $state = $store_data['state'] ?? '';
-        
+
         if (!empty($city) && !empty($state)) {
             $dealership_name = 'TIGON Golf Carts ' . $city . ' ' . $state;
             $dealership_parent_id = tigon_dms_get_existing_category('TIGON Dealership', 0);
@@ -682,30 +1419,211 @@ function tigon_dms_create_woo_product($cart_id, $title, $price, $cart_data, $spe
             }
         }
     }
-    
+
+    // 7. Golf Carts top-level category
+    $golf_carts_cat_id = tigon_dms_get_existing_category('Golf Carts', 0);
+    if ($golf_carts_cat_id) {
+        $categories[] = $golf_carts_cat_id;
+    }
+
+    // 8. Power type categories (Electric/Gas, battery type, voltage, street legal)
+    $is_electric = isset($cart_data['isElectric']) && $cart_data['isElectric'];
+    $is_street_legal = isset($cart_data['title']['isStreetLegal']) && $cart_data['title']['isStreetLegal'];
+
+    if ($is_electric) {
+        $electric_cat_id = tigon_dms_get_existing_category('Electric', 0);
+        if ($electric_cat_id) {
+            $categories[] = $electric_cat_id;
+        }
+
+        $zev_cat_id = tigon_dms_get_existing_category('Zero Emission Vehicles (ZEVs)', 0);
+        if ($zev_cat_id) {
+            $categories[] = $zev_cat_id;
+        }
+
+        // Battery type category (Lithium / Lead-Acid)
+        $battery_type = $cart_data['battery']['type'] ?? '';
+        if ($battery_type === 'Lithium') {
+            $lithium_cat_id = tigon_dms_get_existing_category('Lithium', 0);
+            if ($lithium_cat_id) {
+                $categories[] = $lithium_cat_id;
+            }
+        } elseif ($battery_type === 'Lead') {
+            $lead_cat_id = tigon_dms_get_existing_category('Lead-Acid', 0);
+            if ($lead_cat_id) {
+                $categories[] = $lead_cat_id;
+            }
+        }
+
+        // Voltage category
+        $pack_voltage = $cart_data['battery']['packVoltage'] ?? '';
+        if (!empty($pack_voltage)) {
+            $voltage_cat_id = tigon_dms_get_existing_category($pack_voltage . ' Volt', 0);
+            if ($voltage_cat_id) {
+                $categories[] = $voltage_cat_id;
+            }
+        }
+
+        // Street legal electric categories
+        if ($is_street_legal) {
+            foreach (['Street Legal', 'Neighborhood Electric Vehicles (NEVs)', 'Battery Electric Vehicles (BEVs)', 'Low Speed Vehicles (LSVs)', 'Medium Speed Vehicles (MSVs)'] as $cat_name) {
+                $cat_id = tigon_dms_get_existing_category($cat_name, 0);
+                if ($cat_id) {
+                    $categories[] = $cat_id;
+                }
+            }
+        }
+    } else {
+        $gas_cat_id = tigon_dms_get_existing_category('Gas', 0);
+        if ($gas_cat_id) {
+            $categories[] = $gas_cat_id;
+        }
+        $ptv_cat_id = tigon_dms_get_existing_category('Personal Transportation Vehicles (PTVs)', 0);
+        if ($ptv_cat_id) {
+            $categories[] = $ptv_cat_id;
+        }
+    }
+
+    // 9. Lifted / Non-Lifted category
+    $is_lifted = isset($cart_data['cartAttributes']['isLifted']) && $cart_data['cartAttributes']['isLifted'];
+    if ($is_lifted) {
+        $lifted_cat_id = tigon_dms_get_existing_category('Lifted', 0);
+        if ($lifted_cat_id) {
+            $categories[] = $lifted_cat_id;
+        }
+    } else {
+        $non_lifted_cat_id = tigon_dms_get_existing_category('NON-Lifted', 0);
+        if ($non_lifted_cat_id) {
+            $categories[] = $non_lifted_cat_id;
+        }
+    }
+
+    // 10. Seating categories
+    if (!empty($passengers)) {
+        if ($passengers === 'Utility') {
+            $seater_cat_id = tigon_dms_get_existing_category('2 Seater', 0);
+        } else {
+            $num_seats = explode(' ', $passengers)[0];
+            $seater_cat_id = tigon_dms_get_existing_category($num_seats . ' Seater', 0);
+        }
+        if (!empty($seater_cat_id)) {
+            $categories[] = $seater_cat_id;
+        }
+    }
+
+    // 10b. Utility Task Vehicles (UTVs) — for Utility passengers
+    if (($cart_data['cartAttributes']['passengers'] ?? '') === 'Utility') {
+        $utv_cat_id = tigon_dms_get_existing_category('Utility Task Vehicles (UTVs)', 0);
+        if ($utv_cat_id) {
+            $categories[] = $utv_cat_id;
+        }
+    }
+
+    // 11. New/Used category
+    $new_used_cat_id = tigon_dms_get_existing_category($is_used ? 'Used' : 'New', 0);
+    if ($new_used_cat_id) {
+        $categories[] = $new_used_cat_id;
+    }
+
+    // 12. Inventory status category
+    $is_rental = !empty($cart_data['isRental']);
+    if ($is_rental) {
+        if ($is_used) {
+            $inv_cat_id = tigon_dms_get_existing_category('Local Used Rental Inventory', 0);
+        } else {
+            $inv_cat_id = tigon_dms_get_existing_category('Local New Rental Inventory', 0);
+        }
+        // Also add Rental category
+        $rental_cat_id = tigon_dms_get_existing_category('Rental', 0);
+        if ($rental_cat_id) {
+            $categories[] = $rental_cat_id;
+        }
+    } else {
+        if ($is_used) {
+            $inv_cat_id = tigon_dms_get_existing_category('Local Used Active Inventory', 0);
+        } else {
+            $inv_cat_id = tigon_dms_get_existing_category('Local New Active Inventory', 0);
+        }
+    }
+    if (!empty($inv_cat_id)) {
+        $categories[] = $inv_cat_id;
+    }
+
+    // 13. Parent hierarchy categories (Passengers, Drivetrain, Power Source, Batteries, Vehicle Class, Location)
+    foreach (array('Passengers', 'DriveTrain', 'Power Source', 'Vehicle Class', 'Location') as $parent_name) {
+        $parent_id = tigon_dms_get_existing_category($parent_name, 0);
+        if ($parent_id) {
+            $categories[] = $parent_id;
+        }
+    }
+
+    // Batteries parent (electric only)
+    if (isset($cart_data['isElectric']) && $cart_data['isElectric']) {
+        $batteries_cat_id = tigon_dms_get_existing_category('Batteries', 0);
+        if ($batteries_cat_id) {
+            $categories[] = $batteries_cat_id;
+        }
+    }
+
     // Assign all categories to product
+    $categories = array_unique(array_filter($categories));
     if (!empty($categories)) {
         wp_set_object_terms($product_id, $categories, 'product_cat');
     }
-    
+
     // Set DMS meta
     update_post_meta($product_id, '_dms_cart_id', sanitize_text_field($cart_id));
     update_post_meta($product_id, '_dms_payload', wp_json_encode($cart_data));
-
-    // Location watermark badge (_tigonwm) derived from this cart's actual location,
-    // so Lecanto products show "Lecanto FL" instead of falling back to the
-    // WooCommerce store-location default.
-    update_post_meta($product_id, '_tigonwm', tigon_dms_get_watermark_text($cart_data));
 
     // Store parsed DMS cart data in structured meta
     update_post_meta($product_id, '_dms_cart_specs', $specs);
     update_post_meta($product_id, '_dms_cart_images', $images);
     update_post_meta($product_id, '_dms_cart_warranty', $warranty);
-    
-    // Price fields for WooCommerce compatibility
-    update_post_meta($product_id, '_regular_price', floatval($price));
-    update_post_meta($product_id, '_price', floatval($price));
-    
+
+    // SKU (VIN > Serial > Generated fallback)
+    $sku = '';
+    if (!empty($cart_data['vinNo'])) {
+        $sku = $cart_data['vinNo'];
+    } elseif (!empty($cart_data['serialNo'])) {
+        $sku = $cart_data['serialNo'];
+    } else {
+        // Resolve city for fallback SKU (store_id may have been looked up earlier for categories)
+        $fallback_city = '';
+        if (!empty($store_id)) {
+            $fb_store_data = DMS_API::get_city_and_state_by_store_id($store_id);
+            $fallback_city = $fb_store_data['city'] ?? '';
+        }
+        $sku = strtoupper(
+            substr(preg_replace('/\s/', '', $make), 0, 3) .
+            substr(preg_replace('/\s/', '', $model), 0, 3) .
+            substr(preg_replace('/\s/', '', $cart_data['cartAttributes']['cartColor'] ?? ''), 0, 3) .
+            substr(preg_replace('/\s/', '', $cart_data['cartAttributes']['seatColor'] ?? ''), 0, 3) .
+            substr(preg_replace('/\s/', '', $fallback_city), 0, 3)
+        );
+    }
+    if (!empty($sku)) {
+        update_post_meta($product_id, '_sku', sanitize_text_field($sku));
+    }
+
+    // Price fields for WooCommerce compatibility (only set if valid price)
+    // Prices must be stored as decimal strings (e.g. "7995.00") for valid structured data
+    if (!empty($price) && floatval($price) > 0) {
+        $formatted_price = number_format(floatval($price), 2, '.', '');
+        update_post_meta($product_id, '_regular_price', $formatted_price);
+        update_post_meta($product_id, '_price', $formatted_price);
+
+        // Sale price
+        $sale_price = $cart_data['salePrice'] ?? '';
+        if (!empty($sale_price) && floatval($sale_price) > 0 && floatval($sale_price) < floatval($price)) {
+            $formatted_sale = number_format(floatval($sale_price), 2, '.', '');
+            update_post_meta($product_id, '_sale_price', $formatted_sale);
+            update_post_meta($product_id, '_price', $formatted_sale);
+        }
+    } else {
+        // Log warning for products with no valid price
+        error_log('DMS Sync: Product ' . $product_id . ' (cart ' . $cart_id . ') has no valid retailPrice: ' . var_export($price, true));
+    }
+
     // Enable shipping (not virtual)
     update_post_meta($product_id, '_virtual', 'no');
     update_post_meta($product_id, '_downloadable', 'no');
@@ -724,7 +1642,46 @@ function tigon_dms_create_woo_product($cart_id, $title, $price, $cart_data, $spe
     update_post_meta($product_id, '_visibility', 'visible'); // Visible in catalog and search
     update_post_meta($product_id, '_sold_individually', 'yes');
     update_post_meta($product_id, '_backorders', 'no');
-    
+
+    // Google/Facebook product feed meta
+    $condition = $is_used ? 'used' : 'new';
+    $color = $cart_data['cartAttributes']['cartColor'] ?? '';
+    update_post_meta($product_id, '_wc_gla_condition', $condition);
+    update_post_meta($product_id, '_wc_gla_brand', strtoupper($make));
+    update_post_meta($product_id, '_wc_gla_color', strtoupper($color));
+    update_post_meta($product_id, '_wc_gla_pattern', $model);
+    // Global Unique ID (GUI) — algorithmic trade ID from SKU (mirrors Database_Object)
+    $gui = tigon_dms_compute_gui($sku);
+    update_post_meta($product_id, '_global_unique_id', $gui);
+    update_post_meta($product_id, '_wc_gla_gtin', '');
+    update_post_meta($product_id, '_wc_gla_mpn', $gui);
+    update_post_meta($product_id, '_wc_gla_sizeSystem', 'US');
+    update_post_meta($product_id, '_wc_facebook_enhanced_catalog_attributes_brand', strtoupper($make));
+    update_post_meta($product_id, '_wc_facebook_enhanced_catalog_attributes_color', strtoupper($color));
+    update_post_meta($product_id, '_wc_facebook_enhanced_catalog_attributes_condition', $condition);
+    update_post_meta($product_id, '_wc_facebook_enhanced_catalog_attributes_pattern', $model);
+    update_post_meta($product_id, '_wc_facebook_product_image_source', 'product');
+    update_post_meta($product_id, '_wc_facebook_sync_enabled', 'yes');
+    update_post_meta($product_id, '_wc_fb_visibility', 'yes');
+    update_post_meta($product_id, '_wc_pinterest_condition', $condition);
+    update_post_meta($product_id, '_wc_pinterest_google_product_category', 'Vehicles & Parts > Vehicles > Motor Vehicles > Golf Carts');
+
+    // Download defaults (mirrors Database_Object)
+    update_post_meta($product_id, '_download_limit', '-1');
+    update_post_meta($product_id, '_download_expiry', '-1');
+
+    // Download images from S3 and attach as WooCommerce featured/gallery images
+    tigon_dms_download_and_attach_images($product_id, $images, $title, $cart_data);
+
+    // Apply user-configured field mappings (overrides from admin Field Mapping page)
+    tigon_dms_apply_custom_mappings($product_id, $cart_data);
+
+    // Apply rich mapping (tags, descriptions, attributes, taxonomies, SEO)
+    tigon_dms_apply_rich_mapping($product_id, $cart_data);
+
+    // Refresh WC product lookup table and caches (mirrors Database_Write_Controller write path)
+    tigon_dms_refresh_wc_product_data($product_id);
+
     return $product_id;
 }
 
@@ -743,23 +1700,95 @@ function tigon_dms_create_woo_product($cart_id, $title, $price, $cart_data, $spe
 function tigon_dms_update_woo_product($product_id, $title, $price, $cart_data, $specs = array(), $images = array(), $warranty = array()) {
     // Normalize title for consistency (e.g., "In" → "-")
     $normalized_title = tigon_dms_normalize_title($title);
-    
-    // Update post title and slug
+
+    // Re-evaluate product readiness on every update.
+    // A previously-draft product will be promoted to publish once all mappings are present.
+    $readiness = \Tigon\DmsConnect\Includes\Product_Readiness::evaluate($cart_data);
+    $post_status = $readiness['status'];
+
+    // Update post title, slug, and status based on readiness
     wp_update_post(array(
-        'ID'         => $product_id,
-        'post_title' => sanitize_text_field($normalized_title),
-        'post_name'  => sanitize_title($normalized_title),
+        'ID'          => $product_id,
+        'post_title'  => sanitize_text_field($normalized_title),
+        'post_name'   => sanitize_title($normalized_title),
+        'post_status' => $post_status,
     ));
+
+    // Track/clear readiness meta
+    if ($post_status === 'draft') {
+        update_post_meta($product_id, '_dms_readiness_missing', wp_json_encode($readiness['missing']));
+    } else {
+        delete_post_meta($product_id, '_dms_readiness_missing');
+    }
     
-    // Update price
-    update_post_meta($product_id, '_regular_price', floatval($price));
-    update_post_meta($product_id, '_price', floatval($price));
-    
+    // Extract data from cart
+    $make = $cart_data['cartType']['make'] ?? '';
+    $model = $cart_data['cartType']['model'] ?? '';
+    $store_id = $cart_data['cartLocation']['locationId'] ?? '';
+
+    // Update price (only if retailPrice is valid AND Pricing page is not managing this product)
+    // Prices must be stored as decimal strings (e.g. "7995.00") for valid structured data
+    if (!empty($price) && floatval($price) > 0 && !tigon_dms_is_price_managed($product_id)) {
+        $formatted_price = number_format(floatval($price), 2, '.', '');
+        update_post_meta($product_id, '_regular_price', $formatted_price);
+        update_post_meta($product_id, '_price', $formatted_price);
+
+        // Sale price
+        $sale_price = $cart_data['salePrice'] ?? '';
+        if (!empty($sale_price) && floatval($sale_price) > 0 && floatval($sale_price) < floatval($price)) {
+            $formatted_sale = number_format(floatval($sale_price), 2, '.', '');
+            update_post_meta($product_id, '_sale_price', $formatted_sale);
+            update_post_meta($product_id, '_price', $formatted_sale);
+        } else {
+            delete_post_meta($product_id, '_sale_price');
+        }
+    }
+
+    // SKU (VIN > Serial > Generated fallback) — keep in sync on updates
+    $sku = '';
+    if (!empty($cart_data['vinNo'])) {
+        $sku = $cart_data['vinNo'];
+    } elseif (!empty($cart_data['serialNo'])) {
+        $sku = $cart_data['serialNo'];
+    } else {
+        $fallback_city = '';
+        if (!empty($store_id)) {
+            $fb_store_data = DMS_API::get_city_and_state_by_store_id($store_id);
+            $fallback_city = $fb_store_data['city'] ?? '';
+        }
+        $sku = strtoupper(
+            substr(preg_replace('/\s/', '', $make), 0, 3) .
+            substr(preg_replace('/\s/', '', $model), 0, 3) .
+            substr(preg_replace('/\s/', '', $cart_data['cartAttributes']['cartColor'] ?? ''), 0, 3) .
+            substr(preg_replace('/\s/', '', $cart_data['cartAttributes']['seatColor'] ?? ''), 0, 3) .
+            substr(preg_replace('/\s/', '', $fallback_city), 0, 3)
+        );
+    }
+    if (!empty($sku)) {
+        update_post_meta($product_id, '_sku', sanitize_text_field($sku));
+    }
+
+    // Global Unique ID (GUI) — algorithmic trade ID from SKU
+    $gui = tigon_dms_compute_gui($sku);
+    update_post_meta($product_id, '_global_unique_id', $gui);
+
+    // WooCommerce core product meta
+    update_post_meta($product_id, '_virtual', 'no');
+    update_post_meta($product_id, '_downloadable', 'no');
+    update_post_meta($product_id, '_weight', '500');
+    update_post_meta($product_id, '_length', '96');
+    update_post_meta($product_id, '_width', '48');
+    update_post_meta($product_id, '_height', '72');
+    update_post_meta($product_id, '_manage_stock', 'no');
+    update_post_meta($product_id, '_stock_status', 'instock');
+    update_post_meta($product_id, '_visibility', 'visible');
+    update_post_meta($product_id, '_sold_individually', 'yes');
+    update_post_meta($product_id, '_backorders', 'no');
+    update_post_meta($product_id, '_download_limit', '-1');
+    update_post_meta($product_id, '_download_expiry', '-1');
+
     // Update DMS payload
     update_post_meta($product_id, '_dms_payload', wp_json_encode($cart_data));
-
-    // Refresh location watermark badge so store transfers reflect correctly.
-    update_post_meta($product_id, '_tigonwm', tigon_dms_get_watermark_text($cart_data));
 
     // Update parsed DMS cart data in structured meta
     update_post_meta($product_id, '_dms_cart_specs', $specs);
@@ -861,7 +1890,7 @@ function tigon_dms_update_woo_product($product_id, $title, $price, $cart_data, $
         $store_data = DMS_API::get_city_and_state_by_store_id($store_id);
         $city = $store_data['city'] ?? '';
         $state = $store_data['state'] ?? '';
-        
+
         if (!empty($city) && !empty($state)) {
             $dealership_name = 'TIGON Golf Carts ' . $city . ' ' . $state;
             $dealership_parent_id = tigon_dms_get_existing_category('TIGON Dealership', 0);
@@ -873,40 +1902,2353 @@ function tigon_dms_update_woo_product($product_id, $title, $price, $cart_data, $
             }
         }
     }
-    
+
+    // 7. Golf Carts top-level category
+    $golf_carts_cat_id = tigon_dms_get_existing_category('Golf Carts', 0);
+    if ($golf_carts_cat_id) {
+        $categories[] = $golf_carts_cat_id;
+    }
+
+    // 8. Power type categories (Electric/Gas, battery type, voltage, street legal)
+    $is_electric = isset($cart_data['isElectric']) && $cart_data['isElectric'];
+    $is_street_legal = isset($cart_data['title']['isStreetLegal']) && $cart_data['title']['isStreetLegal'];
+
+    if ($is_electric) {
+        $electric_cat_id = tigon_dms_get_existing_category('Electric', 0);
+        if ($electric_cat_id) {
+            $categories[] = $electric_cat_id;
+        }
+
+        $zev_cat_id = tigon_dms_get_existing_category('Zero Emission Vehicles (ZEVs)', 0);
+        if ($zev_cat_id) {
+            $categories[] = $zev_cat_id;
+        }
+
+        $battery_type = $cart_data['battery']['type'] ?? '';
+        if ($battery_type === 'Lithium') {
+            $lithium_cat_id = tigon_dms_get_existing_category('Lithium', 0);
+            if ($lithium_cat_id) {
+                $categories[] = $lithium_cat_id;
+            }
+        } elseif ($battery_type === 'Lead') {
+            $lead_cat_id = tigon_dms_get_existing_category('Lead-Acid', 0);
+            if ($lead_cat_id) {
+                $categories[] = $lead_cat_id;
+            }
+        }
+
+        $pack_voltage = $cart_data['battery']['packVoltage'] ?? '';
+        if (!empty($pack_voltage)) {
+            $voltage_cat_id = tigon_dms_get_existing_category($pack_voltage . ' Volt', 0);
+            if ($voltage_cat_id) {
+                $categories[] = $voltage_cat_id;
+            }
+        }
+
+        if ($is_street_legal) {
+            foreach (['Street Legal', 'Neighborhood Electric Vehicles (NEVs)', 'Battery Electric Vehicles (BEVs)', 'Low Speed Vehicles (LSVs)', 'Medium Speed Vehicles (MSVs)'] as $cat_name) {
+                $cat_id = tigon_dms_get_existing_category($cat_name, 0);
+                if ($cat_id) {
+                    $categories[] = $cat_id;
+                }
+            }
+        }
+    } else {
+        $gas_cat_id = tigon_dms_get_existing_category('Gas', 0);
+        if ($gas_cat_id) {
+            $categories[] = $gas_cat_id;
+        }
+        $ptv_cat_id = tigon_dms_get_existing_category('Personal Transportation Vehicles (PTVs)', 0);
+        if ($ptv_cat_id) {
+            $categories[] = $ptv_cat_id;
+        }
+    }
+
+    // 9. Lifted / Non-Lifted category
+    $is_lifted = isset($cart_data['cartAttributes']['isLifted']) && $cart_data['cartAttributes']['isLifted'];
+    if ($is_lifted) {
+        $lifted_cat_id = tigon_dms_get_existing_category('Lifted', 0);
+        if ($lifted_cat_id) {
+            $categories[] = $lifted_cat_id;
+        }
+    } else {
+        $non_lifted_cat_id = tigon_dms_get_existing_category('NON-Lifted', 0);
+        if ($non_lifted_cat_id) {
+            $categories[] = $non_lifted_cat_id;
+        }
+    }
+
+    // 10. Seating categories
+    if (!empty($passengers)) {
+        if ($passengers === 'Utility') {
+            $seater_cat_id = tigon_dms_get_existing_category('2 Seater', 0);
+        } else {
+            $num_seats = explode(' ', $passengers)[0];
+            $seater_cat_id = tigon_dms_get_existing_category($num_seats . ' Seater', 0);
+        }
+        if (!empty($seater_cat_id)) {
+            $categories[] = $seater_cat_id;
+        }
+    }
+
+    // 10b. Utility Task Vehicles (UTVs) — for Utility passengers
+    if (($cart_data['cartAttributes']['passengers'] ?? '') === 'Utility') {
+        $utv_cat_id = tigon_dms_get_existing_category('Utility Task Vehicles (UTVs)', 0);
+        if ($utv_cat_id) {
+            $categories[] = $utv_cat_id;
+        }
+    }
+
+    // 11. New/Used category
+    $new_used_cat_id = tigon_dms_get_existing_category($is_used ? 'Used' : 'New', 0);
+    if ($new_used_cat_id) {
+        $categories[] = $new_used_cat_id;
+    }
+
+    // 12. Inventory status category
+    $is_rental = !empty($cart_data['isRental']);
+    if ($is_rental) {
+        if ($is_used) {
+            $inv_cat_id = tigon_dms_get_existing_category('Local Used Rental Inventory', 0);
+        } else {
+            $inv_cat_id = tigon_dms_get_existing_category('Local New Rental Inventory', 0);
+        }
+        // Also add Rental category
+        $rental_cat_id = tigon_dms_get_existing_category('Rental', 0);
+        if ($rental_cat_id) {
+            $categories[] = $rental_cat_id;
+        }
+    } else {
+        if ($is_used) {
+            $inv_cat_id = tigon_dms_get_existing_category('Local Used Active Inventory', 0);
+        } else {
+            $inv_cat_id = tigon_dms_get_existing_category('Local New Active Inventory', 0);
+        }
+    }
+    if (!empty($inv_cat_id)) {
+        $categories[] = $inv_cat_id;
+    }
+
+    // 13. Parent hierarchy categories (Passengers, Drivetrain, Power Source, Batteries, Vehicle Class, Location)
+    foreach (array('Passengers', 'DriveTrain', 'Power Source', 'Vehicle Class', 'Location') as $parent_name) {
+        $parent_id = tigon_dms_get_existing_category($parent_name, 0);
+        if ($parent_id) {
+            $categories[] = $parent_id;
+        }
+    }
+
+    // Batteries parent (electric only)
+    if (isset($cart_data['isElectric']) && $cart_data['isElectric']) {
+        $batteries_cat_id = tigon_dms_get_existing_category('Batteries', 0);
+        if ($batteries_cat_id) {
+            $categories[] = $batteries_cat_id;
+        }
+    }
+
     // Assign all categories to product
+    $categories = array_unique(array_filter($categories));
     if (!empty($categories)) {
         wp_set_object_terms($product_id, $categories, 'product_cat');
     }
-    
-    // Ensure product is visible in catalog (remove any exclude-from-catalog terms)
-    // This ensures synced products appear on inventory page
-    $current_visibility = wp_get_object_terms($product_id, 'product_visibility', array('fields' => 'slugs'));
-    if (is_array($current_visibility) && in_array('exclude-from-catalog', $current_visibility)) {
-        // Remove exclude-from-catalog and set to visible
-        $new_visibility = array_filter($current_visibility, function($term) {
-            return $term !== 'exclude-from-catalog';
-        });
-        if (empty($new_visibility) || !in_array('visible', $new_visibility)) {
-            $new_visibility[] = 'visible';
-        }
-        wp_set_object_terms($product_id, array_values($new_visibility), 'product_visibility');
-    } elseif (empty($current_visibility) || !in_array('visible', $current_visibility)) {
-        // No visibility set or not visible - set to visible
-        wp_set_object_terms($product_id, array('visible'), 'product_visibility');
-    }
-    
-    // Update visibility meta to ensure compatibility
+
+    // Ensure product is visible in catalog and featured
+    wp_set_object_terms($product_id, array('featured'), 'product_visibility');
     update_post_meta($product_id, '_visibility', 'visible');
-    
+
+    // Google/Facebook product feed meta
+    $condition = $is_used ? 'used' : 'new';
+    $color = $cart_data['cartAttributes']['cartColor'] ?? '';
+    update_post_meta($product_id, '_wc_gla_condition', $condition);
+    update_post_meta($product_id, '_wc_gla_brand', strtoupper($make));
+    update_post_meta($product_id, '_wc_gla_color', strtoupper($color));
+    update_post_meta($product_id, '_wc_gla_pattern', $model);
+    update_post_meta($product_id, '_wc_gla_sizeSystem', 'US');
+    update_post_meta($product_id, '_wc_facebook_enhanced_catalog_attributes_brand', strtoupper($make));
+    update_post_meta($product_id, '_wc_facebook_enhanced_catalog_attributes_color', strtoupper($color));
+    update_post_meta($product_id, '_wc_facebook_enhanced_catalog_attributes_condition', $condition);
+    update_post_meta($product_id, '_wc_facebook_enhanced_catalog_attributes_pattern', $model);
+    update_post_meta($product_id, '_wc_facebook_product_image_source', 'product');
+    update_post_meta($product_id, '_wc_facebook_sync_enabled', 'yes');
+    update_post_meta($product_id, '_wc_fb_visibility', 'yes');
+    update_post_meta($product_id, '_wc_pinterest_condition', $condition);
+    update_post_meta($product_id, '_wc_pinterest_google_product_category', 'Vehicles & Parts > Vehicles > Motor Vehicles > Golf Carts');
+
+    // Download images from S3 and attach as WooCommerce featured/gallery images
+    tigon_dms_download_and_attach_images($product_id, $images, $title, $cart_data);
+
+    // Apply user-configured field mappings (overrides from admin Field Mapping page)
+    tigon_dms_apply_custom_mappings($product_id, $cart_data);
+
+    // Apply rich mapping (tags, descriptions, attributes, taxonomies, SEO)
+    tigon_dms_apply_rich_mapping($product_id, $cart_data);
+
+    // Refresh WC product lookup table and caches (mirrors Database_Write_Controller write path)
+    tigon_dms_refresh_wc_product_data($product_id);
+
     return $product_id;
+}
+
+/**
+ * ============================================================================
+ * Post-Write WooCommerce Refresh (inspired by Database_Write_Controller)
+ * ============================================================================
+ *
+ * After creating/updating a product via direct meta writes, WooCommerce's
+ * wc_product_meta_lookup table and object caches may be stale. These helpers
+ * ensure WC product queries (price filters, sorting, stock status) work
+ * correctly after sync writes.
+ */
+
+/**
+ * Refresh WooCommerce product lookup table and caches after sync writes.
+ *
+ * Our sync path uses wp_insert_post/update_post_meta directly rather than
+ * the WC Product API, so wc_product_meta_lookup doesn't get updated
+ * automatically. This mirrors what Database_Write_Controller should do
+ * after write_database_object().
+ *
+ * @param int $product_id WooCommerce product ID
+ */
+function tigon_dms_refresh_wc_product_data($product_id) {
+    if (!class_exists('WooCommerce')) {
+        return;
+    }
+
+    // Clear WordPress post cache so fresh meta is read
+    clean_post_cache($product_id);
+
+    // Clear WooCommerce product transients (price ranges, counts, etc.)
+    if (function_exists('wc_delete_product_transients')) {
+        wc_delete_product_transients($product_id);
+    }
+
+    // Update WC product lookup table (used for price filters, stock queries, sorting)
+    // This table is not updated by direct update_post_meta() calls
+    // Note: WC_Data_Store uses __call() magic, so method_exists() won't find
+    // update_lookup_table on the wrapper. We call it directly and catch errors.
+    if (class_exists('WC_Data_Store')) {
+        try {
+            $data_store = \WC_Data_Store::load('product');
+            $data_store->update_lookup_table($product_id, 'wc_product_meta_lookup');
+        } catch (\Exception $e) {
+            // Swallow — lookup table will be rebuilt by global refresh after sync
+        } catch (\Error $e) {
+            // Catch TypeError/Error from missing method — non-fatal
+        }
+    }
+}
+
+/**
+ * Handle a product whose DMS cart is no longer in the active inventory.
+ *
+ * Hard-deletes the product and all associated media (images, gallery,
+ * monroney stickers, and any other attachments). When a cart is sold or
+ * isInStock is false/null/empty, the product must be fully removed from
+ * WordPress, WooCommerce, and the database.
+ *
+ * @param int  $product_id      WooCommerce product ID
+ * @param bool $delete_images   Deprecated — media is always deleted now.
+ * @return bool True if product was deleted, false if not found
+ */
+function tigon_dms_handle_sold_product($product_id, $delete_images = true) {
+    return \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $product_id);
+}
+
+/**
+ * ============================================================================
+ * Rich Product Mapping (inspired by Abstract_Cart)
+ * ============================================================================
+ *
+ * Enhances WooCommerce products with tags, descriptions, product attributes,
+ * custom taxonomies, and SEO meta. Mirrors the mapping logic from the
+ * class-based import path (Abstract_Cart) for the simpler sync path.
+ */
+
+/**
+ * Get make name with trademark symbol
+ *
+ * @param string $make DMS make name
+ * @return string Make name with registered symbol
+ */
+function tigon_dms_get_make_with_symbol($make) {
+    $make = trim($make);
+    if (empty($make)) {
+        return '';
+    }
+    $upper = strtoupper($make);
+    if ($upper === 'SWIFT' || $upper === 'SWIFT EV') {
+        return 'Swift EV®';
+    }
+    if ($upper === 'TARA' || $upper === 'TARA EV') {
+        return 'Tara®';
+    }
+    if ($upper === 'TEKO' || $upper === 'TEKO EV') {
+        return 'Teko®';
+    }
+    if ($upper === 'TOMBERLIN' || $upper === 'TOMBERLIN EV') {
+        return 'Tomberlin®';
+    }
+    if ($upper === 'YAMAHA' || $upper === 'YAMAHA EV') {
+        return 'Yamaha®';
+    }
+    if ($upper === 'STAR' || $upper === 'STAR EV') {
+        return 'Star EV®';
+    }
+    return $make . '®';
+}
+
+/**
+ * Compute Global Unique ID from SKU (mirrors Database_Object constructor).
+ *
+ * Converts alphabetic chars to digits via (ord - 65) % 9 + 1, keeps numeric
+ * chars as-is, takes rightmost 14 characters, left-pads with zeros to 14.
+ *
+ * @param string $sku Product SKU (VIN, serial, or generated)
+ * @return string 14-character numeric identifier
+ */
+function tigon_dms_compute_gui($sku) {
+    $chars = str_split((string) $sku);
+    $mapped = array_map(function ($char) {
+        $int = ord($char);
+        if ($int - 65 >= 0) {
+            return (($int - 65) % 9) + 1;
+        }
+        return $char;
+    }, $chars);
+    $gui = substr(implode('', $mapped), -14, 14);
+    return str_pad($gui, 14, '0', STR_PAD_LEFT);
+}
+
+/**
+ * Get a cached Attributes instance for fast term ID lookups.
+ *
+ * Lazily instantiates the Attributes class once and caches it for the
+ * duration of the request. All sync functions use this to avoid hundreds
+ * of individual get_term_by() database queries per product.
+ *
+ * @return \Tigon\DmsConnect\Admin\Attributes|null Attributes instance or null
+ */
+function tigon_dms_get_attributes_instance() {
+    static $instance = null;
+    static $attempted = false;
+
+    if (!$attempted) {
+        $attempted = true;
+        if (class_exists('\Tigon\DmsConnect\Admin\Attributes')) {
+            try {
+                $instance = new \Tigon\DmsConnect\Admin\Attributes();
+            } catch (\Throwable $e) {
+                $instance = null;
+            }
+        }
+    }
+
+    return $instance;
+}
+
+/**
+ * Apply rich product mapping from Abstract_Cart logic
+ *
+ * @param int   $product_id WooCommerce product ID
+ * @param array $cart_data  Full DMS cart payload
+ */
+function tigon_dms_apply_rich_mapping($product_id, $cart_data) {
+    tigon_dms_assign_product_tags($product_id, $cart_data);
+    tigon_dms_set_product_descriptions($product_id, $cart_data);
+    tigon_dms_assign_product_attributes($product_id, $cart_data);
+    tigon_dms_assign_custom_taxonomies($product_id, $cart_data);
+    tigon_dms_set_seo_meta($product_id, $cart_data);
+    tigon_dms_set_product_fields_meta($product_id, $cart_data);
+}
+
+/**
+ * Assign product tags mirroring Abstract_Cart::attach_categories_tags()
+ *
+ * @param int   $product_id WooCommerce product ID
+ * @param array $cart_data  Full DMS cart payload
+ */
+function tigon_dms_assign_product_tags($product_id, $cart_data) {
+    $tags = array();
+    $make  = $cart_data['cartType']['make'] ?? '';
+    $model = $cart_data['cartType']['model'] ?? '';
+    $color = $cart_data['cartAttributes']['cartColor'] ?? '';
+    $year  = $cart_data['cartType']['year'] ?? '';
+    $passengers    = $cart_data['cartAttributes']['passengers'] ?? '';
+    $drivetrain    = $cart_data['cartAttributes']['driveTrain'] ?? '2X4';
+    $is_used       = !empty($cart_data['isUsed']);
+    $is_electric   = !empty($cart_data['isElectric']);
+    $is_street_legal = !empty($cart_data['title']['isStreetLegal']);
+    $is_lifted     = !empty($cart_data['cartAttributes']['isLifted']);
+    $store_id      = $cart_data['cartLocation']['locationId'] ?? '';
+    $battery_type  = $cart_data['battery']['type'] ?? '';
+
+    $make_symbol = tigon_dms_get_make_with_symbol($make);
+
+    // Make tag
+    if (!empty($make_symbol)) {
+        $tags[] = strtoupper($make_symbol);
+    }
+
+    // Make + Model tag
+    if (!empty($make_symbol) && !empty($model)) {
+        $tags[] = strtoupper($make_symbol . ' ' . $model);
+    }
+
+    // Color tag
+    if (!empty($color)) {
+        $tags[] = strtoupper($color);
+    }
+
+    // Seats tag
+    if (!empty($passengers)) {
+        if ($passengers === 'Utility') {
+            $tags[] = '2 SEATS';
+        } else {
+            $num = explode(' ', $passengers)[0];
+            if (is_numeric($num)) {
+                $tags[] = $num . ' SEATS';
+            }
+        }
+    }
+
+    // Lifted / Non-lifted
+    $tags[] = $is_lifted ? 'LIFTED' : 'NON LIFTED';
+
+    // Condition
+    $tags[] = $is_used ? 'USED' : 'NEW';
+
+    // Location tags
+    if (!empty($store_id)) {
+        $store_data = DMS_API::get_city_and_state_by_store_id($store_id);
+        $city  = $store_data['city'] ?? '';
+        $state = $store_data['state'] ?? '';
+        if (!empty($city)) {
+            $tags[] = strtoupper($city);
+            $tags[] = strtoupper($city) . ' GOLF CART DEALERSHIP';
+        }
+        if (!empty($state)) {
+            $tags[] = strtoupper($state);
+            $tags[] = strtoupper($state) . ' GOLF CART DEALERSHIP';
+        }
+        if (!empty($city) && !empty($state)) {
+            $tags[] = strtoupper($city . ' ' . $state) . ' STREET LEGAL DEALERSHIP';
+        }
+    }
+
+    // Power type tags
+    if ($is_electric) {
+        $tags[] = 'ELECTRIC';
+        if ($battery_type === 'Lead') {
+            $tags[] = 'LEAD-ACID';
+        } elseif ($battery_type === 'Lithium') {
+            $tags[] = 'LITHIUM';
+        }
+        if ($is_street_legal) {
+            $tags[] = 'NEV';
+            $tags[] = 'LSV';
+            $tags[] = 'MSV';
+            $tags[] = 'STREET LEGAL';
+        }
+    } else {
+        $tags[] = 'GAS';
+        $tags[] = 'PTV';
+    }
+
+    // 0% FINANCING — all vehicles
+    $tags[] = '0% FINANCING';
+
+    // Year tag
+    if (!empty($year)) {
+        $tags[] = strtoupper($year);
+    }
+
+    // Passengers tag (e.g. "4 Passenger", "6 Passenger")
+    if (!empty($passengers) && $passengers !== 'Utility') {
+        $num = explode(' ', $passengers)[0];
+        if (is_numeric($num)) {
+            $tags[] = $num . ' Passenger';
+        }
+    }
+
+    // Drivetrain tag (2X4, 4X4, AWD)
+    $tags[] = strtoupper($drivetrain);
+
+    // General tags
+    $tags[] = 'GOLF CART';
+    $tags[] = 'TIGON';
+    $tags[] = 'TIGON GOLF CARTS';
+
+    $tags = array_unique(array_filter($tags));
+    if (empty($tags)) {
+        return;
+    }
+
+    // Use Attributes cache for fast term ID resolution
+    $attrs = tigon_dms_get_attributes_instance();
+    if ($attrs && !empty($attrs->tags)) {
+        $tag_ids = array();
+        $tag_names_new = array();
+        foreach ($tags as $tag) {
+            $id = $attrs->tags[strtoupper($tag)] ?? null;
+            if ($id !== null) {
+                $tag_ids[] = (int) $id;
+            } else {
+                $tag_names_new[] = $tag;
+            }
+        }
+        if (!empty($tag_ids)) {
+            wp_set_object_terms($product_id, $tag_ids, 'product_tag', true);
+        }
+        if (!empty($tag_names_new)) {
+            wp_set_object_terms($product_id, $tag_names_new, 'product_tag', true);
+        }
+    } else {
+        wp_set_object_terms($product_id, $tags, 'product_tag', true);
+    }
+}
+
+/**
+ * Set product descriptions mirroring Abstract_Cart::generate_descriptions()
+ *
+ * Only sets description/short_description if not already populated,
+ * so manual edits are preserved on subsequent syncs.
+ *
+ * @param int   $product_id WooCommerce product ID
+ * @param array $cart_data  Full DMS cart payload
+ */
+function tigon_dms_set_product_descriptions($product_id, $cart_data) {
+    $update = array('ID' => $product_id);
+
+    $current_content = get_post_field('post_content', $product_id);
+    if (empty(trim($current_content))) {
+        $description = tigon_dms_generate_description_html($cart_data);
+        if (!empty($description)) {
+            $update['post_content'] = $description;
+        }
+    }
+
+    $current_excerpt = get_post_field('post_excerpt', $product_id);
+    if (empty(trim($current_excerpt))) {
+        $short_desc = tigon_dms_generate_short_description_html($cart_data);
+        if (!empty($short_desc)) {
+            $update['post_excerpt'] = $short_desc;
+        }
+    }
+
+    if (count($update) > 1) {
+        wp_update_post($update);
+    }
+}
+
+/**
+ * Generate rich HTML product description with feature table
+ *
+ * @param array $cart_data Full DMS cart payload
+ * @return string HTML description
+ */
+function tigon_dms_generate_description_html($cart_data) {
+    $make  = $cart_data['cartType']['make'] ?? '';
+    $model = $cart_data['cartType']['model'] ?? '';
+    $year  = $cart_data['cartType']['year'] ?? '';
+    $color = $cart_data['cartAttributes']['cartColor'] ?? '';
+    $seat_color    = $cart_data['cartAttributes']['seatColor'] ?? '';
+    $tire_type     = $cart_data['cartAttributes']['tireType'] ?? '';
+    $rim_size      = $cart_data['cartAttributes']['tireRimSize'] ?? '';
+    $is_electric   = !empty($cart_data['isElectric']);
+    $is_street_legal = !empty($cart_data['title']['isStreetLegal']);
+    $is_lifted     = !empty($cart_data['cartAttributes']['isLifted']);
+
+    $make_symbol = tigon_dms_get_make_with_symbol($make);
+
+    // Build make/model hyperlinks (mirrors Abstract_Cart)
+    $make_slug = sanitize_title($make);
+    if (strtoupper($make) === 'DENAGO') {
+        $make_slug = sanitize_title($make) . '-ev';
+    }
+    $model_slug = sanitize_title($model);
+    $make_link  = '<a href="https://tigongolfcarts.com/' . esc_attr($make_slug) . '">' . esc_html($make_symbol) . '</a>';
+    $model_link = '<a href="https://tigongolfcarts.com/' . esc_attr($make_slug) . '/' . esc_attr($model_slug) . '">' . esc_html($model) . '</a>';
+
+    $name = trim($make_symbol . ' ' . $model . ' ' . $color);
+
+    // Build feature table
+    $html = '<h2 style="text-align: center;"><strong>' . esc_html($name) . '</strong></h2>';
+    $html .= '<table style="text-align: center;"><thead><tr><th>Feature</th><th>Description</th></tr></thead><tbody>';
+
+    $html .= '<tr><td>Make</td><td>' . $make_link . '</td></tr>';
+    $html .= '<tr><td>Model</td><td>' . $model_link . '</td></tr>';
+    if (!empty($year)) {
+        $html .= '<tr><td>Year</td><td>' . esc_html($year) . '</td></tr>';
+    }
+    if ($is_street_legal) {
+        $html .= '<tr><td>Street Legal</td><td>Fully Street Legal</td></tr>';
+    }
+    $html .= '<tr><td>Color</td><td>' . esc_html($color) . '</td></tr>';
+    if (!empty($seat_color)) {
+        $html .= '<tr><td>Seat Color</td><td>' . esc_html($seat_color) . '</td></tr>';
+    }
+    if (!empty($tire_type)) {
+        $html .= '<tr><td>Tires</td><td>' . esc_html($tire_type) . '</td></tr>';
+    }
+    if (!empty($rim_size)) {
+        $html .= '<tr><td>Rims</td><td>' . esc_html($rim_size) . '"</td></tr>';
+    }
+
+    // Additional features
+    $features = array();
+    if ($is_lifted) {
+        $features[] = '3 Inch Lift Kit';
+    }
+    if (!empty($cart_data['cartAttributes']['hasSoundSystem']) && $cart_data['cartAttributes']['hasSoundSystem']) {
+        $features[] = $make_symbol . ' Sound System';
+    }
+    foreach (($cart_data['advertising']['cartAddOns'] ?? array()) as $addon) {
+        $parts = explode(' ', $addon);
+        array_pop($parts); // Remove price suffix
+        $features[] = implode(' ', $parts);
+    }
+    if (!empty($features)) {
+        $html .= '<tr><td>Additional Features</td><td>' . esc_html(implode(', ', $features)) . '</td></tr>';
+    }
+
+    // Power/Battery/Engine rows
+    if ($is_electric) {
+        $battery_type = $cart_data['battery']['type'] ?? '';
+        $is_dc = !empty($cart_data['battery']['isDC']);
+        $acdc = $is_dc ? 'DC' : 'AC';
+        $html .= '<tr><td>Battery</td><td>' . esc_html($battery_type . ' ' . $acdc) . ' Battery</td></tr>';
+
+        $battery_brand = $cart_data['battery']['brand'] ?? '';
+        if (!empty($battery_brand)) {
+            $html .= '<tr><td>Battery Brand</td><td>' . esc_html($battery_brand) . '</td></tr>';
+        }
+        $battery_year = $cart_data['battery']['year'] ?? '';
+        if (!empty($battery_year)) {
+            $html .= '<tr><td>Battery Year</td><td>' . esc_html($battery_year) . '</td></tr>';
+        }
+        $amp_hours = $cart_data['battery']['ampHours'] ?? '';
+        if (!empty($amp_hours)) {
+            $html .= '<tr><td>Capacity</td><td>' . esc_html($amp_hours) . ' Amp Hours</td></tr>';
+        }
+        $warranty_len = $cart_data['warrantyLength'] ?? '';
+        $batt_warranty = $cart_data['battery']['warrantyLength'] ?? '';
+        if (!empty($warranty_len) || !empty($batt_warranty)) {
+            $html .= '<tr><td>Warranty</td><td>' . esc_html($warranty_len . ' parts, ' . $batt_warranty . ' battery warranty') . '</td></tr>';
+        }
+    } else {
+        $engine_make = $cart_data['engine']['make'] ?? '';
+        if (!empty($engine_make)) {
+            $html .= '<tr><td>Engine</td><td>' . esc_html($year . ' ' . $engine_make) . '</td></tr>';
+        }
+        $stroke = $cart_data['engine']['stroke'] ?? '';
+        $hp = $cart_data['engine']['horsepower'] ?? '';
+        if (!empty($stroke) && !empty($hp)) {
+            $html .= '<tr><td>Specs</td><td>' . esc_html($stroke . ' Stroke, ' . $hp . ' HP') . '</td></tr>';
+        }
+        $warranty_len = $cart_data['warrantyLength'] ?? '';
+        if (!empty($warranty_len)) {
+            $html .= '<tr><td>Warranty</td><td>' . esc_html($warranty_len . ' parts and engine warranty') . '</td></tr>';
+        }
+    }
+
+    $html .= '</tbody></table>';
+
+    return $html;
+}
+
+/**
+ * Generate short description marketing copy
+ *
+ * Uses deterministic selection based on cart ID so re-syncs produce
+ * consistent copy (unlike Abstract_Cart which uses random_int).
+ *
+ * @param array $cart_data Full DMS cart payload
+ * @return string HTML short description
+ */
+function tigon_dms_generate_short_description_html($cart_data) {
+    $make  = $cart_data['cartType']['make'] ?? '';
+    $model = $cart_data['cartType']['model'] ?? '';
+    $color = $cart_data['cartAttributes']['cartColor'] ?? '';
+    $is_electric   = !empty($cart_data['isElectric']);
+    $has_utility   = ($cart_data['cartAttributes']['passengers'] ?? '') === 'Utility';
+    $pack_voltage  = $cart_data['battery']['packVoltage'] ?? '';
+    $passengers    = $cart_data['cartAttributes']['passengers'] ?? '';
+
+    $make_symbol = tigon_dms_get_make_with_symbol($make);
+    $name = trim($make_symbol . ' ' . $model . ' ' . $color);
+
+    // Build hyperlinks
+    $make_slug = sanitize_title($make);
+    if (strtoupper($make) === 'DENAGO') {
+        $make_slug .= '-ev';
+    }
+    $model_slug = sanitize_title($model);
+    $make_link  = '<a href="https://tigongolfcarts.com/' . esc_attr($make_slug) . '">' . esc_html($make_symbol) . '</a>';
+    $model_link = '<a href="https://tigongolfcarts.com/' . esc_attr($make_slug) . '/' . esc_attr($model_slug) . '">' . esc_html($model) . '</a>';
+
+    // Deterministic selection based on cart ID
+    $cart_id = $cart_data['_id'] ?? '';
+    $seed = crc32($cart_id);
+
+    $adjectives = array('elegant', 'unbeatable', 'exceptional', 'versatile', 'dependable', 'stylish', 'eye-catching', 'proven and reliable', 'sleek');
+    $adj = $adjectives[abs($seed) % count($adjectives)];
+
+    $intros = array(
+        "Introducing the $make_link $model_link from Tigon Golf Carts,",
+        "Experience the freedom to explore with this " . esc_html($color) . " $make_link $model_link,",
+        "The $make_link $model_link is taking the industry by storm as",
+        "Conquer the terrain with the $make_link $model_link in " . esc_html($color) . ",",
+        "Take the reigns of the " . esc_html($color) . " $make_link $model_link from Tigon Golf Carts,",
+    );
+    $intro = $intros[abs($seed >> 4) % count($intros)];
+
+    $outros = array(
+        'this ' . $adj . ' cart is perfect for both on and off-course adventures.',
+        'the ' . $adj . ' ' . esc_html($make_symbol . ' ' . $model) . ' is the perfect companion for all your journeys.',
+        'this ' . $adj . ' machine is a cart you don\'t want to miss!',
+        'this ' . $adj . ' vehicle sets a new standard for luxury and efficiency.',
+    );
+    $outro = $outros[abs($seed >> 8) % count($outros)];
+
+    $html = '<h2 style="text-align: center;">' . esc_html($name) . '</h2>';
+    $html .= '<p style="text-align: center;">' . $intro;
+
+    if ($has_utility) {
+        $html .= ' a sturdy workhorse ready to help you get the job done.</p>';
+        $html .= '<p style="text-align: center;">Featuring a built-in utility bed, the ' . esc_html($model) . ' is highly capable and versatile.';
+    } elseif ($is_electric) {
+        $html .= ' an elegant powerhouse designed for adventure seekers.</p>';
+        $html .= '<p style="text-align: center;">Equipped with a powerful ' . esc_html($pack_voltage) . ' volt electric motor, the ' . esc_html($model) . ' provides a clean, reliable ride without sacrificing performance. ';
+    } else {
+        $hp = $cart_data['engine']['horsepower'] ?? '';
+        $engine_desc = !empty($hp) ? ($hp . ' horsepower') : 'high quality';
+        $html .= ' a rugged beast ready to help you take on the world.</p>';
+        $html .= '<p style="text-align: center;">With a ' . esc_html($engine_desc) . ' gas engine, the ' . esc_html($model) . ' is a powerhouse of performance. ';
+    }
+
+    if (!$has_utility && !empty($passengers)) {
+        $num = explode(' ', $passengers)[0];
+        if ($num === '6') {
+            $html .= 'Capable of carting 6 passengers, ';
+        } else {
+            $html .= 'Combining rugged durability with sophisticated technology, ';
+        }
+    } else {
+        $html .= 'Combining rugged durability with sophisticated technology, ';
+    }
+
+    $html .= $outro . '</p>';
+
+    return $html;
+}
+
+/**
+ * Assign WooCommerce product attributes mirroring Abstract_Cart::attach_attributes()
+ *
+ * Only assigns attributes whose taxonomy terms already exist in WooCommerce.
+ *
+ * @param int   $product_id WooCommerce product ID
+ * @param array $cart_data  Full DMS cart payload
+ */
+function tigon_dms_assign_product_attributes($product_id, $cart_data) {
+    $make  = $cart_data['cartType']['make'] ?? '';
+    $color = $cart_data['cartAttributes']['cartColor'] ?? '';
+    $seat_color    = $cart_data['cartAttributes']['seatColor'] ?? '';
+    $passengers    = $cart_data['cartAttributes']['passengers'] ?? '';
+    $is_electric   = !empty($cart_data['isElectric']);
+    $is_street_legal = !empty($cart_data['title']['isStreetLegal']);
+    $is_lifted     = !empty($cart_data['cartAttributes']['isLifted']);
+    $has_extended_top = !empty($cart_data['cartAttributes']['hasExtendedTop']);
+    $has_sound     = !empty($cart_data['cartAttributes']['hasSoundSystem']);
+    $tire_type     = $cart_data['cartAttributes']['tireType'] ?? '';
+    $rim_size      = $cart_data['cartAttributes']['tireRimSize'] ?? '';
+    $year          = $cart_data['cartType']['year'] ?? '';
+    $drive_train   = $cart_data['cartAttributes']['driveTrain'] ?? '2X4';
+    $has_hitch     = !empty($cart_data['cartAttributes']['hitch']);
+    $is_used       = !empty($cart_data['isUsed']);
+    $battery_type  = $cart_data['battery']['type'] ?? '';
+    $warranty      = $cart_data['warrantyLength'] ?? '';
+    $battery_warranty = $cart_data['battery']['warrantyLength'] ?? '';
+    $store_id      = $cart_data['cartLocation']['locationId'] ?? '';
+    $has_utility   = $passengers === 'Utility';
+
+    $make_symbol = tigon_dms_get_make_with_symbol($make);
+    $make_lower  = sanitize_title(preg_replace('/[®™]/', '', $make_symbol));
+
+    $product_attributes = array();
+    $position = 0;
+
+    // Cached Attributes instance for fast O(1) term lookups
+    $attrs = tigon_dms_get_attributes_instance();
+
+    // Helper: register attribute and assign terms using Attributes cache or DB fallback
+    $set_attr = function($attr_slug, $term_values) use ($product_id, &$product_attributes, &$position, $attrs) {
+        $taxonomy = 'pa_' . $attr_slug;
+        if (!taxonomy_exists($taxonomy)) {
+            return;
+        }
+
+        $term_ids = array();
+        foreach ((array) $term_values as $term_name) {
+            if (empty($term_name)) continue;
+
+            // Fast path: use Attributes pre-loaded attribute options
+            if ($attrs && isset($attrs->attributes[$attr_slug]['options'][strtoupper($term_name)])) {
+                $term_ids[] = (int) $attrs->attributes[$attr_slug]['options'][strtoupper($term_name)];
+                continue;
+            }
+
+            // Slow path: individual DB lookup, auto-create if missing
+            $term = get_term_by('name', $term_name, $taxonomy);
+            if (!$term) {
+                $term = get_term_by('slug', sanitize_title($term_name), $taxonomy);
+            }
+            if ($term && !is_wp_error($term)) {
+                $term_ids[] = (int) $term->term_id;
+            } else {
+                $new_term = wp_insert_term(
+                    $term_name,
+                    $taxonomy,
+                    array('slug' => sanitize_title($term_name))
+                );
+                if (!is_wp_error($new_term)) {
+                    $term_ids[] = (int) $new_term['term_id'];
+                    if ($attrs) {
+                        $attrs->attributes[$attr_slug]['options'][strtoupper($term_name)] = $new_term['term_id'];
+                    }
+                }
+            }
+        }
+
+        if (empty($term_ids)) {
+            return;
+        }
+
+        // Use Attributes object structure for consistency with class-based import
+        if ($attrs && isset($attrs->attributes[$attr_slug]['object'])) {
+            $product_attributes[$taxonomy] = $attrs->attributes[$attr_slug]['object'];
+            $product_attributes[$taxonomy]['position'] = $position++;
+        } else {
+            $product_attributes[$taxonomy] = array(
+                'name'         => $taxonomy,
+                'value'        => '',
+                'position'     => $position++,
+                'is_visible'   => 1,
+                'is_variation' => 0,
+                'is_taxonomy'  => 1,
+            );
+        }
+        wp_set_object_terms($product_id, $term_ids, $taxonomy);
+    };
+
+    // Battery Type
+    if ($is_electric && !empty($battery_type)) {
+        $set_attr('battery-type', array(strtoupper($battery_type)));
+    }
+
+    // Battery Warranty
+    if ($is_electric && !empty($battery_warranty)) {
+        $set_attr('battery-warranty', array(strtoupper($battery_warranty)));
+    }
+
+    // Brush Guard (Denago/Evolution = YES, others = NO)
+    $make_upper = strtoupper($make_symbol);
+    $has_brush = ($make_upper === 'DENAGO®' || $make_upper === 'EVOLUTION®') ? 'YES' : 'NO';
+    $set_attr('brush-guard', array($has_brush));
+
+    // Drivetrain
+    $set_attr('drivetrain', array(strtoupper($drive_train)));
+
+    // Extended Top
+    $set_attr('extended-top', array($has_extended_top ? 'YES' : 'NO'));
+
+    // Lift Kit
+    $set_attr('lift-kit', array($is_lifted ? '3 INCH' : 'NO'));
+
+    // Location
+    if (!empty($store_id)) {
+        $store_data = DMS_API::get_city_and_state_by_store_id($store_id);
+        $city  = $store_data['city'] ?? '';
+        $state = $store_data['state'] ?? '';
+        $loc_values = array();
+        if (!empty($city) && !empty($state)) {
+            $loc_values[] = strtoupper($city . ' ' . $state);
+        }
+        if (!empty($state)) {
+            $loc_values[] = strtoupper($state);
+        }
+        if (!empty($loc_values)) {
+            $set_attr('location', $loc_values);
+        }
+    }
+
+    // Make-specific color attributes (or generic fallback)
+    $make_color_attrs = array(
+        'bintelli', 'club-car', 'denago', 'epic', 'evolution',
+        'ezgo', 'icon', 'navitas', 'polaris', 'royal-ev',
+        'star-ev', 'swift', 'tara', 'teko', 'tomberlin', 'yamaha',
+    );
+    if (in_array($make_lower, $make_color_attrs)) {
+        if (!empty($color)) {
+            $set_attr($make_lower . '-cart-colors', array(strtoupper($color)));
+        }
+        if (!empty($seat_color)) {
+            $set_attr($make_lower . '-seat-colors', array(strtoupper($seat_color)));
+        }
+    } else {
+        if (!empty($color)) {
+            $set_attr('cart-color', array(strtoupper($color)));
+        }
+        if (!empty($seat_color)) {
+            $set_attr('seat-color', array(strtoupper($seat_color)));
+        }
+    }
+
+    // Sound System (New products with hasSoundSystem only)
+    if (!$is_used && $has_sound) {
+        $set_attr('sound-system', array(strtoupper($make_symbol) . ' SOUND SYSTEM'));
+    }
+
+    // Passengers
+    if (!empty($passengers)) {
+        $num_seats = $has_utility ? '2' : explode(' ', $passengers)[0];
+        $set_attr('passengers', array($num_seats . ' SEATER'));
+    }
+
+    // Receiver Hitch
+    $set_attr('receiver-hitch', array($has_hitch ? 'YES' : 'NO'));
+
+    // Return Policy (New = Yes, Used = 90 Day)
+    $set_attr('return-policy', array($is_used ? '90 DAY' : 'YES'));
+
+    // Rim Size
+    if (!empty($rim_size)) {
+        $set_attr('rim-size', array($rim_size . ' INCH'));
+    }
+
+    // Shipping
+    $set_attr('shipping', array('1 TO 3 DAYS LOCAL', '3 TO 7 DAYS OTR', '5 TO 9 DAYS NATIONAL'));
+
+    // Side Step
+    $side_step = $cart_data['cartAttributes']['sideStep'] ?? null;
+    if (!empty($side_step)) {
+        $side_step_terms = array();
+        foreach ((array) $side_step as $step_val) {
+            if (!empty($step_val)) {
+                $side_step_terms[] = strtoupper($step_val);
+            }
+        }
+        if (!empty($side_step_terms)) {
+            $set_attr('side-step', $side_step_terms);
+        }
+    }
+
+    // Street Legal
+    $set_attr('street-legal', array($is_street_legal ? 'YES' : 'NO'));
+
+    // Tire Profile
+    if (!empty($tire_type)) {
+        $tire_profile = strtoupper(str_replace('-', ' ', $tire_type));
+        $set_attr('tire-profile', array($tire_profile));
+    }
+
+    // Utility Bed
+    $has_bed = $cart_data['cartAttributes']['hasBed'] ?? '';
+    if (!empty($has_bed) && is_string($has_bed)) {
+        $set_attr('utility-bed', array(strtoupper($has_bed)));
+    }
+
+    // Store Code
+    if (!empty($store_id)) {
+        if (strtolower($store_id) === 'national') {
+            $store_code_val = 'UNITED STATES OF AMERICA';
+        } else {
+            $loc_data = \Tigon\DmsConnect\Admin\Attributes::get_location($store_id);
+            if ($loc_data) {
+                $city = $loc_data['city_short'] ?? $loc_data['city'];
+                $st = $loc_data['st'] ?? '';
+                $store_code_val = strtoupper(trim($city . ' ' . $st));
+            } else {
+                $store_code_val = '';
+            }
+        }
+        if (!empty($store_code_val)) {
+            $set_attr('store-code', array($store_code_val));
+        }
+    }
+
+    // Vehicle Class
+    $vehicle_classes = array('GOLF CART', 'PERSONAL TRANSPORTATION VEHICLES (PTVS)');
+    if ($is_street_legal) {
+        $vehicle_classes[] = 'LOW SPEED VEHICLE (LSVS)';
+        $vehicle_classes[] = 'MEDIUM SPEED VEHICLE (MSVS)';
+    }
+    if ($is_electric) {
+        $vehicle_classes[] = 'NEIGHBORHOOD ELECTRIC VEHICLES (NEVS)';
+        $vehicle_classes[] = 'ZERO EMISSION VEHICLES (ZEVS)';
+    }
+    $has_bed = $cart_data['cartAttributes']['hasBed'] ?? false;
+    if (!empty($has_bed)) {
+        $vehicle_classes[] = 'UTILITY TASK VEHICLE (UTVS)';
+    }
+    if (empty($is_lifted)) {
+        $vehicle_classes[] = 'NON-LIFTED';
+    }
+    $set_attr('vehicle-class', $vehicle_classes);
+
+    // Vehicle MSRP
+    $retail_price = $cart_data['retailPrice'] ?? 0;
+    if (!empty($retail_price)) {
+        $msrp_label = '$' . number_format((float) $retail_price, 0, '.', ',');
+        $set_attr('vehicle-msrp', array(strtoupper($msrp_label)));
+    }
+
+    // Vehicle Power
+    $power_value = $is_electric ? 'ELECTRIC' : 'GAS';
+    $set_attr('vehicle-power', array($power_value));
+
+    // Vehicle Status
+    $status_value = $is_used ? 'USED' : 'NEW';
+    $set_attr('vehicle-status', array($status_value));
+
+    // Vehicle Warranty
+    if (!empty($warranty)) {
+        $set_attr('vehicle-warranty', array(strtoupper($warranty)));
+    }
+
+    // VIN
+    $vin_no = $cart_data['vinNo'] ?? '';
+    if (!empty($vin_no)) {
+        $set_attr('vin', array(strtoupper($vin_no)));
+    }
+
+    // Year of Vehicle
+    if (!empty($year)) {
+        $set_attr('year-of-vehicle', array(strtoupper($year)));
+    }
+
+    // Save product attributes meta
+    if (!empty($product_attributes)) {
+        update_post_meta($product_id, '_product_attributes', $product_attributes);
+    }
+}
+
+/**
+ * Assign custom taxonomies mirroring Abstract_Cart::attach_taxonomies()
+ *
+ * @param int   $product_id WooCommerce product ID
+ * @param array $cart_data  Full DMS cart payload
+ */
+function tigon_dms_assign_custom_taxonomies($product_id, $cart_data) {
+    $make  = $cart_data['cartType']['make'] ?? '';
+    $model = $cart_data['cartType']['model'] ?? '';
+    $is_used       = !empty($cart_data['isUsed']);
+    $is_electric   = !empty($cart_data['isElectric']);
+    $is_street_legal = !empty($cart_data['title']['isStreetLegal']);
+    $is_lifted     = !empty($cart_data['cartAttributes']['isLifted']);
+    $has_utility   = ($cart_data['cartAttributes']['passengers'] ?? '') === 'Utility';
+    $drive_train   = $cart_data['cartAttributes']['driveTrain'] ?? '2X4';
+    $has_hitch     = !empty($cart_data['cartAttributes']['hitch']);
+    $has_sound     = !empty($cart_data['cartAttributes']['hasSoundSystem']);
+    $store_id      = $cart_data['cartLocation']['locationId'] ?? '';
+    $is_rental     = !empty($cart_data['isRental']);
+    $rim_size      = $cart_data['cartAttributes']['tireRimSize'] ?? '';
+
+    $make_symbol = tigon_dms_get_make_with_symbol($make);
+
+    // Cached Attributes instance for fast taxonomy term lookups
+    $attrs = tigon_dms_get_attributes_instance();
+
+    // Map taxonomy slugs to Attributes property names for O(1) lookups
+    $taxonomy_map = array(
+        'manufacturers'    => 'manufacturers_taxonomy',
+        'product-brand'    => 'brands_taxonomy',
+        'models'           => 'models_taxonomy',
+        'sound-systems'    => 'sound_systems_taxonomy',
+        'added-features'   => 'added_features_taxonomy',
+        'vehicle-class'    => 'vehicle_classes_taxonomy',
+        'inventory-status' => 'inventory_status_taxonomy',
+        'drivetrain'       => 'drivetrains_taxonomy',
+        'rims'             => 'rims_taxonomy',
+        'fb_product_set'   => 'fb_product_set_taxonomy',
+    );
+
+    // Helper: safely assign terms using Attributes cache or DB fallback, auto-creating if missing
+    $assign = function($taxonomy, $term_names) use ($product_id, $attrs, $taxonomy_map) {
+        if (!taxonomy_exists($taxonomy)) {
+            error_log('[DMS Connect] Taxonomy "' . $taxonomy . '" does not exist — skipping term assignment for product ' . $product_id);
+            return;
+        }
+        $ids = array();
+        foreach ((array) $term_names as $name) {
+            if (empty($name)) continue;
+
+            $upper = strtoupper($name);
+
+            // Fast path: use Attributes pre-loaded taxonomy map
+            $prop = $taxonomy_map[$taxonomy] ?? null;
+            if ($attrs && $prop && isset($attrs->$prop[$upper])) {
+                $ids[] = (int) $attrs->$prop[$upper];
+                continue;
+            }
+
+            // Slow path: individual DB lookup
+            $term = get_term_by('name', $name, $taxonomy);
+            if (!$term) {
+                $term = get_term_by('slug', sanitize_title($name), $taxonomy);
+            }
+            if ($term && !is_wp_error($term)) {
+                $ids[] = (int) $term->term_id;
+                // Cache for subsequent calls in same batch
+                if ($attrs && $prop) {
+                    $attrs->$prop[$upper] = $term->term_id;
+                }
+                continue;
+            }
+
+            // Auto-create the term if it doesn't exist
+            $new_term = wp_insert_term($name, $taxonomy, array('slug' => sanitize_title($name)));
+            if (!is_wp_error($new_term)) {
+                $ids[] = (int) $new_term['term_id'];
+                if ($attrs && $prop) {
+                    $attrs->$prop[$upper] = $new_term['term_id'];
+                }
+            } else {
+                error_log('[DMS Connect] Failed to create term "' . $name . '" in taxonomy "' . $taxonomy . '": ' . $new_term->get_error_message());
+            }
+        }
+        if (!empty($ids)) {
+            wp_set_object_terms($product_id, $ids, $taxonomy, true);
+        }
+    };
+
+    // Manufacturers taxonomy (with special case handling)
+    $mfg_name = strtoupper($make_symbol);
+    if ($mfg_name === 'SWIFT EV®') {
+        $mfg_name = 'SWIFT®';
+    } elseif ($mfg_name === 'STAR®') {
+        $mfg_name = 'STAR EV®';
+    }
+    $assign('manufacturers', array($mfg_name));
+
+    // Brands taxonomy (product-brand) — matches manufacturer make, auto-create if missing
+    $assign('product-brand', array($mfg_name));
+
+    // Models taxonomy (with special case handling from Abstract_Cart)
+    $model_upper = strtoupper($model);
+    if ($model_upper === 'DS') {
+        $model_name = strtoupper($make_symbol) . ' DS ELECTRIC';
+    } elseif ($model_upper === 'PRECEDENT') {
+        $model_name = strtoupper($make_symbol) . ' PRECEDENT ELECTRIC';
+    } elseif ($model_upper === '4L') {
+        $model_name = strtoupper($make_symbol) . ' CROWN 4 LIFTED';
+    } elseif ($model_upper === '6L') {
+        $model_name = strtoupper($make_symbol) . ' CROWN 6 LIFTED';
+    } elseif ($model_upper === 'DRIVE 2') {
+        $model_name = strtoupper($make_symbol) . ' DRIVE2';
+    } elseif (strtoupper($make_symbol) === 'STAR EV®') {
+        $model_name = 'STAR EV® ' . $model_upper;
+    } elseif (strtoupper($make_symbol) === 'EZGO®') {
+        $model_name = 'EZ-GO® ' . $model_upper;
+    } else {
+        $model_name = strtoupper($make_symbol . ' ' . $model);
+    }
+    $assign('models', array($model_name));
+
+    // Facebook Product Set taxonomy — assigns make-level + model-level terms
+    // Existing terms use varying make-level naming: "DENAGO®", "CLUB CAR® Golf Carts", "Swift Golf Carts"
+    // We check for existing terms in multiple name variants before auto-creating.
+    if (taxonomy_exists('fb_product_set')) {
+        $fb_terms = array();
+
+        // --- Make-level term ---
+        // Try multiple name variants against cache and DB to find existing make-level term
+        $fb_make_id = null;
+        $fb_make_prop = $attrs->fb_product_set_taxonomy ?? array();
+
+        // Variant 1: Just the make symbol (e.g., "DENAGO®", "EVOLUTION®")
+        $fb_make_v1 = $mfg_name;
+        // Variant 2: Make symbol + " Golf Carts" (e.g., "CLUB CAR® Golf Carts")
+        $fb_make_v2 = $mfg_name . ' Golf Carts';
+        // Variant 3: Make name without symbol + " Golf Carts" (e.g., "Swift Golf Carts", "Yamaha Golf Carts")
+        $fb_make_v3 = ucwords(strtolower(str_replace('®', '', $mfg_name))) . ' Golf Carts';
+
+        // Fast cache lookup
+        foreach (array($fb_make_v1, $fb_make_v2, $fb_make_v3) as $variant) {
+            $upper = strtoupper($variant);
+            if (isset($fb_make_prop[$upper])) {
+                $fb_make_id = (int) $fb_make_prop[$upper];
+                break;
+            }
+        }
+
+        // Slow DB lookup if cache missed
+        if (!$fb_make_id) {
+            foreach (array($fb_make_v1, $fb_make_v2, $fb_make_v3) as $variant) {
+                $t = get_term_by('name', $variant, 'fb_product_set');
+                if (!$t) {
+                    $t = get_term_by('slug', sanitize_title($variant), 'fb_product_set');
+                }
+                if ($t && !is_wp_error($t)) {
+                    $fb_make_id = (int) $t->term_id;
+                    break;
+                }
+            }
+        }
+
+        // Auto-create make-level term if none found (use just the make symbol)
+        if (!$fb_make_id) {
+            $new_fb = wp_insert_term($fb_make_v1, 'fb_product_set', array('slug' => sanitize_title($fb_make_v1)));
+            if (!is_wp_error($new_fb)) {
+                $fb_make_id = (int) $new_fb['term_id'];
+                // Cache for subsequent products in same batch
+                if ($attrs && isset($attrs->fb_product_set_taxonomy)) {
+                    $attrs->fb_product_set_taxonomy[strtoupper($fb_make_v1)] = $fb_make_id;
+                }
+            }
+        }
+
+        if ($fb_make_id) {
+            $fb_terms[] = $fb_make_id;
+        }
+
+        // --- Model-level term (reuses $model_name from models taxonomy) ---
+        if (!empty($model)) {
+            $fb_model_name = $model_name; // Same as models taxonomy (e.g., "DENAGO® NOMAD XL")
+            $fb_model_upper = strtoupper($fb_model_name);
+
+            $fb_model_id = null;
+            if (isset($fb_make_prop[$fb_model_upper])) {
+                $fb_model_id = (int) $fb_make_prop[$fb_model_upper];
+            }
+            if (!$fb_model_id) {
+                $t = get_term_by('name', $fb_model_name, 'fb_product_set');
+                if (!$t) {
+                    $t = get_term_by('slug', sanitize_title($fb_model_name), 'fb_product_set');
+                }
+                if ($t && !is_wp_error($t)) {
+                    $fb_model_id = (int) $t->term_id;
+                }
+            }
+            if (!$fb_model_id) {
+                $new_fb_model = wp_insert_term($fb_model_name, 'fb_product_set', array('slug' => sanitize_title($fb_model_name)));
+                if (!is_wp_error($new_fb_model)) {
+                    $fb_model_id = (int) $new_fb_model['term_id'];
+                    if ($attrs && isset($attrs->fb_product_set_taxonomy)) {
+                        $attrs->fb_product_set_taxonomy[$fb_model_upper] = $fb_model_id;
+                    }
+                }
+            }
+            if ($fb_model_id) {
+                $fb_terms[] = $fb_model_id;
+            }
+        }
+
+        // Also add condition-based terms: "New Golf Carts" or "Used Golf Carts"
+        $condition_fb = $is_used ? 'Used Golf Carts' : 'New Golf Carts';
+        $condition_upper = strtoupper($condition_fb);
+        $condition_id = null;
+        if (isset($fb_make_prop[$condition_upper])) {
+            $condition_id = (int) $fb_make_prop[$condition_upper];
+        }
+        if (!$condition_id) {
+            $t = get_term_by('name', $condition_fb, 'fb_product_set');
+            if (!$t) {
+                $t = get_term_by('slug', sanitize_title($condition_fb), 'fb_product_set');
+            }
+            if ($t && !is_wp_error($t)) {
+                $condition_id = (int) $t->term_id;
+            }
+        }
+        if (!$condition_id) {
+            $new_cond = wp_insert_term($condition_fb, 'fb_product_set', array('slug' => sanitize_title($condition_fb)));
+            if (!is_wp_error($new_cond)) {
+                $condition_id = (int) $new_cond['term_id'];
+                if ($attrs && isset($attrs->fb_product_set_taxonomy)) {
+                    $attrs->fb_product_set_taxonomy[$condition_upper] = $condition_id;
+                }
+            }
+        }
+        if ($condition_id) {
+            $fb_terms[] = $condition_id;
+        }
+
+        if (!empty($fb_terms)) {
+            wp_set_object_terms($product_id, $fb_terms, 'fb_product_set', true);
+        }
+    }
+
+    // Sound Systems taxonomy — based on hasSoundSystem + optional soundSystem override
+    if ($has_sound) {
+        $custom_sound = $cart_data['addons']['soundSystem'] ?? null;
+        if (!empty($custom_sound) && is_string($custom_sound)) {
+            $sound_name = strtoupper($custom_sound);
+        } elseif (strtoupper($make_symbol) === 'SWIFT®') {
+            $sound_name = 'SWIFT EV® SOUND SYSTEM';
+        } else {
+            $sound_name = strtoupper($make_symbol) . ' SOUND SYSTEM';
+        }
+        // Try cached lookup first, fall back to auto-create
+        $ss_prop = $attrs->sound_systems_taxonomy ?? array();
+        if (isset($ss_prop[$sound_name])) {
+            wp_set_object_terms($product_id, array((int) $ss_prop[$sound_name]), 'sound-systems', true);
+        } else {
+            $existing = get_term_by('name', $sound_name, 'sound-systems');
+            if (!$existing) {
+                $existing = get_term_by('slug', sanitize_title($sound_name), 'sound-systems');
+            }
+            if ($existing && !is_wp_error($existing)) {
+                wp_set_object_terms($product_id, array((int) $existing->term_id), 'sound-systems', true);
+            } else {
+                $new_ss = wp_insert_term($sound_name, 'sound-systems', array('slug' => sanitize_title($sound_name)));
+                if (!is_wp_error($new_ss)) {
+                    wp_set_object_terms($product_id, array((int) $new_ss['term_id']), 'sound-systems', true);
+                }
+            }
+        }
+    } else {
+        // No sound system
+        $assign('sound-systems', array('NO SOUND SYSTEM'));
+    }
+
+    // Rims taxonomy — based on tireRimSize (e.g. "14" becomes "14 INCH")
+    if (!empty($rim_size)) {
+        $rim_name = strtoupper($rim_size . ' INCH');
+        $rims_prop = $attrs->rims_taxonomy ?? array();
+        if (isset($rims_prop[$rim_name])) {
+            wp_set_object_terms($product_id, array((int) $rims_prop[$rim_name]), 'rims', true);
+        } else {
+            $existing_rim = get_term_by('name', $rim_name, 'rims');
+            if (!$existing_rim) {
+                $existing_rim = get_term_by('slug', sanitize_title($rim_name), 'rims');
+            }
+            if ($existing_rim && !is_wp_error($existing_rim)) {
+                wp_set_object_terms($product_id, array((int) $existing_rim->term_id), 'rims', true);
+            } else {
+                $new_rim = wp_insert_term($rim_name, 'rims', array('slug' => sanitize_title($rim_name)));
+                if (!is_wp_error($new_rim)) {
+                    wp_set_object_terms($product_id, array((int) $new_rim['term_id']), 'rims', true);
+                }
+            }
+        }
+    }
+
+    // Added Features taxonomy
+    $added_features = array();
+    if (isset($cart_data['addedFeatures'])) {
+        $af = $cart_data['addedFeatures'];
+        if (!empty($af['staticStock']))  $added_features[] = 'STATIC STOCK';
+        if (!empty($af['brushGuard']))   $added_features[] = 'BRUSH GUARD';
+        if (!empty($af['clayBasket']))   $added_features[] = 'CLAY BASKET';
+        if (!empty($af['fenderFlares'])) $added_features[] = 'FENDER FLARES';
+        if (!empty($af['LEDs']))         $added_features[] = 'LEDS';
+        if (!empty($af['lightBar']))     $added_features[] = 'LIGHT BAR';
+        if (!empty($af['underGlow']))    $added_features[] = 'UNDER GLOW';
+        if (!empty($af['stockOptions'])) $added_features[] = 'STOCK OPTIONS';
+    }
+    if ($is_lifted) {
+        $added_features[] = 'LIFT KIT';
+    }
+    if ($has_hitch) {
+        $added_features[] = 'TOW HITCH';
+    }
+    if (!empty($added_features)) {
+        $assign('added-features', $added_features);
+    }
+
+    // Vehicle Class taxonomy — must match Abstract_Cart::attach_taxonomies()
+    $vc = array('GOLF CART', 'PERSONAL TRANSPORTATION VEHICLES (PTVS)');
+    if ($is_street_legal) {
+        $vc[] = 'LOW SPEED VEHICLE (LSVS)';
+        $vc[] = 'MEDIUM SPEED VEHICLE (MSVS)';
+    }
+    if ($is_electric) {
+        $vc[] = 'NEIGHBORHOOD ELECTRIC VEHICLES (NEVS)';
+        $vc[] = 'ZERO EMISSION VEHICLES (ZEVS)';
+    }
+    if (!empty($cart_data['cartAttributes']['hasBed'])) {
+        $vc[] = 'UTILITY TASK VEHICLE (UTVS)';
+    }
+    if (!$is_lifted) {
+        $vc[] = 'NON-LIFTED';
+    }
+    if ($is_rental) {
+        $vc[] = 'RENTALS';
+    }
+    $assign('vehicle-class', $vc);
+
+    // Inventory Status taxonomy (includes rental support)
+    if ($is_rental) {
+        $inv_status = $is_used ? 'LOCAL USED RENTAL INVENTORY' : 'LOCAL NEW RENTAL INVENTORY';
+    } else {
+        $inv_status = $is_used ? 'LOCAL USED ACTIVE INVENTORY' : 'LOCAL NEW ACTIVE INVENTORY';
+    }
+    $assign('inventory-status', array($inv_status));
+
+    // Drivetrain taxonomy
+    $assign('drivetrain', array(strtoupper($drive_train)));
+
+    // Location taxonomy (city and state term IDs from Attributes, auto-create when missing)
+    if (!empty($store_id) && class_exists('\Tigon\DmsConnect\Admin\Attributes')) {
+        $loc = \Tigon\DmsConnect\Admin\Attributes::get_location($store_id);
+        if (!$loc) {
+            $loc = \Tigon\DmsConnect\Admin\Attributes::$locations['T1'] ?? null;
+        }
+        if ($loc && taxonomy_exists('location')) {
+            $location_ids = array();
+
+            // State term — auto-create if state_id is null
+            $state_id = $loc['state_id'] ?? null;
+            if (empty($state_id) && !empty($loc['state'])) {
+                $state_name = $loc['state'];
+                $existing_state = get_term_by('name', $state_name, 'location');
+                if ($existing_state && !is_wp_error($existing_state)) {
+                    $state_id = $existing_state->term_id;
+                } else {
+                    $new_state = wp_insert_term($state_name, 'location', array('slug' => sanitize_title($state_name)));
+                    if (!is_wp_error($new_state)) {
+                        $state_id = $new_state['term_id'];
+                    }
+                }
+                if ($state_id) {
+                    \Tigon\DmsConnect\Admin\Attributes::$locations[$store_id]['state_id'] = $state_id;
+                }
+            }
+            if (!empty($state_id)) {
+                $location_ids[] = (int) $state_id;
+            }
+
+            // City term — auto-create if city_id is null
+            $city_id = $loc['city_id'] ?? null;
+            if (empty($city_id) && !empty($loc['city'])) {
+                $city_name = $loc['city'];
+                $existing_city = get_term_by('name', $city_name, 'location');
+                if ($existing_city && !is_wp_error($existing_city)) {
+                    $city_id = $existing_city->term_id;
+                } else {
+                    $new_city = wp_insert_term($city_name, 'location', array(
+                        'slug'   => sanitize_title($city_name),
+                        'parent' => $state_id ?: 0,
+                    ));
+                    if (!is_wp_error($new_city)) {
+                        $city_id = $new_city['term_id'];
+                    }
+                }
+                if ($city_id) {
+                    \Tigon\DmsConnect\Admin\Attributes::$locations[$store_id]['city_id'] = $city_id;
+                }
+            }
+            if (!empty($city_id)) {
+                $location_ids[] = (int) $city_id;
+            }
+
+            if (!empty($location_ids)) {
+                wp_set_object_terms($product_id, $location_ids, 'location', true);
+            }
+        }
+    }
+}
+
+/**
+ * Set Yoast SEO meta mirroring Abstract_Cart::generate_descriptions()
+ *
+ * @param int   $product_id WooCommerce product ID
+ * @param array $cart_data  Full DMS cart payload
+ */
+function tigon_dms_set_seo_meta($product_id, $cart_data) {
+    $make  = $cart_data['cartType']['make'] ?? '';
+    $model = $cart_data['cartType']['model'] ?? '';
+    $color = $cart_data['cartAttributes']['cartColor'] ?? '';
+    $store_id = $cart_data['cartLocation']['locationId'] ?? '';
+
+    $make_symbol = tigon_dms_get_make_with_symbol($make);
+    $make_model_color = trim($make_symbol . ' ' . $model . ' ' . $color);
+
+    // Build TIGON location text and phone number
+    $tigon_text = 'TIGON Golf Carts';
+    $phone = '';
+    if (!empty($store_id)) {
+        $store_data = DMS_API::get_city_and_state_by_store_id($store_id);
+        $city  = $store_data['city'] ?? '';
+        $state = $store_data['state'] ?? '';
+        if (!empty($city) && !empty($state)) {
+            $tigon_text = 'TIGON® Golf Carts ' . $city . ', ' . $state;
+        }
+        // Try to get phone from Attributes static locations
+        if (class_exists('\Tigon\DmsConnect\Admin\Attributes')) {
+            $loc = \Tigon\DmsConnect\Admin\Attributes::$locations[$store_id] ?? null;
+            if ($loc && !empty($loc['phone'])) {
+                $phone = $loc['phone'];
+            }
+        }
+    }
+
+    // Meta description (matches Abstract_Cart pattern)
+    $meta_desc = $make_model_color . ' At ' . $tigon_text . '.';
+    if (!empty($phone)) {
+        $meta_desc .= ' Call Now ' . $phone . ' Get 0% Financing, and Shipping Options Today!';
+    } else {
+        $meta_desc .= ' Get 0% Financing, and Shipping Options Today!';
+    }
+
+    // SEO title
+    $seo_title = $make_model_color . ' | ' . $tigon_text;
+
+    // Set Yoast SEO meta (only if Yoast is active)
+    if (defined('WPSEO_VERSION') || class_exists('WPSEO_Meta')) {
+        update_post_meta($product_id, '_yoast_wpseo_title', sanitize_text_field($seo_title));
+        update_post_meta($product_id, '_yoast_wpseo_metadesc', sanitize_text_field($meta_desc));
+
+        // Product name for focus keywords and breadcrumb (mirrors Database_Object)
+        $product_name = get_the_title($product_id);
+        if (!empty($product_name)) {
+            update_post_meta($product_id, '_yoast_wpseo_focus_kw', sanitize_text_field($product_name));
+            update_post_meta($product_id, '_yoast_wpseo_focus_keywords', sanitize_text_field($product_name));
+            update_post_meta($product_id, '_yoast_wpseo_bctitle', sanitize_text_field($product_name));
+        }
+
+        // OpenGraph title + description (mirrors Database_Object)
+        update_post_meta($product_id, '_yoast_wpseo_opengraph-title', sanitize_text_field($product_name ?: $seo_title));
+        update_post_meta($product_id, '_yoast_wpseo_opengraph-description', sanitize_text_field($meta_desc));
+
+        // OpenGraph + Twitter images from featured image (mirrors Database_Object)
+        $featured_id = get_post_thumbnail_id($product_id);
+        if (!empty($featured_id)) {
+            $featured_url = wp_get_attachment_image_url($featured_id, 'full');
+            update_post_meta($product_id, '_yoast_wpseo_opengraph-image-id', $featured_id);
+            if ($featured_url) {
+                update_post_meta($product_id, '_yoast_wpseo_opengraph-image', esc_url_raw($featured_url));
+            }
+            update_post_meta($product_id, '_yoast_wpseo_twitter-image-id', $featured_id);
+            if ($featured_url) {
+                update_post_meta($product_id, '_yoast_wpseo_twitter-image', esc_url_raw($featured_url));
+            }
+        }
+    }
+}
+
+/**
+ * Set Product_Fields meta that mirrors Database_Object field writing.
+ *
+ * Covers: stock, tax, Google/Facebook extras, Yoast primary terms,
+ * cornerstone, TIGON watermark, monroney sticker, WCPA, shipping class,
+ * custom tabs, and custom product options.
+ *
+ * @param int   $product_id WooCommerce product ID
+ * @param array $cart_data  Full DMS cart payload
+ */
+function tigon_dms_set_product_fields_meta($product_id, $cart_data) {
+    $make  = $cart_data['cartType']['make'] ?? '';
+    $model = $cart_data['cartType']['model'] ?? '';
+    $color = $cart_data['cartAttributes']['cartColor'] ?? '';
+    $store_id  = $cart_data['cartLocation']['locationId'] ?? '';
+    $is_used   = !empty($cart_data['isUsed']);
+
+    // Handle "Other" locationId — use latestStoreId as fallback
+    if ($store_id === 'Other') {
+        $store_id = $cart_data['cartLocation']['latestStoreId'] ?? 'T1';
+    }
+
+    $make_symbol = tigon_dms_get_make_with_symbol($make);
+
+    // ---------------------------------------------------------------
+    // 1. Stock & Tax (from set_simple_fields)
+    // ---------------------------------------------------------------
+    update_post_meta($product_id, '_stock', 10000);
+    update_post_meta($product_id, '_tax_status', 'taxable');
+    update_post_meta($product_id, '_tax_class', 'standard');
+
+    // ---------------------------------------------------------------
+    // 2. Google Shopping extras (gender, adult, age_group)
+    // ---------------------------------------------------------------
+    update_post_meta($product_id, '_wc_gla_gender', 'unisex');
+    update_post_meta($product_id, '_wc_gla_adult', 'no');
+    update_post_meta($product_id, '_wc_gla_age_group', 'all ages');
+
+    // Google category (also set by create function, ensure consistency)
+    update_post_meta($product_id, '_wc_gla_google_product_category', 'Vehicles & Parts > Vehicles > Motor Vehicles > Golf Carts');
+
+    // ---------------------------------------------------------------
+    // 3. Facebook extras (gender, age_group)
+    // ---------------------------------------------------------------
+    update_post_meta($product_id, '_wc_facebook_enhanced_catalog_attributes_gender', 'unisex');
+    update_post_meta($product_id, '_wc_facebook_enhanced_catalog_attributes_age_group', 'all ages');
+
+    // ---------------------------------------------------------------
+    // 4. Yoast primary terms + cornerstone
+    // ---------------------------------------------------------------
+    $yoast_active = defined('WPSEO_VERSION') || class_exists('WPSEO_Meta');
+
+    if ($yoast_active) {
+        // Primary product category = Make+Model category when available
+        // (e.g. "Club Car Onward"); falls back to the Make category
+        // ("Club Car") if the Make+Model subcategory doesn't exist.
+        // Applies to both NEW and USED carts.
+        $primary_cat_id = null;
+        if (!empty($make)) {
+            $attrs = tigon_dms_get_attributes_instance();
+            $make_cat_id = null;
+            if ($attrs && !empty($attrs->categories)) {
+                $make_cat_id = $attrs->categories[strtoupper($make_symbol)] ?? null;
+            }
+            if (!$make_cat_id) {
+                $make_cat_id = tigon_dms_get_existing_category($make, 0);
+            }
+
+            // Prefer the Make+Model subcategory (the "Model" the user
+            // asked for — e.g. "Club Car Onward" under "Club Car").
+            if (!empty($model) && $make_cat_id) {
+                $make_model = trim($make . ' ' . $model);
+                $model_cat_id = tigon_dms_get_existing_category($make_model, $make_cat_id);
+                if ($model_cat_id) {
+                    $primary_cat_id = $model_cat_id;
+                }
+            }
+            // Fall back to the Make if no Make+Model subcategory exists.
+            if (!$primary_cat_id && $make_cat_id) {
+                $primary_cat_id = $make_cat_id;
+            }
+        }
+        if ($primary_cat_id) {
+            update_post_meta($product_id, '_yoast_wpseo_primary_product_cat', $primary_cat_id);
+        }
+
+        // Primary location = city term ID from Attributes
+        if (!empty($store_id) && class_exists('\Tigon\DmsConnect\Admin\Attributes')) {
+            $loc = \Tigon\DmsConnect\Admin\Attributes::$locations[$store_id] ?? null;
+            if ($loc && !empty($loc['city_id'])) {
+                update_post_meta($product_id, '_yoast_wpseo_primary_location', $loc['city_id']);
+            }
+        }
+
+        // Primary model = model taxonomy term ID
+        if (!empty($model) && taxonomy_exists('models')) {
+            $model_upper = strtoupper($model);
+            if ($model_upper === 'DS') {
+                $model_term_name = strtoupper($make_symbol) . ' DS ELECTRIC';
+            } elseif ($model_upper === 'PRECEDENT') {
+                $model_term_name = strtoupper($make_symbol) . ' PRECEDENT ELECTRIC';
+            } elseif ($model_upper === '4L') {
+                $model_term_name = strtoupper($make_symbol) . ' CROWN 4 LIFTED';
+            } elseif ($model_upper === '6L') {
+                $model_term_name = strtoupper($make_symbol) . ' CROWN 6 LIFTED';
+            } elseif ($model_upper === 'DRIVE 2') {
+                $model_term_name = strtoupper($make_symbol) . ' DRIVE2';
+            } elseif (strtoupper($make_symbol) === 'STAR EV®') {
+                $model_term_name = 'STAR EV® ' . $model_upper;
+            } elseif (strtoupper($make_symbol) === 'EZGO®') {
+                $model_term_name = 'EZ-GO® ' . $model_upper;
+            } else {
+                $model_term_name = strtoupper($make_symbol . ' ' . $model);
+            }
+
+            // Fast path: Attributes cache
+            $model_term_id = null;
+            if ($attrs && !empty($attrs->models_taxonomy)) {
+                $model_term_id = $attrs->models_taxonomy[strtoupper($model_term_name)] ?? null;
+            }
+            if (!$model_term_id) {
+                // Slow path: DB lookup
+                $model_term = get_term_by('name', $model_term_name, 'models');
+                if (!$model_term) {
+                    $model_term = get_term_by('slug', sanitize_title($model_term_name), 'models');
+                }
+                if ($model_term && !is_wp_error($model_term)) {
+                    $model_term_id = $model_term->term_id;
+                }
+            }
+            if ($model_term_id) {
+                update_post_meta($product_id, '_yoast_wpseo_primary_models', $model_term_id);
+            }
+        }
+
+        // Primary added-feature (mirrors Database_Object primary_added_feature)
+        if (taxonomy_exists('added-features')) {
+            // Use the first added-feature from the cart as primary
+            $added_features = $cart_data['cartAttributes']['addedFeatures'] ?? [];
+            if (!empty($added_features) && is_array($added_features)) {
+                $first_feature = is_string($added_features[0]) ? $added_features[0] : ($added_features[0]['name'] ?? '');
+                if (!empty($first_feature)) {
+                    $feature_upper = strtoupper($first_feature);
+                    $feature_term_id = null;
+                    if ($attrs && !empty($attrs->added_features_taxonomy)) {
+                        $feature_term_id = $attrs->added_features_taxonomy[$feature_upper] ?? null;
+                    }
+                    if (!$feature_term_id) {
+                        $feature_term = get_term_by('name', $first_feature, 'added-features');
+                        if ($feature_term && !is_wp_error($feature_term)) {
+                            $feature_term_id = $feature_term->term_id;
+                        }
+                    }
+                    if ($feature_term_id) {
+                        update_post_meta($product_id, '_yoast_wpseo_primary_added-features', $feature_term_id);
+                    }
+                }
+            }
+        }
+
+        // Cornerstone content
+        update_post_meta($product_id, '_yoast_wpseo_is_cornerstone', '1');
+    }
+
+    // ---------------------------------------------------------------
+    // 5. TIGON watermark text — maps to locationId from payload
+    //    Format: "City ST" (e.g., "Hatfield PA", "Dover DE")
+    //    Rentals: "TIGON® RENTALS"
+    // ---------------------------------------------------------------
+    $tigonwm = 'TIGON®';
+    if (!empty($store_id)) {
+        // Use Attributes::get_location() which checks hardcoded array first, then API fallback
+        if (class_exists('\Tigon\DmsConnect\Admin\Attributes')) {
+            $loc = \Tigon\DmsConnect\Admin\Attributes::get_location($store_id);
+            if ($loc) {
+                $city_short = $loc['city_short'] ?? $loc['city'] ?? '';
+                $st = $loc['st'] ?? '';
+                if (!empty($city_short) && !empty($st)) {
+                    $tigonwm = $city_short . ' ' . $st;
+                }
+            }
+        } else {
+            $store_data = DMS_API::get_city_and_state_by_store_id($store_id);
+            $city  = $store_data['city'] ?? '';
+            $state = $store_data['state'] ?? '';
+            if (!empty($city) && !empty($state)) {
+                // Abbreviate state name for consistency
+                $state_map = array(
+                    'Pennsylvania' => 'PA', 'New Jersey' => 'NJ', 'Delaware' => 'DE',
+                    'North Carolina' => 'NC', 'Indiana' => 'IN', 'Virginia' => 'VA',
+                    'Florida' => 'FL', 'Ohio' => 'OH', 'South Carolina' => 'SC',
+                    'Maryland' => 'MD', 'New York' => 'NY', 'Connecticut' => 'CT',
+                    'Massachusetts' => 'MA', 'Georgia' => 'GA', 'Texas' => 'TX',
+                );
+                $st = $state_map[$state] ?? strtoupper(substr($state, 0, 2));
+                $tigonwm = $city . ' ' . $st;
+            }
+        }
+    }
+    // Rentals override
+    if (!empty($cart_data['isRental'])) {
+        $tigonwm = 'TIGON® RENTALS';
+    }
+    update_post_meta($product_id, '_tigonwm', sanitize_text_field($tigonwm));
+
+    // ---------------------------------------------------------------
+    // 6. Monroney sticker (window sticker PDF)
+    // ---------------------------------------------------------------
+    $sticker_url = $cart_data['cartWindowStickerUrl'] ?? '';
+    if (!empty($sticker_url)) {
+        update_post_meta($product_id, 'monroney_sticker', esc_url_raw($sticker_url));
+        // ACF field container ID (from Abstract_Cart)
+        update_post_meta($product_id, '_monroney_sticker', 'field_66e3332abf481');
+    }
+
+    // ---------------------------------------------------------------
+    // 7. WCPA - Exclude global addon forms
+    // ---------------------------------------------------------------
+    update_post_meta($product_id, 'wcpa_exclude_global_forms', '1');
+
+    // ---------------------------------------------------------------
+    // 8. Shipping class term
+    // ---------------------------------------------------------------
+    if (taxonomy_exists('product_shipping_class')) {
+        // Rentals get "Golf Cart Rentals", everything else gets "Golf Cart Shipping"
+        if ($is_rental) {
+            $shipping_slug = 'golf-cart-rentals';
+            $shipping_name = 'Golf Cart Rentals';
+        } else {
+            $shipping_slug = 'golf-cart-shipping';
+            $shipping_name = 'Golf Cart Shipping';
+        }
+        $shipping_term = get_term_by('slug', $shipping_slug, 'product_shipping_class');
+        if (!$shipping_term || is_wp_error($shipping_term)) {
+            $new_shipping = wp_insert_term($shipping_name, 'product_shipping_class', array('slug' => $shipping_slug));
+            if (!is_wp_error($new_shipping)) {
+                wp_set_object_terms($product_id, array($new_shipping['term_id']), 'product_shipping_class');
+            }
+        } else {
+            wp_set_object_terms($product_id, array($shipping_term->term_id), 'product_shipping_class');
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // 9. Custom product tabs (Yikes WooCommerce Product Tabs)
+    // ---------------------------------------------------------------
+    $tabs_meta = tigon_dms_build_custom_tabs($cart_data);
+    if (!empty($tabs_meta)) {
+        update_post_meta($product_id, '_yikes_woo_products_tabs', $tabs_meta);
+    }
+
+    // ---------------------------------------------------------------
+    // 10. Custom product options (WCPA addon forms)
+    // ---------------------------------------------------------------
+    $options_meta = tigon_dms_build_custom_options($cart_data);
+    if (!empty($options_meta)) {
+        update_post_meta($product_id, '_wcpa_product_meta', $options_meta);
+    }
+
+    // ---------------------------------------------------------------
+    // 11. Custom product meta fields (from DMS payload)
+    //     Maps API fields to WooCommerce custom meta keys used by
+    //     the theme, SASWP schema, Google/Facebook feeds, and filters.
+    // ---------------------------------------------------------------
+    $year        = $cart_data['cartType']['year'] ?? '';
+    $seat_color  = $cart_data['cartAttributes']['seatColor'] ?? '';
+    $passengers  = $cart_data['cartAttributes']['passengers'] ?? '';
+    $drivetrain  = $cart_data['cartAttributes']['driveTrain'] ?? '2X4';
+    $is_electric = !empty($cart_data['isElectric']);
+    $is_lifted   = !empty($cart_data['cartAttributes']['isLifted']);
+    $vin_no      = $cart_data['vinNo'] ?? '';
+    $serial_no   = $cart_data['serialNo'] ?? '';
+    $mileage     = $cart_data['mileage'] ?? '';
+    $voltage     = $cart_data['battery']['packVoltage'] ?? '';
+
+    // Year — both prefixed and non-prefixed (used by different theme templates)
+    if (!empty($year)) {
+        update_post_meta($product_id, '_year', sanitize_text_field($year));
+        update_post_meta($product_id, 'year', sanitize_text_field($year));
+    }
+
+    // Model — both prefixed and non-prefixed
+    if (!empty($model)) {
+        update_post_meta($product_id, '_model', sanitize_text_field($model));
+        update_post_meta($product_id, 'model', sanitize_text_field($model));
+    }
+
+    // Brand / Make — both prefixed and non-prefixed
+    if (!empty($make_symbol)) {
+        update_post_meta($product_id, '_brand', sanitize_text_field($make_symbol));
+        update_post_meta($product_id, 'brand', sanitize_text_field($make_symbol));
+    }
+
+    // Cart Color — both prefixed and non-prefixed
+    if (!empty($color)) {
+        update_post_meta($product_id, '_color', sanitize_text_field($color));
+        update_post_meta($product_id, 'color', sanitize_text_field($color));
+    }
+
+    // Seat Color — both prefixed and non-prefixed
+    if (!empty($seat_color)) {
+        update_post_meta($product_id, '_seat_color', sanitize_text_field($seat_color));
+        update_post_meta($product_id, 'seat_color', sanitize_text_field($seat_color));
+    }
+
+    // Power Source — both prefixed and non-prefixed
+    $power_source = $is_electric ? 'Electric' : 'Gas';
+    update_post_meta($product_id, '_power_source', sanitize_text_field($power_source));
+    update_post_meta($product_id, 'power_source', sanitize_text_field($power_source));
+
+    // Voltage — both prefixed and non-prefixed (electric only)
+    if ($is_electric && !empty($voltage)) {
+        update_post_meta($product_id, '_voltage', sanitize_text_field($voltage));
+        update_post_meta($product_id, 'voltage', sanitize_text_field($voltage));
+    }
+
+    // Seats/Passengers — both prefixed and non-prefixed
+    if (!empty($passengers)) {
+        $num_seats = ($passengers === 'Utility') ? '2' : explode(' ', $passengers)[0];
+        update_post_meta($product_id, '_seats', sanitize_text_field($num_seats));
+        update_post_meta($product_id, 'seats', sanitize_text_field($num_seats));
+    }
+
+    // Mileage — both prefixed and non-prefixed (used vehicles)
+    if (!empty($mileage)) {
+        update_post_meta($product_id, '_mileage', sanitize_text_field($mileage));
+        update_post_meta($product_id, 'mileage', sanitize_text_field($mileage));
+    }
+
+    // Lifted — both prefixed and non-prefixed
+    $lifted_val = $is_lifted ? 'Yes' : 'No';
+    update_post_meta($product_id, '_lifted', sanitize_text_field($lifted_val));
+    update_post_meta($product_id, 'lifted', sanitize_text_field($lifted_val));
+
+    // Drivetrain — both prefixed and non-prefixed
+    if (!empty($drivetrain)) {
+        update_post_meta($product_id, '_drivetrain', sanitize_text_field(strtoupper($drivetrain)));
+        update_post_meta($product_id, 'drivetrain', sanitize_text_field(strtoupper($drivetrain)));
+    }
+
+    // VIN# — both prefixed and non-prefixed
+    if (!empty($vin_no)) {
+        update_post_meta($product_id, '_vin#', sanitize_text_field($vin_no));
+        update_post_meta($product_id, 'vin#', sanitize_text_field($vin_no));
+    }
+
+    // Extra product code (serial number as secondary identifier)
+    if (!empty($serial_no)) {
+        update_post_meta($product_id, '_extra-product-code', sanitize_text_field($serial_no));
+        update_post_meta($product_id, 'extra-product-code', sanitize_text_field($serial_no));
+    }
+
+    // ---------------------------------------------------------------
+    // 12. Facebook for WooCommerce — additional catalog attributes
+    // ---------------------------------------------------------------
+    update_post_meta($product_id, '_wc_facebook_enhanced_catalog_attributes_material', 'Composite');
+    if (!empty($make_symbol)) {
+        update_post_meta($product_id, '_wc_facebook_enhanced_catalog_attributes_mpn', sanitize_text_field($make_symbol . ' ' . $model));
+    }
+    if (!empty($passengers)) {
+        $num_seats = ($passengers === 'Utility') ? '2' : explode(' ', $passengers)[0];
+        update_post_meta($product_id, '_wc_facebook_enhanced_catalog_attributes_size', $num_seats . ' Seater');
+    }
+    update_post_meta($product_id, '_wc_facebook_google_product_category', 'Vehicles & Parts > Vehicles > Motor Vehicles > Golf Carts');
+    update_post_meta($product_id, '_wc_facebook_commerce_enabled', 'yes');
+
+    // ---------------------------------------------------------------
+    // 13. Google for WooCommerce — ensure all fields set
+    // ---------------------------------------------------------------
+    update_post_meta($product_id, '_wc_gla_gtin', '');
+    update_post_meta($product_id, '_wc_gla_visibility', 'sync-and-show');
+    update_post_meta($product_id, '_wc_gla_sync_status', '');
+
+    // ---------------------------------------------------------------
+    // 14. Facebook product feed — legacy fields
+    // ---------------------------------------------------------------
+    if (!empty($make_symbol)) {
+        update_post_meta($product_id, 'fb_brand', sanitize_text_field(strtoupper($make_symbol)));
+    }
+    if (!empty($color)) {
+        update_post_meta($product_id, 'fb_color', sanitize_text_field(strtoupper($color)));
+    }
+    update_post_meta($product_id, 'fb_product_condition', $is_used ? 'used' : 'new');
+    update_post_meta($product_id, 'fb_gender', 'unisex');
+    update_post_meta($product_id, 'fb_age_group', 'all ages');
+    if (!empty($model)) {
+        update_post_meta($product_id, 'fb_pattern', sanitize_text_field($model));
+    }
+    update_post_meta($product_id, 'fb_material', 'Composite');
+    update_post_meta($product_id, 'fb_sync_enabled', 'yes');
+    update_post_meta($product_id, 'fb_visibility', 'yes');
+
+    // ---------------------------------------------------------------
+    // 15. Yoast SEO — primary terms for all registered taxonomies
+    // ---------------------------------------------------------------
+    if ($yoast_active) {
+        $yoast_attrs = tigon_dms_get_attributes_instance();
+
+        // Primary drivetrain
+        if (!empty($drivetrain) && taxonomy_exists('drivetrain')) {
+            $dt_term_id = null;
+            if ($yoast_attrs && !empty($yoast_attrs->drivetrains_taxonomy)) {
+                $dt_term_id = $yoast_attrs->drivetrains_taxonomy[strtoupper($drivetrain)] ?? null;
+            }
+            if (!$dt_term_id) {
+                $dt_term = get_term_by('name', strtoupper($drivetrain), 'drivetrain');
+                if (!$dt_term) $dt_term = get_term_by('slug', sanitize_title($drivetrain), 'drivetrain');
+                if ($dt_term && !is_wp_error($dt_term)) $dt_term_id = $dt_term->term_id;
+            }
+            if ($dt_term_id) {
+                update_post_meta($product_id, '_yoast_wpseo_primary_drivetrain', $dt_term_id);
+            }
+        }
+
+        // Primary vehicle-class
+        if (taxonomy_exists('vehicle-class')) {
+            $vc_term_id = null;
+            if ($yoast_attrs && !empty($yoast_attrs->vehicle_classes_taxonomy)) {
+                $vc_term_id = $yoast_attrs->vehicle_classes_taxonomy['GOLF CART'] ?? null;
+            }
+            if (!$vc_term_id) {
+                $vc_term = get_term_by('name', 'GOLF CART', 'vehicle-class');
+                if (!$vc_term) $vc_term = get_term_by('slug', 'golf-cart', 'vehicle-class');
+                if ($vc_term && !is_wp_error($vc_term)) $vc_term_id = $vc_term->term_id;
+            }
+            if ($vc_term_id) {
+                update_post_meta($product_id, '_yoast_wpseo_primary_vehicle-class', $vc_term_id);
+            }
+        }
+
+        // Primary inventory-status
+        if (taxonomy_exists('inventory-status')) {
+            $is_rental = !empty($cart_data['isRental']);
+            if ($is_rental) {
+                $inv_name = $is_used ? 'LOCAL USED RENTAL INVENTORY' : 'LOCAL NEW RENTAL INVENTORY';
+            } else {
+                $inv_name = $is_used ? 'LOCAL USED ACTIVE INVENTORY' : 'LOCAL NEW ACTIVE INVENTORY';
+            }
+            $inv_term_id = null;
+            if ($yoast_attrs && !empty($yoast_attrs->inventory_status_taxonomy)) {
+                $inv_term_id = $yoast_attrs->inventory_status_taxonomy[strtoupper($inv_name)] ?? null;
+            }
+            if (!$inv_term_id) {
+                $inv_term = get_term_by('name', $inv_name, 'inventory-status');
+                if (!$inv_term) $inv_term = get_term_by('slug', sanitize_title($inv_name), 'inventory-status');
+                if ($inv_term && !is_wp_error($inv_term)) $inv_term_id = $inv_term->term_id;
+            }
+            if ($inv_term_id) {
+                update_post_meta($product_id, '_yoast_wpseo_primary_inventory-status', $inv_term_id);
+            }
+        }
+
+        // Primary manufacturers
+        if (!empty($make) && taxonomy_exists('manufacturers')) {
+            $mfg_name = strtoupper($make_symbol);
+            if ($mfg_name === 'SWIFT EV®') $mfg_name = 'SWIFT®';
+            elseif ($mfg_name === 'STAR®') $mfg_name = 'STAR EV®';
+            $mfg_term_id = null;
+            if ($yoast_attrs && !empty($yoast_attrs->manufacturers_taxonomy)) {
+                $mfg_term_id = $yoast_attrs->manufacturers_taxonomy[$mfg_name] ?? null;
+            }
+            if (!$mfg_term_id) {
+                $mfg_term = get_term_by('name', $mfg_name, 'manufacturers');
+                if ($mfg_term && !is_wp_error($mfg_term)) {
+                    $mfg_term_id = $mfg_term->term_id;
+                }
+            }
+            if ($mfg_term_id) {
+                update_post_meta($product_id, '_yoast_wpseo_primary_manufacturers', $mfg_term_id);
+            }
+        }
+
+        // Primary product-brand
+        if (!empty($make) && taxonomy_exists('product-brand')) {
+            $brand_name = $mfg_name; // same resolved name as manufacturers
+            $brand_term_id = null;
+            if ($yoast_attrs && !empty($yoast_attrs->brands_taxonomy)) {
+                $brand_term_id = $yoast_attrs->brands_taxonomy[$brand_name] ?? null;
+            }
+            if (!$brand_term_id) {
+                $brand_term = get_term_by('name', $brand_name, 'product-brand');
+                if ($brand_term && !is_wp_error($brand_term)) {
+                    $brand_term_id = $brand_term->term_id;
+                }
+            }
+            if ($brand_term_id) {
+                update_post_meta($product_id, '_yoast_wpseo_primary_product-brand', $brand_term_id);
+            }
+        }
+
+        // Primary sound-systems
+        if (taxonomy_exists('sound-systems')) {
+            $has_sound = !empty($cart_data['cartAttributes']['hasSoundSystem']);
+            if ($has_sound) {
+                $sound_name = strtoupper($make_symbol) . ' SOUND SYSTEM';
+            } else {
+                $sound_name = 'NO SOUND SYSTEM';
+            }
+            $ss_term_id = null;
+            if ($yoast_attrs && !empty($yoast_attrs->sound_systems_taxonomy)) {
+                $ss_term_id = $yoast_attrs->sound_systems_taxonomy[$sound_name] ?? null;
+            }
+            if (!$ss_term_id) {
+                $ss_term = get_term_by('name', $sound_name, 'sound-systems');
+                if (!$ss_term) $ss_term = get_term_by('slug', sanitize_title($sound_name), 'sound-systems');
+                if ($ss_term && !is_wp_error($ss_term)) $ss_term_id = $ss_term->term_id;
+            }
+            if ($ss_term_id) {
+                update_post_meta($product_id, '_yoast_wpseo_primary_sound-systems', $ss_term_id);
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // 16. Product description meta (SASWP schema, rich text)
+    // ---------------------------------------------------------------
+    $product_desc = trim($make_symbol . ' ' . $model . ' ' . $color);
+    if (!empty($product_desc)) {
+        update_post_meta($product_id, 'Product-Description-3', sanitize_text_field($product_desc));
+        update_post_meta($product_id, '_Product-Description-3', 'field_product_description_3');
+    }
+
+    // ---------------------------------------------------------------
+    // 17. WooCommerce product version (set to current WC version)
+    // ---------------------------------------------------------------
+    if (defined('WC_VERSION')) {
+        update_post_meta($product_id, '_product_version', WC_VERSION);
+    }
+
+    // ---------------------------------------------------------------
+    // 18. total_sales and rating counters (initialize if not set)
+    // ---------------------------------------------------------------
+    if (get_post_meta($product_id, 'total_sales', true) === '') {
+        update_post_meta($product_id, 'total_sales', '0');
+    }
+    if (get_post_meta($product_id, '_wc_average_rating', true) === '') {
+        update_post_meta($product_id, '_wc_average_rating', '0');
+    }
+    if (get_post_meta($product_id, '_wc_review_count', true) === '') {
+        update_post_meta($product_id, '_wc_review_count', '0');
+    }
+}
+
+/**
+ * Build custom product tabs for the Yikes WooCommerce Product Tabs plugin.
+ *
+ * Mirrors Abstract_Cart::attach_custom_tabs() — assigns warranty, specs,
+ * video, and manual tabs based on make and model.
+ *
+ * @param array $cart_data Full DMS cart payload
+ * @return string|null Serialized tabs array or null
+ */
+function tigon_dms_build_custom_tabs($cart_data) {
+    // Use Attributes cache for pre-loaded tabs (already indexed by name)
+    $attrs = tigon_dms_get_attributes_instance();
+    if ($attrs && !empty($attrs->tabs)) {
+        $tabs_by_name = $attrs->tabs;
+    } else {
+        // Fallback: load tabs from Yikes option
+        $saved_tabs = get_option('yikes_woo_reusable_products_tabs');
+        if (empty($saved_tabs) || !is_array($saved_tabs)) {
+            return null;
+        }
+        $tabs_by_name = array();
+        foreach ($saved_tabs as $tab) {
+            if (!empty($tab['tab_name'])) {
+                $tabs_by_name[$tab['tab_name']] = $tab;
+            }
+        }
+    }
+
+    $make   = $cart_data['cartType']['make'] ?? '';
+    $model  = $cart_data['cartType']['model'] ?? '';
+    $year   = $cart_data['cartType']['year'] ?? '';
+    $is_used = !empty($cart_data['isUsed']);
+
+    $make_symbol = tigon_dms_get_make_with_symbol($make);
+    $make_upper  = strtoupper($make_symbol);
+
+    $tab_names = array();
+
+    // Used cart warranty
+    if ($is_used) {
+        $tab_names[] = 'TIGON Warranty (USED GOLF CARTS)';
+    }
+
+    // Make/model-specific tabs (from Abstract_Cart::attach_custom_tabs)
+    switch ($make_upper) {
+        case 'DENAGO®':
+            if (!$is_used) {
+                $tab_names[] = 'DENAGO Warranty';
+            }
+            if ($year === '2024') {
+                $tab_names[] = 'VIDEO DENAGO 2024';
+            }
+            switch (strtoupper($model)) {
+                case 'NOMAD':
+                    $tab_names[] = 'Denago® Nomad Vehicle Specs';
+                    break;
+                case 'NOMAD XL':
+                    $tab_names[] = 'Denago® Nomad XL Vehicle Specs';
+                    $tab_names[] = 'Denago Nomad XL User Manual';
+                    if ($year === '2024') $tab_names[] = 'PICS DENAGO NOMAD XL 2024';
+                    break;
+                case 'ROVER XL':
+                    $tab_names[] = 'Denago® Rover XL Vehicle Specs';
+                    if ($year === '2024') $tab_names[] = 'PICS DENAGO ROVER XL 2024';
+                    break;
+            }
+            break;
+
+        case 'EVOLUTION®':
+            if (!$is_used) {
+                $tab_names[] = 'EVolution Warranty';
+            }
+            switch (strtoupper($model)) {
+                case 'CLASSIC 2 PRO':
+                    $tab_names[] = 'EVolution Classic 2 Pro Images';
+                    $tab_names[] = 'EVolution Classic 2 Pro Specs';
+                    break;
+                case 'CLASSIC 2 PLUS':
+                    $tab_names[] = 'EVolution Classic 2 Plus Images';
+                    $tab_names[] = 'EVolution Classic 2 Plus Specs';
+                    break;
+                case 'CLASSIC 4 PRO':
+                    $tab_names[] = 'EVolution Classic 4 Pro Images';
+                    $tab_names[] = 'EVolution Classic 4 Pro Specs';
+                    break;
+                case 'CLASSIC 4 PLUS':
+                    $tab_names[] = 'EVolution Classic 4 Plus Images';
+                    $tab_names[] = 'EVolution Classic 4 Plus Specs';
+                    break;
+                case 'D5 MAVERICK 2+2':
+                    $tab_names[] = 'EVolution D5-Maverick 2+2';
+                    $tab_names[] = 'EVolution D5-Maverick 2+2 Images';
+                    break;
+                case 'D5 MAVERICK 2+2 PLUS':
+                    $tab_names[] = 'EVolution D5-Maverick 2+2 Plus Images';
+                    break;
+                case 'D5 RANGER 2+2':
+                    $tab_names[] = 'EVOLUTION D5 RANGER 2+2 IMAGES';
+                    $tab_names[] = 'EVOLUTION D5 RANGER 2+2 SPECS';
+                    break;
+                case 'D5 RANGER 2+2 PLUS':
+                    $tab_names[] = 'EVOLUTION D5 RANGER 2+2 PLUS IMAGES';
+                    $tab_names[] = 'EVOLUTION D5 RANGER 2+2 PLUS SPECS';
+                    break;
+                case 'D5 RANGER 4':
+                    $tab_names[] = 'EVOLUTION D5 RANGER 4 IMAGES';
+                    $tab_names[] = 'EVOLUTION D5 RANGER 4 SPEC';
+                    break;
+                case 'D5 RANGER 4 PLUS':
+                    $tab_names[] = 'EVOLUTION D5 RANGER 4 PLUS IMAGES';
+                    $tab_names[] = 'EVOLUTION D5 RANGER 4 PLUS SPECS';
+                    break;
+                case 'D5 RANGER 6':
+                    $tab_names[] = 'EVOLUTION D5 RANGER 6 IMAGES';
+                    $tab_names[] = 'EVOLUTION D5 RANGER 6 SPECS';
+                    break;
+            }
+            break;
+    }
+
+    if (empty($tab_names)) {
+        return null;
+    }
+
+    // Build tab array from saved Yikes tabs
+    $tabs = array();
+    foreach ($tab_names as $name) {
+        if (isset($tabs_by_name[$name])) {
+            $tab = $tabs_by_name[$name];
+            $tabs[] = array(
+                'name'    => $name,
+                'id'      => $tab['tab_id'] ?? '',
+                'title'   => $tab['tab_title'] ?? $name,
+                'content' => preg_replace('/\\\*(&quot;)*/', '', $tab['tab_content'] ?? ''),
+            );
+        }
+    }
+
+    return !empty($tabs) ? serialize($tabs) : null;
+}
+
+/**
+ * Build custom product options (WCPA addon forms) per make/model.
+ *
+ * Mirrors Abstract_Cart::attach_custom_options() — assigns make/model-specific
+ * addon forms for new carts, or individual addon matching for used carts.
+ *
+ * @param array $cart_data Full DMS cart payload
+ * @return string|null Serialized options array or null
+ */
+function tigon_dms_build_custom_options($cart_data) {
+    // Use Attributes cache for pre-loaded WCPA forms (already indexed by title)
+    $attrs = tigon_dms_get_attributes_instance();
+    if ($attrs && !empty($attrs->custom_options)) {
+        $forms_by_title = $attrs->custom_options;
+    } else {
+        // Fallback: load WCPA forms from DB
+        $forms = get_posts(array(
+            'post_type'   => 'wcpa_pt_forms',
+            'numberposts' => -1,
+        ));
+        if (empty($forms)) {
+            return null;
+        }
+        $forms_by_title = array();
+        foreach ($forms as $form) {
+            $forms_by_title[$form->post_title] = $form->ID;
+        }
+    }
+
+    $make   = $cart_data['cartType']['make'] ?? '';
+    $model  = $cart_data['cartType']['model'] ?? '';
+    $is_used = !empty($cart_data['isUsed']);
+    $passengers = $cart_data['cartAttributes']['passengers'] ?? '';
+    $num_seats  = ($passengers === 'Utility') ? '2' : (explode(' ', $passengers)[0] ?? '');
+
+    $make_symbol = tigon_dms_get_make_with_symbol($make);
+    $make_upper  = strtoupper($make_symbol);
+
+    $option_ids = array();
+
+    if (!$is_used) {
+        // New carts: find the make/model-specific addon list
+        if ($make_upper === 'DENAGO®') {
+            $addon_list = 'Denago® EV ' . $model . ' Add Ons';
+        } elseif ($make_upper === 'EPIC®') {
+            $addon_list = 'EPIC® ' . $model . ' Add Ons';
+        } elseif ($make_upper === 'EVOLUTION®') {
+            $addon_list = 'EVolution® ' . $model . ' Add Ons';
+            if (substr($model, 0, 3) === 'D5 ') {
+                $m = $model;
+                $pos = strpos($m, ' ');
+                if ($pos !== false) {
+                    $m = substr_replace($m, '-', $pos, 1);
+                }
+                $addon_list = 'EVolution® ' . $m . ' Add Ons';
+            }
+        } elseif ($make_upper === 'ICON®') {
+            $addon_list = 'ICON® ' . $model . ' Add Ons';
+        } elseif ($make_upper === 'SWIFT EV®') {
+            $addon_list = 'SWIFT EV® ' . $model . ' Add Ons';
+        } else {
+            $addon_list = $make_symbol . ' ' . $model . ' Add Ons';
+        }
+
+        if (isset($forms_by_title[$addon_list])) {
+            $option_ids[] = $forms_by_title[$addon_list];
+        }
+    } else {
+        // Used carts: match individual addons from cart data
+        $addons = array_flip($cart_data['advertising']['cartAddOns'] ?? array());
+        $addon_map = array(
+            'Golf cart enclosure 2 passenger 600' => array('form' => '2 Passenger Golf Cart Enclosure', 'seats' => '2'),
+            'Golf cart enclosure 4 Passenger 800'  => array('form' => '4 Passenger Golf Cart Enclosure', 'seats' => '4'),
+            'Golf cart enclosure 6 passenger 1200'  => array('form' => '6 Passenger Golf Cart Enclosure', 'seats' => '6'),
+            '120 Volt inverter 500'                 => array('form' => '120 Volt Inverter'),
+            '32 inch light bar 220'                 => array('form' => '32in LED Light Bar'),
+            'Cargo caddie 250'                      => array('form' => 'Cargo Caddie'),
+            'Rear seat cupholders 80'               => array('form' => 'Rear Seat Cupholders'),
+            'Upgraded charger 210'                  => array('form' => 'Upgraded Charger'),
+            'Breezeasy Fan System 400'              => array('form' => 'Breezeasy 3 Fan System'),
+            'Golf bag attachment 120'               => array('form' => 'Golf Bag Attachment'),
+            'Led light kit 350'                     => array('form' => 'LED Cart Light Kit'),
+            'Led light kit with signals and horn 495' => array('form' => 'LED Cart Light Kit With Signals & Horn'),
+            'Led under glow 400'                    => array('form' => 'LED Under Glow Lights'),
+            'Led roof lights 400'                   => array('form' => 'LED Roof Lights'),
+            'Rear seat kit 385'                     => array('form' => 'Rear Seat Kit'),
+            'Basic 4 Passenger storage cover 150'   => array('form' => 'Basic 4 Passenger Storage Cover', 'seats' => '4'),
+            'Premium 4 Passenger storage cover 300' => array('form' => 'Premium 4 Passenger Storage Cover', 'seats' => '4'),
+            'Premium 6 Passenger storage cover 385' => array('form' => 'Premium 6 Passenger Storage Cover', 'seats' => '6'),
+            '26 in sound bar 500'                   => array('form' => '26" Sound Bar'),
+            '32 in Sound bar 600'                   => array('form' => '32" Sound Bar'),
+            'EcoXGear subwoofer 745'                => array('form' => 'EcoXGear Subwoofer'),
+            'New tinted windshield 210'             => array('form' => 'Tinted Windshield'),
+            'Grab bar 85'                           => array('form' => 'Grab Bar'),
+            'Deluxe Grab Bar 150'                   => array('form' => 'Deluxe Grab Bar'),
+            'Side mirrors 65'                       => array('form' => 'Side Mirrors'),
+            'Extended roof 500'                     => array('form' => 'Extended Roof 84"'),
+        );
+
+        // Hitch special case (3 tiers)
+        if (isset($addons['Hitch 80']) && isset($addons['Hitch 300']) && isset($addons['Hitch 500'])) {
+            foreach (array('Hitch Bolt On', 'Basic Hitch Weld On', 'Premium Hitch Weld On') as $hitch) {
+                if (isset($forms_by_title[$hitch])) {
+                    $option_ids[] = $forms_by_title[$hitch];
+                }
+            }
+        }
+
+        // Seat belt special case
+        if (isset($addons['Seat belts 4 Passenger 160']) && $num_seats === '4') {
+            if (isset($forms_by_title['Seat Belts 4 Passenger'])) {
+                $option_ids[] = $forms_by_title['Seat Belts 4 Passenger'];
+            }
+        }
+        if (isset($addons['Seat belts 6 Passenger 240']) && $num_seats === '6') {
+            if (isset($forms_by_title['Seat Belts 6 Passenger'])) {
+                $option_ids[] = $forms_by_title['Seat Belts 6 Passenger'];
+            }
+        }
+
+        foreach ($addon_map as $addon_key => $config) {
+            if (!isset($addons[$addon_key])) continue;
+            // Check seat count restriction
+            if (isset($config['seats']) && $config['seats'] !== $num_seats) continue;
+            if (isset($forms_by_title[$config['form']])) {
+                $option_ids[] = $forms_by_title[$config['form']];
+            }
+        }
+    }
+
+    return !empty($option_ids) ? serialize(array_unique($option_ids)) : null;
 }
 
 /**
  * ============================================================================
  * WooCommerce Product Tabs: Inject DMS Cart Data
  * ============================================================================
- * 
+ *
  * Hooks into woocommerce_product_tabs to override the existing Custom Data
  * tab (or Additional Information tab) and render DMS cart specifications,
  * images, and window sticker PDF link.
@@ -964,324 +4306,6 @@ function tigon_dms_get_dms_product_data($product_id) {
 
 
 /**
- * Override WooCommerce product tabs to inject DMS data as separate tabs
- * 
- * For DMS products: Remove "Custom Data" tab and add "Description" and "Additional Information" tabs
- * 
- * @param array $tabs Existing product tabs
- * @return array Modified tabs array
- */
-function tigon_dms_override_product_tabs($tabs) {
-    global $product;
-    
-    // Only process on single product pages
-    if (!is_product() || !$product) {
-        return $tabs;
-    }
-    
-    // Check if this is a DMS product
-    $product_id = $product->get_id();
-    $cart_id = get_post_meta($product_id, '_dms_cart_id', true);
-    
-    if (empty($cart_id)) {
-        // Not a DMS product - return tabs unchanged
-        return $tabs;
-    }
-    
-    // Remove existing tabs that we're replacing
-    $tabs_to_remove = array('custom_data', 'specifications', 'specs', 'additional_information', 'dms_custom_data');
-    foreach ($tabs_to_remove as $tab_key) {
-        if (isset($tabs[$tab_key])) {
-            unset($tabs[$tab_key]);
-        }
-    }
-    
-    // Add "Description" tab with DMS specs
-    $tabs['dms_description'] = array(
-        'title'    => __('Description', 'tigon-dms-connect'),
-        'priority' => 10,
-        'callback' => function() use ($product_id) {
-            tigon_dms_render_description_tab($product_id);
-        },
-    );
-    
-    // Add "Additional Information" tab with detailed features
-    $tabs['dms_additional_info'] = array(
-        'title'    => __('Additional Information', 'tigon-dms-connect'),
-        'priority' => 20,
-        'callback' => function() use ($product_id) {
-            tigon_dms_render_additional_info_tab($product_id);
-        },
-    );
-    
-    return $tabs;
-}
-add_filter('woocommerce_product_tabs', 'tigon_dms_override_product_tabs', 98);
-
-/**
- * Render the Description tab content (main specs from first image)
- * 
- * @param int $product_id Product ID
- */
-function tigon_dms_render_description_tab($product_id) {
-    $dms_data = tigon_dms_get_dms_product_data($product_id);
-    $specs = $dms_data['specs'];
-    
-    // Main specs fields for Description tab (from /get-cart-by-id API)
-    $main_fields = array(
-        'Make', 'Model', 'Year', 'Street Legal', 'Color', 'Seat Color', 
-        'Tires', 'Rims', 'Drivetrain', 'Passengers',
-        'Battery Type', 'Battery Brand', 'Battery Year', 'Capacity', 'Battery Voltage', 'Battery Warranty',
-        'Engine', 'Horsepower', 'Stroke',
-        'Warranty'
-    );
-    
-    // Build main_specs in the correct order from main_fields
-    $main_specs = array();
-    if (!empty($specs)) {
-        // Process in order defined in main_fields array
-        foreach ($main_fields as $field_key) {
-            if (isset($specs[$field_key]) && !empty($specs[$field_key])) {
-                $main_specs[$field_key] = $specs[$field_key];
-            }
-        }
-    }
-    
-    if (empty($main_specs)) {
-        echo '<p>' . esc_html__('No description data available.', 'tigon-dms-connect') . '</p>';
-        return;
-    }
-    ?>
-    <div class="dms-description-tab">
-        <table class="dms-specs-table dms-additional-info-table">
-            <tbody>
-                <?php foreach ($main_specs as $label => $value): ?>
-                    <tr>
-                        <td class="dms-specs-feature"><strong><?php echo esc_html(strtoupper($label)); ?></strong></td>
-                        <td class="dms-specs-description">
-                            <?php
-                            // Red link styling for brand names (Make is always red, Model only if Denago)
-                            if ($label === 'Make' || ($label === 'Model' && strpos(strtolower($value), 'denago') !== false)) {
-                                echo '<span class="dms-brand-link">' . esc_html($value) . '</span>';
-                            } else {
-                                echo esc_html($value);
-                            }
-                            ?>
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
-    </div>
-    <?php
-    tigon_dms_output_tab_styles();
-}
-
-/**
- * Render the Additional Information tab content (detailed features from second image)
- * 
- * @param int $product_id Product ID
- */
-function tigon_dms_render_additional_info_tab($product_id) {
-    $dms_data = tigon_dms_get_dms_product_data($product_id);
-    $specs = $dms_data['specs'];
-    
-    // Additional info fields (from /get-cart-by-id API) - all fields not in Description tab
-    $additional_fields = array(
-        'Sound System', 'Lift Kit', 'Receiver Hitch', 'Extended Top',
-        'Vehicle Power', 'Vehicle Status', 
-        'Serial Number', 'VIN', 'Odometer', 'Hours',
-        'Vehicle Location', 'Year of Vehicle',
-        'Drivetrain', 'Passengers' // These may appear in both tabs if needed
-    );
-    
-    // Main fields that go to Description tab (exclude from Additional Info)
-    $main_fields = array(
-        'Make', 'Model', 'Year', 'Street Legal', 'Color', 'Seat Color', 
-        'Tires', 'Rims', 'Drivetrain', 'Passengers',
-        'Battery Type', 'Battery Brand', 'Battery Year', 'Capacity', 'Battery Voltage', 'Battery Warranty',
-        'Engine', 'Horsepower', 'Stroke',
-        'Warranty'
-    );
-    
-    $additional_info = array();
-    if (!empty($specs)) {
-        foreach ($specs as $key => $value) {
-            // Include if it's in additional_fields AND not in main_fields (to avoid duplicates)
-            if (in_array($key, $additional_fields) && !in_array($key, $main_fields)) {
-                $additional_info[$key] = $value;
-            }
-        }
-    }
-    ?>
-    <div class="dms-additional-info-tab">
-        <table class="dms-specs-table dms-additional-info-table">
-            <tbody>
-                <?php foreach ($additional_info as $label => $value): ?>
-                    <?php if (!empty($value)): ?>
-                        <tr>
-                            <td class="dms-specs-feature"><strong><?php echo esc_html(strtoupper($label)); ?></strong></td>
-                            <td class="dms-specs-description">
-                                <?php
-                                // Red link styling for certain values (matching the image)
-                                $is_red_link = false;
-                                if (strpos(strtolower($value), 'seater') !== false ||
-                                    $value === 'Yes' || $value === 'No' ||
-                                    strpos(strtolower($value), 'day') !== false ||
-                                    strpos(strtolower($value), 'inch') !== false ||
-                                    strpos(strtolower($value), 'local') !== false ||
-                                    strpos(strtolower($value), 'terrain') !== false ||
-                                    strpos(strtolower($value), 'electric') !== false ||
-                                    strpos(strtolower($value), 'new') !== false ||
-                                    strpos(strtolower($value), 'golf cart') !== false ||
-                                    strpos(strtolower($value), 'vehicle') !== false ||
-                                    strpos(strtolower($value), 'year') !== false ||
-                                    is_numeric($value)) {
-                                    $is_red_link = true;
-                                }
-                                
-                                if ($is_red_link) {
-                                    echo '<span class="dms-brand-link">' . esc_html($value) . '</span>';
-                                } else {
-                                    echo esc_html($value);
-                                }
-                                ?>
-                            </td>
-                        </tr>
-                    <?php endif; ?>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
-    </div>
-    <?php
-    tigon_dms_output_tab_styles();
-}
-
-/**
- * Output shared CSS styles for DMS tabs (only once per page)
- */
-function tigon_dms_output_tab_styles() {
-    static $styles_output = false;
-    if ($styles_output) {
-        return;
-    }
-    $styles_output = true;
-    ?>
-    <style>
-        /* DMS Specs Table Styling */
-        .dms-specs-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 15px;
-            margin-bottom: 20px;
-            border: 1px solid #d32f2f;
-        }
-        
-        .dms-specs-table thead {
-            background-color: #4a4a4a;
-            color: #fff;
-        }
-        
-        .dms-specs-table th {
-            padding: 12px 15px;
-            text-align: left;
-            font-weight: 600;
-            font-size: 14px;
-            border: 1px solid #333;
-        }
-        
-        .dms-specs-table thead .dms-specs-feature,
-        .dms-specs-table thead .dms-specs-description {
-            background-color: #4a4a4a;
-        }
-        
-        .dms-specs-table .dms-specs-feature {
-            width: 20%;
-        }
-        
-        .dms-specs-table .dms-specs-description {
-            width: 80%;
-        }
-        
-        .dms-specs-table tbody tr {
-            border-bottom: 1px solid #d32f2f;
-        }
-        
-        .dms-specs-table tbody tr:last-child {
-            border-bottom: none;
-        }
-        
-        .dms-specs-table tbody td {
-            padding: 12px 15px;
-            vertical-align: top;
-            background-color: #fff;
-        }
-        
-        .dms-specs-table tbody td:first-child {
-            font-weight: 600;
-            color: #333;
-            border-right: 1px solid #d32f2f;
-        }
-        
-        .dms-specs-table tbody td:last-child {
-            color: #333;
-        }
-        
-        /* Additional Information Table (no header, uppercase labels) */
-        .dms-additional-info-table tbody td:first-child {
-            background-color: #f5f5f5;
-            text-transform: uppercase;
-            font-size: 13px;
-            letter-spacing: 0.5px;
-        }
-        
-        /* Brand Link Styling (red and underlined) */
-        .dms-brand-link {
-            color: #d32f2f;
-            text-decoration: underline;
-        }
-        
-        /* Images Grid */
-        .dms-tab-images-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-            gap: 10px;
-            margin-top: 10px;
-        }
-        
-        .dms-tab-image-item {
-            border: 1px solid #e0e0e0;
-            border-radius: 4px;
-            overflow: hidden;
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-        }
-        
-        .dms-tab-image-item:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-        }
-        
-        .dms-tab-image-item img {
-            width: 100%;
-            height: auto;
-            display: block;
-        }
-        
-        /* Window Sticker Link */
-        .dms-window-sticker-link {
-            color: #0c4774;
-            text-decoration: underline;
-            font-weight: 500;
-        }
-        
-        .dms-window-sticker-link:hover {
-            color: #AF1F31;
-        }
-    </style>
-    <?php
-}
-
-/**
  * Flush rewrite rules on activation + create database tables
  */
 function tigon_dms_activation() {
@@ -1293,12 +4317,18 @@ function tigon_dms_activation() {
 register_activation_hook(__FILE__, 'tigon_dms_activation');
 
 /**
- * Flush rewrite rules on deactivation
+ * Plugin deactivation: flush rewrite rules and clear scheduled events
  */
 function tigon_dms_deactivation() {
     flush_rewrite_rules();
+    \Tigon\DmsConnect\Core::deactivate();
 }
 register_deactivation_hook(__FILE__, 'tigon_dms_deactivation');
+
+/**
+ * Plugin uninstall: drop custom database tables and clean up transients
+ */
+register_uninstall_hook(__FILE__, ['Tigon\DmsConnect\Core', 'uninstall']);
 
 /**
  * ============================================================================
@@ -1778,9 +4808,30 @@ function tigon_dms_enqueue_woo_inject_script() {
         return;
     }
     
-    // Extract image URLs
+    // Extract image URLs from DMS payload (S3 filenames)
     $image_urls = $cart_data['imageUrls'] ?? array();
-    
+
+    // Check if WooCommerce already has locally-downloaded images for this product.
+    // When local images exist, the JS gallery injection is skipped entirely so
+    // WooCommerce's native gallery renders the downloaded images without flicker.
+    $local_image_urls = array();
+    $thumbnail_id = get_post_thumbnail_id($post->ID);
+    if ($thumbnail_id) {
+        $thumb_url = wp_get_attachment_url($thumbnail_id);
+        if ($thumb_url) {
+            $local_image_urls[] = $thumb_url;
+        }
+    }
+    $gallery_ids = get_post_meta($post->ID, '_product_image_gallery', true);
+    if (!empty($gallery_ids)) {
+        foreach (explode(',', $gallery_ids) as $att_id) {
+            $att_url = wp_get_attachment_url((int) $att_id);
+            if ($att_url) {
+                $local_image_urls[] = $att_url;
+            }
+        }
+    }
+
     // Enqueue API service first (dependency for dms-woo-inject)
     wp_enqueue_script(
         'dms-api-service-js',
@@ -1801,8 +4852,9 @@ function tigon_dms_enqueue_woo_inject_script() {
     
     // Pass data to JavaScript
     wp_localize_script('dms-woo-inject', 'dmsWooData', array(
-        'cartId'    => $cart_id,
-        'imageUrls' => $image_urls,
+        'cartId'         => $cart_id,
+        'imageUrls'      => $image_urls,
+        'localImageUrls' => $local_image_urls,
     ));
 }
 add_action('wp_enqueue_scripts', 'tigon_dms_enqueue_woo_inject_script');
@@ -2173,6 +5225,62 @@ function tigon_dms_products_per_page($cols) {
 add_filter('loop_shop_per_page', 'tigon_dms_products_per_page', 20);
 
 /**
+ * Change "Add to cart" button text to "See Details" for DMS products
+ */
+function tigon_dms_add_to_cart_text($text, $product) {
+    if (get_post_meta($product->get_id(), '_dms_cart_id', true)) {
+        return __('See Details', 'tigon-dms-connect');
+    }
+    return $text;
+}
+add_filter('woocommerce_product_add_to_cart_text', 'tigon_dms_add_to_cart_text', 10, 2);
+add_filter('woocommerce_product_single_add_to_cart_text', 'tigon_dms_add_to_cart_text', 10, 2);
+
+/**
+ * Make DMS product archive buttons link to the product page instead of adding to cart
+ */
+function tigon_dms_loop_add_to_cart_link($link, $product) {
+    if (get_post_meta($product->get_id(), '_dms_cart_id', true)) {
+        return sprintf(
+            '<a href="%s" class="button product_type_simple">%s</a>',
+            esc_url($product->get_permalink()),
+            esc_html__('See Details', 'tigon-dms-connect')
+        );
+    }
+    return $link;
+}
+add_filter('woocommerce_loop_add_to_cart_link', 'tigon_dms_loop_add_to_cart_link', 10, 2);
+
+/**
+ * Prevent duplicate Description tabs on single product pages.
+ *
+ * Some themes / Elementor configurations register the description tab more
+ * than once. This filter runs late (priority 99) and ensures only one
+ * description tab callback exists.
+ */
+function tigon_dms_deduplicate_description_tab($tabs) {
+    // Nothing to deduplicate if there is no description tab at all
+    if (!isset($tabs['description'])) {
+        return $tabs;
+    }
+
+    // Count how many tabs use the same panel id / callback
+    $desc_count = 0;
+    foreach ($tabs as $key => $tab) {
+        if ($key === 'description' || (isset($tab['callback']) && $tab['callback'] === 'woocommerce_product_description_tab')) {
+            $desc_count++;
+            // Keep only the first occurrence keyed 'description'; remove extras
+            if ($desc_count > 1) {
+                unset($tabs[$key]);
+            }
+        }
+    }
+
+    return $tabs;
+}
+add_filter('woocommerce_product_tabs', 'tigon_dms_deduplicate_description_tab', 99);
+
+/**
  * ============================================================================
  * BACKGROUND INVENTORY SYNC
  * ============================================================================
@@ -2235,140 +5343,7 @@ function tigon_dms_reschedule_sync()
     tigon_dms_schedule_sync();
 }
 
-/**
- * Add admin menu for inventory sync
- */
-function tigon_dms_add_sync_menu()
-{
-    add_submenu_page(
-        'woocommerce',
-        'DMS Inventory Sync',
-        'DMS Sync',
-        'manage_woocommerce',
-        'dms-inventory-sync',
-        'tigon_dms_sync_page'
-    );
-}
-add_action('admin_menu', 'tigon_dms_add_sync_menu');
-
-/**
- * Render sync admin page
- */
-function tigon_dms_sync_page()
-{
-    if (!current_user_can('manage_woocommerce')) {
-        wp_die('Unauthorized access');
-    }
-    
-    $sync_running = false;
-    $sync_results = null;
-    $sync_interval = DMS_Sync::get_sync_interval();
-    
-    // Handle manual sync request
-    if (isset($_POST['dms_manual_sync']) && check_admin_referer('dms_manual_sync', 'dms_sync_nonce')) {
-        $sync_running = true;
-        
-        // Run sync
-        if (class_exists('DMS_Sync')) {
-            $sync_results = DMS_Sync::sync_inventory();
-        } else {
-            $sync_results = array(
-                'success' => false,
-                'message' => 'DMS_Sync class not found',
-            );
-        }
-    }
-    
-    // Handle interval update
-    if (isset($_POST['dms_update_interval']) && check_admin_referer('dms_update_interval', 'dms_interval_nonce')) {
-        $new_interval = isset($_POST['sync_interval']) ? (int) $_POST['sync_interval'] : 6;
-        $new_interval = max(1, min(168, $new_interval)); // Clamp between 1-168 hours (1 week)
-        
-        DMS_Sync::set_sync_interval($new_interval);
-        tigon_dms_reschedule_sync();
-        
-        $sync_interval = $new_interval;
-        
-        echo '<div class="notice notice-success is-dismissible"><p>';
-        echo esc_html__('Sync interval updated successfully.', 'tigon-dms-connect');
-        echo '</p></div>';
-    }
-    
-    // Get next scheduled sync time
-    $next_sync = wp_next_scheduled('tigon_dms_sync_inventory');
-    
-    ?>
-    <div class="wrap">
-        <h1><?php echo esc_html__('DMS Inventory Sync', 'tigon-dms-connect'); ?></h1>
-        
-        <div class="card" style="max-width: 800px;">
-            <h2><?php echo esc_html__('Manual Sync', 'tigon-dms-connect'); ?></h2>
-            <p><?php echo esc_html__('Manually trigger a full inventory sync from the DMS API. This may take several minutes depending on the number of carts.', 'tigon-dms-connect'); ?></p>
-            
-            <form method="post" action="">
-                <?php wp_nonce_field('dms_manual_sync', 'dms_sync_nonce'); ?>
-                <p>
-                    <button type="submit" name="dms_manual_sync" class="button button-primary button-large">
-                        <?php echo esc_html__('Sync Inventory Now', 'tigon-dms-connect'); ?>
-                    </button>
-                </p>
-            </form>
-            
-            <?php if ($sync_running && $sync_results): ?>
-                <?php if ($sync_results['success']): ?>
-                    <?php $stats = $sync_results['stats']; ?>
-                    <div class="notice notice-success" style="margin-top: 15px;">
-                        <h3><?php echo esc_html__('Sync Completed', 'tigon-dms-connect'); ?></h3>
-                        <ul>
-                            <li><strong><?php echo esc_html__('Total carts processed:', 'tigon-dms-connect'); ?></strong> <?php echo esc_html($stats['total']); ?></li>
-                            <li><strong><?php echo esc_html__('Products created:', 'tigon-dms-connect'); ?></strong> <?php echo esc_html($stats['created']); ?></li>
-                            <li><strong><?php echo esc_html__('Products updated:', 'tigon-dms-connect'); ?></strong> <?php echo esc_html($stats['updated']); ?></li>
-                            <li><strong><?php echo esc_html__('Skipped:', 'tigon-dms-connect'); ?></strong> <?php echo esc_html($stats['skipped']); ?></li>
-                            <li><strong><?php echo esc_html__('Errors:', 'tigon-dms-connect'); ?></strong> <?php echo esc_html($stats['errors']); ?></li>
-                        </ul>
-                    </div>
-                <?php else: ?>
-                    <div class="notice notice-error" style="margin-top: 15px;">
-                        <p><strong><?php echo esc_html__('Sync Failed:', 'tigon-dms-connect'); ?></strong> <?php echo esc_html($sync_results['message'] ?? 'Unknown error'); ?></p>
-                    </div>
-                <?php endif; ?>
-            <?php endif; ?>
-        </div>
-        
-        <div class="card" style="max-width: 800px; margin-top: 20px;">
-            <h2><?php echo esc_html__('Scheduled Sync', 'tigon-dms-connect'); ?></h2>
-            
-            <form method="post" action="">
-                <?php wp_nonce_field('dms_update_interval', 'dms_interval_nonce'); ?>
-                <table class="form-table">
-                    <tr>
-                        <th scope="row">
-                            <label for="sync_interval"><?php echo esc_html__('Sync Interval (hours)', 'tigon-dms-connect'); ?></label>
-                        </th>
-                        <td>
-                            <input type="number" id="sync_interval" name="sync_interval" value="<?php echo esc_attr($sync_interval); ?>" min="1" max="168" step="1" class="small-text">
-                            <p class="description"><?php echo esc_html__('How often to automatically sync inventory (1-168 hours).', 'tigon-dms-connect'); ?></p>
-                        </td>
-                    </tr>
-                    <?php if ($next_sync): ?>
-                    <tr>
-                        <th scope="row"><?php echo esc_html__('Next Scheduled Sync', 'tigon-dms-connect'); ?></th>
-                        <td>
-                            <p><?php echo esc_html(date_i18n(get_option('date_format') . ' ' . get_option('time_format'), $next_sync)); ?></p>
-                        </td>
-                    </tr>
-                    <?php endif; ?>
-                </table>
-                <p>
-                    <button type="submit" name="dms_update_interval" class="button button-primary">
-                        <?php echo esc_html__('Update Interval', 'tigon-dms-connect'); ?>
-                    </button>
-                </p>
-            </form>
-        </div>
-    </div>
-    <?php
-}
+// Sync page is now in Admin_Page::sync_page()
 
 /**
  * Schedule sync on plugin activation
@@ -2507,9 +5482,9 @@ function tigon_dms_admin_sync_trigger()
     
     exit;
 }
-// Hook early on both admin_init and init (fallback) for better compatibility
-add_action('admin_init', 'tigon_dms_admin_sync_trigger', 1);
-add_action('init', 'tigon_dms_admin_sync_trigger', 1);
+// Hook after all taxonomies are registered (priority 99) so custom taxonomies are available
+add_action('admin_init', 'tigon_dms_admin_sync_trigger', 99);
+add_action('init', 'tigon_dms_admin_sync_trigger', 99);
 
 /**
  * Admin-only migration: rewrite stale _product_attributes meta after the
@@ -2562,7 +5537,6 @@ function tigon_dms_location_attribute_migration()
 
     $attrs_migrated = 0;
     $specs_migrated = 0;
-    $term_relationships_added = 0;
 
     foreach ($product_ids as $product_id) {
         // 1. Rewrite serialized _product_attributes key pa_location -> pa_vehicle-location
@@ -2588,11 +5562,6 @@ function tigon_dms_location_attribute_migration()
             update_post_meta($product_id, '_dms_cart_specs', $specs);
             $specs_migrated++;
         }
-
-        // 3. Safety net: if a product has a term_relationship to the renamed
-        // taxonomy but the relationship was somehow lost on the product side,
-        // leave WooCommerce's rename-migrated relationships in place. Nothing
-        // to do here beyond 1 and 2.
     }
 
     echo "SUCCESS\n\n";
