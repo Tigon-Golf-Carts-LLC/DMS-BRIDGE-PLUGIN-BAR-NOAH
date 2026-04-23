@@ -176,7 +176,7 @@ class Core
     {
         // Require Term ID
         $numeric_taxonomies = [
-            "vehicle-location",
+            "location",
             "manufacturers",
             "models",
             "sound-systems",
