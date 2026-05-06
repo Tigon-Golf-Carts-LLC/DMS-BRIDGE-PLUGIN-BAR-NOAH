@@ -45,6 +45,7 @@ if (!defined('TIGON_DMS_HIDE_DEFAULT_CONTENT')) {
 require_once TIGON_DMS_PLUGIN_DIR . 'includes/class-dms-api.php';
 require_once TIGON_DMS_PLUGIN_DIR . 'includes/class-dms-display.php';
 require_once TIGON_DMS_PLUGIN_DIR . 'includes/class-dms-sync.php';
+require_once TIGON_DMS_PLUGIN_DIR . 'includes/class-dms-product-filter.php';
 
 /**
  * ============================================================================
@@ -5001,12 +5002,26 @@ function tigon_dms_register_elementor_widget($widgets_manager) {
     $inventory_widget_file = TIGON_DMS_PLUGIN_DIR . 'includes/class-dms-inventory-widget.php';
     if (file_exists($inventory_widget_file)) {
         require_once $inventory_widget_file;
-        
+
         if (class_exists('DMS_Inventory_Widget')) {
             if (method_exists($widgets_manager, 'register')) {
                 $widgets_manager->register(new DMS_Inventory_Widget());
             } elseif (method_exists($widgets_manager, 'register_widget_type')) {
                 $widgets_manager->register_widget_type(new DMS_Inventory_Widget());
+            }
+        }
+    }
+
+    // Load and register DMS Connect Product Filter widget
+    $product_filter_widget_file = TIGON_DMS_PLUGIN_DIR . 'includes/class-dms-product-filter-widget.php';
+    if (file_exists($product_filter_widget_file)) {
+        require_once $product_filter_widget_file;
+
+        if (class_exists('DMS_Connect_Product_Filter_Widget')) {
+            if (method_exists($widgets_manager, 'register')) {
+                $widgets_manager->register(new DMS_Connect_Product_Filter_Widget());
+            } elseif (method_exists($widgets_manager, 'register_widget_type')) {
+                $widgets_manager->register_widget_type(new DMS_Connect_Product_Filter_Widget());
             }
         }
     }
