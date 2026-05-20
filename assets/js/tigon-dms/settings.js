@@ -65,7 +65,10 @@ jQuery(document).ready(function () {
             "schema_image_name": jQuery("#schema-image-name").val(),
             "schema_monroney_name": jQuery("#schema-monroney-name").val(),
             "schema_description": jQuery("#schema-description").val(),
-            "schema_short_description": jQuery("#schema-short-description").val()
+            "schema_short_description": jQuery("#schema-short-description").val(),
+            // Cloudflare credentials (blank token = keep the saved value)
+            "cf_zone_id": jQuery("#cf-zone-id").val(),
+            "cf_api_token": jQuery("#cf-api-token").val()
         }
 
         jQuery.ajax({
@@ -78,7 +81,7 @@ jQuery(document).ready(function () {
     });
 
     // ── Tab switching ────────────────────────────────────────────────
-    var tabIds = ["general", "urls", "endpoints", "schema", "locations"];
+    var tabIds = ["general", "urls", "endpoints", "schema", "locations", "cloudflare"];
 
     function activateTab(id) {
         jQuery(".tigon-dms-tab").removeClass("active");
@@ -211,4 +214,70 @@ jQuery(document).ready(function () {
     function esc(str) {
         return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
+
+    // ── Cloudflare tab: live wp-config.php snippet + optional auto-write ──
+    (function () {
+        var zoneEl  = document.getElementById("cf-zone-id");
+        var tokenEl = document.getElementById("cf-api-token");
+        var snippet = document.getElementById("cf-wpconfig-snippet");
+        if (!snippet) return;
+
+        var savedZone = snippet.getAttribute("data-saved-zone") || "";
+
+        function clean(value, allowDash) {
+            var re = allowDash ? /[^A-Za-z0-9_\-]/g : /[^A-Za-z0-9]/g;
+            return String(value || "").replace(re, "");
+        }
+
+        function buildSnippet() {
+            var zone  = clean(zoneEl && zoneEl.value ? zoneEl.value : savedZone, false) || "your-zone-id";
+            var token = clean(tokenEl && tokenEl.value, true) || "PASTE_YOUR_API_TOKEN_HERE";
+            snippet.textContent =
+                "define( 'TIGON_CF_ZONE_ID', '" + zone + "' );\n" +
+                "define( 'TIGON_CF_API_TOKEN', '" + token + "' );";
+        }
+
+        buildSnippet();
+        if (zoneEl)  zoneEl.addEventListener("input", buildSnippet);
+        if (tokenEl) tokenEl.addEventListener("input", buildSnippet);
+
+        var writeBtn    = document.getElementById("cf-write-wpconfig");
+        var writeStatus = document.getElementById("cf-write-status");
+        if (writeBtn) writeBtn.addEventListener("click", function () {
+            if (!window.confirm("This edits wp-config.php directly. The plugin restores the file if anything looks wrong, but proceed only if it is writable. Continue?")) {
+                return;
+            }
+            writeBtn.disabled = true;
+            writeStatus.style.color = "#666";
+            writeStatus.textContent = "Writing…";
+            jQuery.ajax({
+                url: ajaxurl,
+                method: "POST",
+                dataType: "json",
+                data: {
+                    action: "tigon_dms_write_cf_wpconfig",
+                    nonce: globals.nonce,
+                    // Blank fields fall back to the saved settings server-side.
+                    data: {
+                        cf_zone_id: zoneEl ? zoneEl.value.trim() : "",
+                        cf_api_token: tokenEl ? tokenEl.value.trim() : ""
+                    }
+                }
+            }).done(function (res) {
+                if (res && res.success) {
+                    writeStatus.style.color = "#1f7a3d";
+                    writeStatus.textContent = "Written to wp-config.php. Reloading…";
+                    setTimeout(function () { location.reload(); }, 1200);
+                } else {
+                    writeStatus.style.color = "#cf1010";
+                    writeStatus.textContent = (res && res.data) ? res.data : "Write failed.";
+                }
+            }).fail(function () {
+                writeStatus.style.color = "#cf1010";
+                writeStatus.textContent = "Request failed.";
+            }).always(function () {
+                writeBtn.disabled = false;
+            });
+        });
+    })();
 });

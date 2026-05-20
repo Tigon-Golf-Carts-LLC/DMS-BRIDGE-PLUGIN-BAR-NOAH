@@ -53,6 +53,11 @@ class DMS_Sync
             );
         }
 
+        // Defer per-product WP Rocket purges for the duration of the resync.
+        // A single rocket_clean_domain() runs in end_bulk() once the loop is
+        // done — far cheaper than one purge per cart.
+        \Tigon\DmsConnect\Includes\Cache::begin_bulk();
+
         $stats = array(
             'created'   => 0,
             'updated'   => 0,
@@ -264,6 +269,10 @@ class DMS_Sync
         // Clear DMS API transient caches so the next frontend page load
         // picks up the freshly-synced data instead of stale cached results.
         DMS_API::clear_caches();
+
+        // Close the bulk window — purges the full WP Rocket cache once if any
+        // product was created, updated, or deleted during the resync.
+        \Tigon\DmsConnect\Includes\Cache::end_bulk();
 
         return array(
             'success' => true,

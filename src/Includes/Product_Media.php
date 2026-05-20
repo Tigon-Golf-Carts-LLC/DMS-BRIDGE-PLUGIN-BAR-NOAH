@@ -144,6 +144,11 @@ class Product_Media
         }
         clean_post_cache($product_id);
 
+        // Purge the WP Rocket cache while the post still exists, so its
+        // permalink and archive URLs can still be resolved. Deferred
+        // automatically during a bulk resync.
+        Cache::purge_product($product_id, true);
+
         // 4. Delete the product post (this also deletes all postmeta via WP core)
         $result = wp_delete_post($product_id, true); // true = bypass trash
 

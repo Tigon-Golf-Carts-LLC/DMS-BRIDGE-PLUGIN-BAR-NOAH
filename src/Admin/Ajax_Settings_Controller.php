@@ -111,12 +111,60 @@ class Ajax_Settings_Controller
                 $wpdb->update($table_name, ['option_value' => $schema_short_description], ['option_name' => 'schema_short_description']);
             }
 
+            // Cloudflare credentials. Saved only when provided, so a blank
+            // field never clobbers an existing value — the token field shows a
+            // masked placeholder rather than the real value. Restricted to the
+            // characters Cloudflare actually uses.
+            $cf_zone_id   = preg_replace('/[^A-Za-z0-9]/', '', stripcslashes($_REQUEST['data']['cf_zone_id'] ?? ''));
+            $cf_api_token = preg_replace('/[^A-Za-z0-9_\-]/', '', stripcslashes($_REQUEST['data']['cf_api_token'] ?? ''));
+            if($cf_zone_id !== '') {
+                tigon_dms_set_config('cf_zone_id', $cf_zone_id);
+            }
+            if($cf_api_token !== '') {
+                tigon_dms_set_config('cf_api_token', $cf_api_token);
+            }
+
             echo true;
         } else {
             header("Location: " . $_SERVER["HTTP_REFERER"]);
         }
 
         exit;
+    }
+
+    /**
+     * AJAX handler — write the Cloudflare credentials into wp-config.php.
+     *
+     * The credentials are also stored in the config table via save_settings();
+     * this is the optional, explicit "harden into wp-config.php" action. The
+     * heavy lifting (atomic write, integrity check, rollback) lives in the
+     * Cloudflare class.
+     */
+    public static function write_cf_wpconfig()
+    {
+        check_ajax_referer('tigon_dms_run_import_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
+        $zone_id   = sanitize_text_field(wp_unslash($_REQUEST['data']['cf_zone_id'] ?? ''));
+        $api_token = sanitize_text_field(wp_unslash($_REQUEST['data']['cf_api_token'] ?? ''));
+
+        // A blank field falls back to the value already saved on the settings
+        // page, so the admin need not re-type credentials they just saved.
+        if ($zone_id === '') {
+            $zone_id = (string) tigon_dms_get_config('cf_zone_id', '');
+        }
+        if ($api_token === '') {
+            $api_token = (string) tigon_dms_get_config('cf_api_token', '');
+        }
+
+        $result = \Tigon\DmsConnect\Includes\Cloudflare::write_wp_config_constants($zone_id, $api_token);
+        if (is_wp_error($result)) {
+            wp_send_json_error($result->get_error_message());
+        }
+
+        wp_send_json_success('Credentials written to wp-config.php.');
     }
 
     /**
