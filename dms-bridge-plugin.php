@@ -64,6 +64,7 @@ require_once TIGON_DMS_PLUGIN_DIR . 'includes/class-dms-product-filter.php';
  */
 require_once TIGON_DMS_PLUGIN_DIR . 'vendor/autoload.php';
 \Tigon\DmsConnect\Core::init();
+\Tigon\DmsConnect\Includes\Cloudflare::init();
 
 /**
  * ============================================================================
@@ -96,28 +97,29 @@ add_action('wp_ajax_tigon_dms_recrop_primary_images', 'tigon_dms_recrop_primary_
 
 /**
  * ============================================================================
- * WP ROCKET CACHE PURGING — belt-and-suspenders safety net
+ * CACHE PURGING — belt-and-suspenders safety net
  * ============================================================================
  *
- * The DMS sync purges the WP Rocket cache explicitly at every write point
- * (see \Tigon\DmsConnect\Includes\Cache). These hooks are an additional
- * safety net: any product change made through the WooCommerce API — admin
- * edits, the WC REST API, or a future integration — also purges the cache,
- * so inventory pages never serve stale data.
+ * The DMS sync purges the cache explicitly at every write point (see
+ * \Tigon\DmsConnect\Includes\Cache, which fans out to WP Rocket at the origin
+ * and Cloudflare at the edge). These hooks are an additional safety net: any
+ * product change made through the WooCommerce API — admin edits, the WC REST
+ * API, or a future integration — also purges the cache, so inventory pages
+ * never serve stale data.
  *
  * The DMS sync itself writes via raw wp_insert_post()/update_post_meta() and
  * does NOT fire these WooCommerce hooks, so there is no double-purge during
  * a sync. During a bulk resync, Cache::purge_product() is a no-op anyway.
  */
-function tigon_dms_purge_rocket_on_product_change($product_id) {
+function tigon_dms_purge_cache_on_product_change($product_id) {
     if (class_exists('\Tigon\DmsConnect\Includes\Cache')) {
         \Tigon\DmsConnect\Includes\Cache::purge_product((int) $product_id, true);
     }
 }
-add_action('woocommerce_update_product', 'tigon_dms_purge_rocket_on_product_change', 10, 1);
-add_action('woocommerce_new_product',    'tigon_dms_purge_rocket_on_product_change', 10, 1);
-add_action('woocommerce_delete_product', 'tigon_dms_purge_rocket_on_product_change', 10, 1);
-add_action('woocommerce_trash_product',  'tigon_dms_purge_rocket_on_product_change', 10, 1);
+add_action('woocommerce_update_product', 'tigon_dms_purge_cache_on_product_change', 10, 1);
+add_action('woocommerce_new_product',    'tigon_dms_purge_cache_on_product_change', 10, 1);
+add_action('woocommerce_delete_product', 'tigon_dms_purge_cache_on_product_change', 10, 1);
+add_action('woocommerce_trash_product',  'tigon_dms_purge_cache_on_product_change', 10, 1);
 
 /**
  * ============================================================================
