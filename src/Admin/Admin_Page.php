@@ -952,6 +952,7 @@ class Admin_Page
         $dup_sku_nonce = wp_create_nonce('tigon_dms_dup_sku_cleanup_nonce');
         $health_check_nonce = wp_create_nonce('tigon_dms_health_check_nonce');
         $draft_imageless_nonce = wp_create_nonce('tigon_dms_draft_imageless_nonce');
+        $stale_vehicles_nonce = wp_create_nonce('tigon_dms_stale_vehicles_nonce');
         $recrop_nonce = wp_create_nonce('tigon_dms_run_import_nonce');
         $recrop_width  = class_exists('\DMS_Sync') ? \DMS_Sync::PRIMARY_IMAGE_WIDTH  : 715;
         $recrop_height = class_exists('\DMS_Sync') ? \DMS_Sync::PRIMARY_IMAGE_HEIGHT : 953;
@@ -1146,6 +1147,25 @@ class Admin_Page
                 </div>
             </div>
 
+            <!-- ====== REMOVE SOLD & DELISTED VEHICLES ====== -->
+            <div class="action-box-group" style="grid-template-columns:1fr; grid-template-rows:auto;">
+                <div class="action-box primary" style="flex-direction:column; gap:1rem; align-items:flex-start; border-left:4px solid #dc3545;">
+                    <h2 style="margin:0; color:#dc3545;">Remove Sold &amp; Delisted Vehicles</h2>
+                    <p>Compares every <strong>Local New Active</strong> and <strong>Local Used Active</strong> WooCommerce product against the live DMS feed. Vehicles that are no longer in DMS &mdash; sold or delisted &mdash; are listed here so you can <strong>permanently delete the product and every asset</strong>: featured image, gallery photos, and Monroney sticker. Use this to clean up products the automatic sync missed. This action cannot be undone.</p>
+                    <p style="margin:0; font-size:0.85rem; color:#555;">Scan first to review the list &mdash; nothing is deleted until you confirm. If the DMS feed is unreachable or looks incomplete, the scan aborts and deletes nothing.</p>
+                    <div style="display:flex; align-items:center; gap:0.75rem; margin-top:0.5rem;">
+                        <button type="button" id="dms-stale-scan-btn" class="button button-primary" style="height:auto; min-width:auto; padding:0.6rem 2rem; font-size:14px;">
+                            Scan for Sold / Delisted Vehicles
+                        </button>
+                        <button type="button" id="dms-stale-delete-btn" class="button" style="height:auto; min-width:auto; background-color:#dc3545; border-color:#dc3545; color:#fff; padding:0.6rem 2rem; font-size:14px; display:none;">
+                            Delete Stale Vehicles
+                        </button>
+                        <span id="dms-stale-spinner" class="spinner" style="float:none; margin-top:0;"></span>
+                    </div>
+                    <div id="dms-stale-results" style="display:none; width:100%;"></div>
+                </div>
+            </div>
+
             <!-- ====== DUPLICATE SKU CLEANUP ====== -->
             <div class="action-box-group" style="grid-template-columns:1fr; grid-template-rows:auto;">
                 <div class="action-box primary" style="flex-direction:column; gap:1rem; align-items:flex-start; border-left:4px solid #dc3545;">
@@ -1243,6 +1263,7 @@ class Admin_Page
             var dupSkuNonce = ' . wp_json_encode($dup_sku_nonce) . ';
             var healthCheckNonce = ' . wp_json_encode($health_check_nonce) . ';
             var draftImagelessNonce = ' . wp_json_encode($draft_imageless_nonce) . ';
+            var staleVehiclesNonce = ' . wp_json_encode($stale_vehicles_nonce) . ';
 
             /* ─── Draft Imageless Products ──────────────────────── */
             var $diScanBtn = $("#dms-draft-imageless-scan-btn");
@@ -2356,6 +2377,157 @@ class Admin_Page
 
                 processBatch();
             });
+
+            /* ─── Remove Sold & Delisted Vehicles ─────────────────── */
+            (function(){
+                var $scanBtn = $("#dms-stale-scan-btn");
+                var $delBtn  = $("#dms-stale-delete-btn");
+                var $spinner = $("#dms-stale-spinner");
+                var $results = $("#dms-stale-results");
+                var staleSyncId = "";
+                var staleTotal  = 0;
+
+                function staleBox(bg, border, color, html){
+                    return "<div style=\"background:" + bg + ";border:1px solid " + border +
+                        ";padding:1rem;border-radius:6px;color:" + color + ";\">" + html + "</div>";
+                }
+
+                $scanBtn.on("click", function(){
+                    $scanBtn.prop("disabled", true).text("Scanning DMS feed...");
+                    $delBtn.hide();
+                    $spinner.addClass("is-active");
+                    $results.hide().empty();
+
+                    $.ajax({
+                        url: ajaxurl, type: "POST", timeout: 280000,
+                        data: { action: "tigon_dms_stale_vehicles_scan", nonce: staleVehiclesNonce }
+                    }).done(function(resp){
+                        $spinner.removeClass("is-active");
+                        $scanBtn.prop("disabled", false).text("Scan for Sold / Delisted Vehicles");
+
+                        if (!resp || !resp.success) {
+                            var msg = (resp && resp.data) ? resp.data : "Unknown error.";
+                            $results.html(staleBox("#f8d7da", "#f5c6cb", "#721c24",
+                                "<strong>Scan aborted.</strong> " + $("<div>").text(msg).html())).show();
+                            return;
+                        }
+                        var d = resp.data;
+                        if (!d.stale_count) {
+                            $results.html(staleBox("#d4edda", "#c3e6cb", "#155724",
+                                "<strong>Nothing to clean up.</strong> All " + d.scanned +
+                                " active products match a vehicle in the DMS feed (" + d.dms_active +
+                                " live carts).")).show();
+                            return;
+                        }
+                        staleSyncId = d.sync_id;
+                        staleTotal  = d.stale_count;
+
+                        var pct = d.scanned > 0 ? Math.round((d.stale_count / d.scanned) * 100) : 0;
+                        var html = "<div style=\"background:#fff3cd;border:1px solid #ffc107;padding:1rem;border-radius:6px;\">";
+                        html += "<strong>" + d.stale_count + "</strong> of " + d.scanned +
+                            " active products are no longer in the DMS feed (" + d.dms_active + " live carts).";
+                        if (pct >= 40) {
+                            html += "<div style=\"margin-top:0.5rem;color:#721c24;font-weight:700;\">Warning: this would delete " +
+                                pct + "% of your active inventory. Verify the DMS feed is healthy before continuing.</div>";
+                        }
+                        html += "<ul style=\"max-height:280px;overflow:auto;margin:0.75rem 0 0;padding-left:1.25rem;font-size:0.85rem;\">";
+                        for (var i = 0; i < d.sample.length; i++) {
+                            var it = d.sample[i];
+                            html += "<li>" + $("<div>").text(it.title || "(no title)").html() +
+                                " <span style=\"color:#666;\">(ID:" + it.id + ")</span></li>";
+                        }
+                        html += "</ul>";
+                        if (d.stale_count > d.sample.length) {
+                            html += "<p style=\"margin:0.5rem 0 0;font-size:0.85rem;color:#666;\">and " +
+                                (d.stale_count - d.sample.length) + " more not shown.</p>";
+                        }
+                        html += "</div>";
+                        $results.html(html).show();
+                        $delBtn.text("Delete " + d.stale_count + " Stale Vehicles").show();
+                    }).fail(function(){
+                        $spinner.removeClass("is-active");
+                        $scanBtn.prop("disabled", false).text("Scan for Sold / Delisted Vehicles");
+                        $results.html(staleBox("#f8d7da", "#f5c6cb", "#721c24",
+                            "Scan request failed. Please try again.")).show();
+                    });
+                });
+
+                $delBtn.on("click", function(){
+                    if (!staleSyncId) { return; }
+                    if (!window.confirm("Permanently delete " + staleTotal +
+                        " products and ALL their images and Monroney stickers? This cannot be undone.")) {
+                        return;
+                    }
+                    $delBtn.prop("disabled", true);
+                    $scanBtn.prop("disabled", true);
+                    $spinner.addClass("is-active");
+
+                    var cumulative = { deleted: 0, errors: 0, details: [] };
+                    $results.html(
+                        "<div class=\"sync-progress\" style=\"display:block;\">" +
+                        "<div class=\"sync-progress-bar-wrap\"><div class=\"sync-progress-bar\" style=\"width:0%;\"></div>" +
+                        "<div class=\"sync-progress-text\">Starting...</div></div>" +
+                        "<div class=\"sync-progress-status\"></div></div>"
+                    ).show();
+
+                    function staleFinish(){
+                        $spinner.removeClass("is-active");
+                        $delBtn.hide();
+                        $scanBtn.prop("disabled", false);
+                        var listing = "";
+                        for (var i = 0; i < cumulative.details.length; i++) {
+                            listing += "<li>" + $("<div>").text(cumulative.details[i]).html() + "</li>";
+                        }
+                        var bg = cumulative.errors > 0 ? "#fff3cd" : "#d4edda";
+                        var bd = cumulative.errors > 0 ? "#ffc107" : "#c3e6cb";
+                        var fg = cumulative.errors > 0 ? "#856404" : "#155724";
+                        $results.html(staleBox(bg, bd, fg,
+                            "<strong>Cleanup complete.</strong> Deleted " + cumulative.deleted + " of " +
+                            staleTotal + " stale vehicles." +
+                            (cumulative.errors > 0 ? " Errors: " + cumulative.errors + "." : "") +
+                            "<details style=\"margin-top:0.5rem;\"><summary style=\"cursor:pointer;\">Show details</summary>" +
+                            "<ul style=\"max-height:280px;overflow:auto;margin:0.5rem 0 0;padding-left:1.25rem;font-size:0.82rem;\">" +
+                            listing + "</ul></details>")).show();
+                    }
+
+                    function staleBatch(retries){
+                        $.ajax({
+                            url: ajaxurl, type: "POST", timeout: 280000,
+                            data: {
+                                action: "tigon_dms_stale_vehicles_delete_batch",
+                                nonce: staleVehiclesNonce,
+                                sync_id: staleSyncId
+                            }
+                        }).done(function(resp){
+                            if (!resp || !resp.success) {
+                                $results.find(".sync-progress-status").text((resp && resp.data) ? resp.data : "Delete failed.");
+                                staleFinish();
+                                return;
+                            }
+                            var d = resp.data;
+                            cumulative.deleted += (d.deleted || 0);
+                            cumulative.errors  += (d.errors || 0);
+                            if (d.details && d.details.length) {
+                                cumulative.details = cumulative.details.concat(d.details);
+                            }
+                            var pct = d.total > 0 ? Math.min(Math.round((d.processed / d.total) * 100), 100) : 100;
+                            $results.find(".sync-progress-bar").css("width", pct + "%");
+                            $results.find(".sync-progress-text").text(d.processed + " / " + d.total);
+                            $results.find(".sync-progress-status").text(
+                                "Deleted " + cumulative.deleted + ", errors " + cumulative.errors + ".");
+                            if (d.done) { staleFinish(); } else { staleBatch(0); }
+                        }).fail(function(){
+                            if (retries < 3) {
+                                setTimeout(function(){ staleBatch(retries + 1); }, (retries + 1) * 2000);
+                            } else {
+                                $results.find(".sync-progress-status").text("Network error - stopped. Re-scan to continue.");
+                                staleFinish();
+                            }
+                        });
+                    }
+                    staleBatch(0);
+                });
+            })();
         });
         </script>
         ';

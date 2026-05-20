@@ -54,6 +54,8 @@ class Core
         add_action('wp_ajax_tigon_dms_bulk_delete_batch', 'Tigon\DmsConnect\Core::ajax_bulk_delete_batch');
         add_action('wp_ajax_tigon_dms_dup_sku_scan', 'Tigon\DmsConnect\Core::ajax_dup_sku_scan');
         add_action('wp_ajax_tigon_dms_dup_sku_cleanup_batch', 'Tigon\DmsConnect\Core::ajax_dup_sku_cleanup_batch');
+        add_action('wp_ajax_tigon_dms_stale_vehicles_scan', 'Tigon\DmsConnect\Core::ajax_stale_vehicles_scan');
+        add_action('wp_ajax_tigon_dms_stale_vehicles_delete_batch', 'Tigon\DmsConnect\Core::ajax_stale_vehicles_delete_batch');
 
         // Pricing page AJAX handlers
         add_action('wp_ajax_tigon_dms_pricing_bulk_preview', 'Tigon\DmsConnect\Admin\Pricing_Page::ajax_bulk_preview');
@@ -2375,6 +2377,209 @@ class Core
         } catch (\Throwable $e) {
             wp_send_json_error('Draft-imageless batch error: ' . $e->getMessage());
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    //  Remove Sold & Delisted Vehicles
+    //
+    //  Reconciles "Local New/Used Active" WooCommerce products against the
+    //  live DMS feed and permanently deletes products whose vehicle is no
+    //  longer in DMS (sold or delisted). A scan/preview always runs first;
+    //  if the DMS feed is unreachable or looks incomplete the scan aborts
+    //  and deletes nothing.
+    // ─────────────────────────────────────────────────────────────────
+
+    const STALE_VEHICLES_BATCH_SIZE = 3;
+
+    /**
+     * AJAX — scan for active products whose DMS vehicle is no longer in
+     * the feed. Builds a work list but deletes nothing.
+     */
+    public static function ajax_stale_vehicles_scan()
+    {
+        check_ajax_referer('tigon_dms_stale_vehicles_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+        if (!class_exists('DMS_API')) {
+            wp_send_json_error('DMS API client is unavailable.');
+        }
+
+        ignore_user_abort(true);
+        set_time_limit(270);
+
+        // 1. Pull the entire live DMS feed, page by page. Any failed page
+        //    aborts the whole scan — a partial feed must never drive deletes.
+        $active_ids     = [];
+        $raw_count      = 0;
+        $reported_total = 0;
+        $page           = 0;
+        $page_size      = 100;
+
+        while (true) {
+            $result = \DMS_API::get_carts_page($page, $page_size);
+            if ($result === false || !isset($result['carts']) || !is_array($result['carts'])) {
+                wp_send_json_error(
+                    'DMS API request failed on page ' . ($page + 1) . '. No products were deleted — try again.'
+                );
+            }
+            $carts          = $result['carts'];
+            $reported_total = (int) ($result['total'] ?? 0);
+            foreach ($carts as $cart) {
+                $raw_count++;
+                $cid = is_array($cart) ? (string) ($cart['_id'] ?? '') : '';
+                if ($cid !== '') {
+                    $active_ids[$cid] = true;
+                }
+            }
+            $page++;
+            if (count($carts) < $page_size || $page > 1000) {
+                break;
+            }
+        }
+
+        // 2. Safety guards — never reconcile against an empty or partial feed.
+        if (empty($active_ids)) {
+            wp_send_json_error('DMS returned no active inventory. Aborting to prevent mass deletion.');
+        }
+        if ($reported_total > 0 && $raw_count < (int) floor($reported_total * 0.9)) {
+            wp_send_json_error(sprintf(
+                'The DMS feed looked incomplete (received %d of %d carts). Aborting to prevent accidental deletion — try again.',
+                $raw_count,
+                $reported_total
+            ));
+        }
+
+        // 3. Every "Local New/Used Active" product that carries a DMS cart ID.
+        global $wpdb;
+        $new_slug  = tigon_dms_get_config('new_inventory_term_slug', 'local-new-active-inventory');
+        $used_slug = tigon_dms_get_config('used_inventory_term_slug', 'local-used-active-inventory');
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT DISTINCT p.ID, p.post_title, cid.meta_value AS cart_id
+                 FROM {$wpdb->posts} p
+                 INNER JOIN {$wpdb->postmeta} cid
+                     ON cid.post_id = p.ID AND cid.meta_key = '_dms_cart_id'
+                 INNER JOIN {$wpdb->term_relationships} tr ON tr.object_id = p.ID
+                 INNER JOIN {$wpdb->term_taxonomy} tt
+                     ON tt.term_taxonomy_id = tr.term_taxonomy_id AND tt.taxonomy = 'inventory-status'
+                 INNER JOIN {$wpdb->terms} t ON t.term_id = tt.term_id
+                 WHERE p.post_type = 'product'
+                   AND p.post_status IN ('publish', 'draft')
+                   AND t.slug IN (%s, %s)",
+                $new_slug,
+                $used_slug
+            ),
+            ARRAY_A
+        );
+
+        $scanned = is_array($rows) ? count($rows) : 0;
+        $stale   = [];
+        foreach ((array) $rows as $row) {
+            $cid = (string) $row['cart_id'];
+            if ($cid === '' || !isset($active_ids[$cid])) {
+                $stale[] = [
+                    'id'    => (int) $row['ID'],
+                    'title' => (string) $row['post_title'],
+                ];
+            }
+        }
+
+        // 4. Stash the work list; the batch handler consumes it by sync_id.
+        $sync_id = '';
+        if (!empty($stale)) {
+            $sync_id = 'dms_stale_' . wp_generate_password(16, false);
+            set_transient(
+                $sync_id,
+                ['ids' => array_column($stale, 'id'), 'offset' => 0],
+                HOUR_IN_SECONDS
+            );
+        }
+
+        wp_send_json_success([
+            'sync_id'     => $sync_id,
+            'dms_active'  => count($active_ids),
+            'scanned'     => $scanned,
+            'stale_count' => count($stale),
+            'batch_size'  => self::STALE_VEHICLES_BATCH_SIZE,
+            'sample'      => array_slice($stale, 0, 200),
+        ]);
+    }
+
+    /**
+     * AJAX — permanently delete one batch of stale products and every
+     * asset (featured image, gallery, Monroney sticker, attachments).
+     */
+    public static function ajax_stale_vehicles_delete_batch()
+    {
+        check_ajax_referer('tigon_dms_stale_vehicles_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized', 403);
+        }
+
+        ignore_user_abort(true);
+        set_time_limit(270);
+
+        $sync_id = sanitize_text_field($_POST['sync_id'] ?? '');
+        if (strpos($sync_id, 'dms_stale_') !== 0) {
+            wp_send_json_error('Invalid session. Please scan again.');
+        }
+        $meta = get_transient($sync_id);
+        if (!is_array($meta) || !isset($meta['ids']) || !is_array($meta['ids'])) {
+            wp_send_json_error('Session expired. Please scan again.');
+        }
+
+        $ids    = $meta['ids'];
+        $offset = (int) ($meta['offset'] ?? 0);
+        $batch  = array_slice($ids, $offset, self::STALE_VEHICLES_BATCH_SIZE);
+
+        $deleted = 0;
+        $errors  = 0;
+        $details = [];
+
+        foreach ($batch as $pid) {
+            $pid   = (int) $pid;
+            $title = get_the_title($pid);
+            $label = $title ? "{$title} (ID:{$pid})" : "ID:{$pid}";
+            try {
+                if (\Tigon\DmsConnect\Includes\Product_Media::delete_product($pid)) {
+                    $deleted++;
+                    $details[] = "{$label}: deleted (product + images + Monroney sticker)";
+                } else {
+                    $errors++;
+                    $details[] = "{$label}: not found or already deleted";
+                }
+            } catch (\Throwable $e) {
+                $errors++;
+                $details[] = "{$label}: " . $e->getMessage();
+            }
+        }
+
+        $new_offset = $offset + count($batch);
+        $done       = $new_offset >= count($ids);
+
+        if ($done) {
+            delete_transient($sync_id);
+            if (function_exists('wc_update_product_lookup_tables')) {
+                wc_update_product_lookup_tables();
+            }
+            if (class_exists('DMS_API')) {
+                \DMS_API::clear_caches();
+            }
+        } else {
+            $meta['offset'] = $new_offset;
+            set_transient($sync_id, $meta, HOUR_IN_SECONDS);
+        }
+
+        wp_send_json_success([
+            'deleted'   => $deleted,
+            'errors'    => $errors,
+            'details'   => $details,
+            'processed' => $new_offset,
+            'total'     => count($ids),
+            'done'      => $done,
+        ]);
     }
 
     /**
