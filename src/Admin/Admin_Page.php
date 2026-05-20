@@ -3677,6 +3677,21 @@ class Admin_Page
         $schema_description       = $wpdb->get_var("SELECT option_value FROM $table_name WHERE option_name = 'schema_description'") ?? $default_description;
         $schema_short_description = $wpdb->get_var("SELECT option_value FROM $table_name WHERE option_name = 'schema_short_description'") ?? $default_short_description;
 
+        // ── Cloudflare credentials ──
+        $cf_zone_saved  = (string) tigon_dms_get_config('cf_zone_id', '');
+        $cf_token_saved = (string) tigon_dms_get_config('cf_api_token', '');
+        $cf_source      = \Tigon\DmsConnect\Includes\Cloudflare::credentials_source();
+        $cf_token_ph    = $cf_token_saved !== ''
+            ? substr($cf_token_saved, 0, 4) . str_repeat('•', 16) . substr($cf_token_saved, -4)
+            : 'Cloudflare API token (Zone.Cache Purge)';
+        if ($cf_source === 'constant') {
+            $cf_status_html = '<strong style="color:#1f7a3d;">Active &mdash; defined in wp-config.php.</strong> These constants override the fields below.';
+        } elseif ($cf_source === 'database') {
+            $cf_status_html = '<strong style="color:#1f7a3d;">Active &mdash; stored in plugin settings.</strong>';
+        } else {
+            $cf_status_html = '<strong style="color:#b35900;">Not configured.</strong> Edge-cache purging is disabled until credentials are saved.';
+        }
+
         echo '
         <div class="body" style="display:flex; flex-direction:column;">
             <div class="tabbed-panel">
@@ -3686,6 +3701,7 @@ class Admin_Page
                     <button class="tigon-dms-tab" id="endpoints-tab">REST Endpoints</button>
                     <button class="tigon-dms-tab" id="schema-tab">Schema</button>
                     <button class="tigon-dms-tab" id="locations-tab">Locations</button>
+                    <button class="tigon-dms-tab" id="cloudflare-tab">Cloudflare</button>
                 </div>
 
                 <div class="action-box settings-panel" id="general">
@@ -4069,13 +4085,52 @@ class Admin_Page
                     <a class="tigon_dms_action" style="margin-top:1rem;display:inline-block;"><button type="button" id="loc-save-btn" class="fm-btn fm-btn-primary">Save Locations</button></a>
                     <span id="loc-save-status" style="font-size:0.85rem;color:#666;margin-left:0.5rem;"></span>
                 </div>
+
+                <div class="action-box settings-panel" id="cloudflare">
+                    <div class="settings-panel-header">
+                        <h3>Cloudflare Edge Cache</h3>
+                        <p>Credentials used to purge the Cloudflare CDN when inventory changes. Use a scoped API token with only the <em>Zone.Cache Purge</em> permission.</p>
+                    </div>
+                    <div class="settings-panel-body">
+                        <p style="font-size:0.85rem;margin-top:0;">' . $cf_status_html . '</p>
+
+                        <div class="settings form" style="max-width:640px;">
+                            <div>
+                                <span>Cloudflare Zone ID:</span>
+                                <input type="text" style="float:right" id="cf-zone-id" value="' . esc_attr($cf_zone_saved) . '" placeholder="32-character zone ID" />
+                            </div>
+                            <div>
+                                <span>Cloudflare API Token:</span>
+                                <input type="password" autocomplete="new-password" style="float:right" id="cf-api-token" value="" placeholder="' . esc_attr($cf_token_ph) . '" />
+                            </div>
+                            <div style="text-align:right; font-size:0.78rem; color:#666; margin-top:-0.25rem;">
+                                Leave the token blank to keep the saved value.
+                            </div>
+                        </div>
+                        <a class="tigon_dms_action tigon_dms_save" data-nonce="' . $nonce . '"><button type="button">Save Settings</button></a>
+
+                        <hr style="margin:1.5rem 0;border:none;border-top:1px solid #ddd;" />
+
+                        <h4 style="margin-bottom:0.3rem;">Optional: store in wp-config.php</h4>
+                        <p style="font-size:0.82rem;color:#666;margin-top:0;">For tighter security you can keep the credentials out of the database. Copy the snippet into <code>wp-config.php</code>, or let the plugin write it for you. A wp-config.php constant always overrides the saved settings.</p>
+                        <div style="display:flex; align-items:flex-start; gap:0.5rem; flex-wrap:wrap;">
+                            <pre id="cf-wpconfig-snippet" data-saved-zone="' . esc_attr($cf_zone_saved) . '" style="background:#f0f4f8; padding:0.7rem 0.9rem; border-radius:4px; font-size:0.8rem; border:1px solid #d0d5dd; flex:1; min-width:280px; margin:0; white-space:pre; overflow-x:auto;"></pre>
+                            <button type="button" class="tigon-copy-btn" data-target="cf-wpconfig-snippet" style="padding:0.3rem 0.7rem; font-size:0.78rem; cursor:pointer; border:none; border-radius:4px; background-color:#557486; color:#F4F4F4;">Copy</button>
+                        </div>
+                        <div style="margin-top:0.9rem; display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap;">
+                            <button type="button" id="cf-write-wpconfig" class="fm-btn fm-btn-secondary">Write to wp-config.php</button>
+                            <span id="cf-write-status" style="font-size:0.83rem;color:#666;"></span>
+                        </div>
+                        <p style="font-size:0.78rem;color:#b35900;margin-top:0.5rem;">Writing edits <code>wp-config.php</code> directly. The plugin makes the change atomically and restores the file if anything looks wrong, but the file must be writable by the web server.</p>
+                    </div>
+                </div>
             </div>
                 </div>
         </div>
         <script>
         /* ── Tab switching (inline so it works even if external JS delays) ── */
         (function(){
-            var tabIds = ["general", "urls", "endpoints", "schema", "locations"];
+            var tabIds = ["general", "urls", "endpoints", "schema", "locations", "cloudflare"];
             function activateTab(id){
                 tabIds.forEach(function(t){
                     var btn   = document.getElementById(t + "-tab");

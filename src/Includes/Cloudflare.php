@@ -13,10 +13,13 @@
  * 1,000-purge-calls-per-day limit (Free / Pro / Business plans) even though
  * the DMS updates thousands of carts daily.
  *
- * Credentials live in wp-config.php — never in the repo:
+ * Credentials can be supplied two ways — a wp-config.php constant always
+ * wins over the database value:
  *
- *   define( 'TIGON_CF_ZONE_ID',   '...' );
- *   define( 'TIGON_CF_API_TOKEN', '...' );  // scoped token: Zone.Cache Purge
+ *   1. wp-config.php constants: TIGON_CF_ZONE_ID / TIGON_CF_API_TOKEN.
+ *   2. The plugin's Settings -> Cloudflare tab (stored in the config table).
+ *
+ * Use a scoped API token with only the Zone.Cache Purge permission.
  *
  * @package Tigon\DmsConnect\Includes
  */
@@ -47,6 +50,14 @@ class Cloudflare
     /** Default delay before a coalesced flush runs, in seconds. */
     private const DEFAULT_FLUSH_DELAY = 180;
 
+    /** Config-table keys for credentials managed via the settings page. */
+    public const ZONE_OPTION  = 'cf_zone_id';
+    public const TOKEN_OPTION = 'cf_api_token';
+
+    /** Markers bounding the plugin-managed block in wp-config.php. */
+    private const MARKER_BEGIN = '/* BEGIN Tigon DMS Connect - Cloudflare credentials */';
+    private const MARKER_END   = '/* END Tigon DMS Connect - Cloudflare credentials */';
+
     /**
      * Register the flush hook. Called once on plugin load.
      */
@@ -56,12 +67,60 @@ class Cloudflare
     }
 
     /**
-     * Whether Cloudflare credentials are configured in wp-config.php.
+     * Whether Cloudflare credentials are configured (constant or database).
      */
     public static function is_configured(): bool
     {
-        return defined('TIGON_CF_ZONE_ID') && defined('TIGON_CF_API_TOKEN')
-            && TIGON_CF_ZONE_ID !== '' && TIGON_CF_API_TOKEN !== '';
+        return self::zone_id() !== '' && self::api_token() !== '';
+    }
+
+    /**
+     * The active Cloudflare zone ID — wp-config.php constant if defined,
+     * otherwise the value saved on the settings page.
+     */
+    public static function zone_id(): string
+    {
+        if (defined('TIGON_CF_ZONE_ID') && TIGON_CF_ZONE_ID !== '') {
+            return (string) TIGON_CF_ZONE_ID;
+        }
+        return self::config_value(self::ZONE_OPTION);
+    }
+
+    /**
+     * The active Cloudflare API token — wp-config.php constant if defined,
+     * otherwise the value saved on the settings page.
+     */
+    public static function api_token(): string
+    {
+        if (defined('TIGON_CF_API_TOKEN') && TIGON_CF_API_TOKEN !== '') {
+            return (string) TIGON_CF_API_TOKEN;
+        }
+        return self::config_value(self::TOKEN_OPTION);
+    }
+
+    /**
+     * Where the active credentials come from, for display on the settings
+     * page: 'constant', 'database', or 'none'.
+     */
+    public static function credentials_source(): string
+    {
+        $from_constant = defined('TIGON_CF_ZONE_ID') && TIGON_CF_ZONE_ID !== ''
+            && defined('TIGON_CF_API_TOKEN') && TIGON_CF_API_TOKEN !== '';
+        if ($from_constant) {
+            return 'constant';
+        }
+        return self::is_configured() ? 'database' : 'none';
+    }
+
+    /**
+     * Read a credential from the plugin's config table.
+     */
+    private static function config_value(string $key): string
+    {
+        if (function_exists('tigon_dms_get_config')) {
+            return (string) tigon_dms_get_config($key, '');
+        }
+        return '';
     }
 
     /**
@@ -231,7 +290,7 @@ class Cloudflare
      */
     private static function endpoint(): string
     {
-        return self::API_BASE . rawurlencode((string) TIGON_CF_ZONE_ID) . '/purge_cache';
+        return self::API_BASE . rawurlencode(self::zone_id()) . '/purge_cache';
     }
 
     /**
@@ -242,9 +301,99 @@ class Cloudflare
     private static function headers(): array
     {
         return [
-            'Authorization' => 'Bearer ' . TIGON_CF_API_TOKEN,
+            'Authorization' => 'Bearer ' . self::api_token(),
             'Content-Type'  => 'application/json',
         ];
+    }
+
+    /**
+     * Write the Cloudflare credential constants into wp-config.php.
+     *
+     * Replaces an existing plugin-managed block if present, otherwise inserts
+     * one immediately after the opening PHP tag. The write is atomic (temp
+     * file + rename) and the original contents are restored in-process if the
+     * result fails a basic integrity check, so a botched write cannot leave a
+     * broken wp-config.php behind.
+     *
+     * @param string $zone_id   Cloudflare zone ID.
+     * @param string $api_token Cloudflare API token.
+     * @return true|\WP_Error
+     */
+    public static function write_wp_config_constants(string $zone_id, string $api_token)
+    {
+        // Restrict to the characters Cloudflare actually uses so nothing can
+        // break out of the single-quoted PHP strings we are about to write.
+        $zone_id   = preg_replace('/[^A-Za-z0-9]/', '', $zone_id);
+        $api_token = preg_replace('/[^A-Za-z0-9_\-]/', '', $api_token);
+        if ($zone_id === '' || $api_token === '') {
+            return new \WP_Error('cf_bad_input', 'A valid zone ID and API token are both required.');
+        }
+
+        $path = self::locate_wp_config();
+        if ($path === '') {
+            return new \WP_Error('cf_no_wpconfig', 'Could not locate wp-config.php.');
+        }
+        if (!is_writable($path) || !is_writable(dirname($path))) {
+            return new \WP_Error(
+                'cf_not_writable',
+                'wp-config.php is not writable by the web server. Add the constants manually instead.'
+            );
+        }
+
+        $original = file_get_contents($path);
+        if ($original === false || strpos($original, '<?php') !== 0) {
+            return new \WP_Error('cf_read_failed', 'Could not read a valid wp-config.php.');
+        }
+
+        $block = self::MARKER_BEGIN . "\n"
+            . "define( 'TIGON_CF_ZONE_ID', '" . $zone_id . "' );\n"
+            . "define( 'TIGON_CF_API_TOKEN', '" . $api_token . "' );\n"
+            . self::MARKER_END;
+
+        $pattern = '/' . preg_quote(self::MARKER_BEGIN, '/') . '.*?'
+            . preg_quote(self::MARKER_END, '/') . '/s';
+        if (preg_match($pattern, $original)) {
+            $updated = preg_replace($pattern, $block, $original, 1);
+        } else {
+            $updated = preg_replace('/^<\?php/', "<?php\n" . $block, $original, 1);
+        }
+        if (!is_string($updated) || strpos($updated, $block) === false) {
+            return new \WP_Error('cf_write_prep_failed', 'Could not prepare the updated wp-config.php contents.');
+        }
+
+        // Atomic replace: write a sibling temp file, then rename over the
+        // original. The temp file ends in .php so it is never served as
+        // plaintext if it lingers.
+        $tmp = dirname($path) . '/wp-config-tigon-tmp.php';
+        if (file_put_contents($tmp, $updated, LOCK_EX) === false) {
+            return new \WP_Error('cf_write_failed', 'Could not write the temporary config file.');
+        }
+        if (!rename($tmp, $path)) {
+            @unlink($tmp);
+            return new \WP_Error('cf_write_failed', 'Could not replace wp-config.php.');
+        }
+
+        // Integrity check — restore the original if the result looks wrong.
+        $verify = file_get_contents($path);
+        if ($verify === false || strpos($verify, '<?php') !== 0 || strpos($verify, $block) === false) {
+            file_put_contents($path, $original, LOCK_EX);
+            return new \WP_Error('cf_verify_failed', 'wp-config.php failed verification and was restored.');
+        }
+
+        return true;
+    }
+
+    /**
+     * Locate the site's wp-config.php — in ABSPATH, or one directory above it.
+     */
+    private static function locate_wp_config(): string
+    {
+        foreach ([ABSPATH . 'wp-config.php', dirname(ABSPATH) . '/wp-config.php'] as $candidate) {
+            if (file_exists($candidate)) {
+                return $candidate;
+            }
+        }
+        return '';
     }
 
     /**
