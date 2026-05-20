@@ -1106,6 +1106,52 @@ function tigon_dms_download_and_attach_images($product_id, $image_names, $title,
 }
 
 /**
+ * Apply the DMS payload price to a product as the authoritative price.
+ *
+ * DMS price always wins: this runs as the final step of the sync — after
+ * any Global Pricing Rule — so the payload retailPrice/salePrice overrides
+ * the rule price. When the payload carries no usable price the product
+ * keeps whatever a rule applied "underneath".
+ *
+ * Prices are stored as decimal strings (e.g. "7995.00") for valid
+ * structured data.
+ *
+ * @param int    $product_id WooCommerce product ID.
+ * @param array  $cart_data  Full DMS cart payload.
+ * @param string $cart_id    DMS cart _id (logging only).
+ * @return bool True when a DMS price was written.
+ */
+function tigon_dms_apply_dms_price($product_id, array $cart_data, $cart_id = '') {
+    $price = $cart_data['retailPrice'] ?? 0;
+
+    if (empty($price) || floatval($price) <= 0) {
+        error_log('DMS Sync: Product ' . $product_id . ' (cart ' . $cart_id . ') has no valid retailPrice: ' . var_export($price, true));
+        return false; // No DMS price — leave any rule price underneath.
+    }
+
+    $formatted_price = number_format(floatval($price), 2, '.', '');
+    update_post_meta($product_id, '_regular_price', $formatted_price);
+    update_post_meta($product_id, '_price', $formatted_price);
+
+    $sale_price = $cart_data['salePrice'] ?? '';
+    if (!empty($sale_price) && floatval($sale_price) > 0 && floatval($sale_price) < floatval($price)) {
+        $formatted_sale = number_format(floatval($sale_price), 2, '.', '');
+        update_post_meta($product_id, '_sale_price', $formatted_sale);
+        update_post_meta($product_id, '_price', $formatted_sale);
+    } else {
+        delete_post_meta($product_id, '_sale_price');
+    }
+
+    // Direct meta writes bypass the WooCommerce price lookup table and
+    // caches — refresh them so the new price shows immediately.
+    if (function_exists('tigon_dms_refresh_wc_product_data')) {
+        tigon_dms_refresh_wc_product_data($product_id);
+    }
+
+    return true;
+}
+
+/**
  * Create or update WooCommerce product from DMS cart data
  *
  * @param array  $cart_data Full DMS cart payload
@@ -1152,11 +1198,11 @@ function tigon_dms_ensure_woo_product($cart_data, $cart_id) {
         $pid = tigon_dms_create_woo_product($cart_id, $title, $retail_price, $cart_data, $specs, $images, $warranty);
     }
 
-    // Auto-apply any matching Global Pricing Rule. This ensures that
-    // newly-imported products (and existing unmanaged ones) pick up
-    // their rule-defined price immediately, without waiting for a
-    // manual rule refresh. Products already managed by the Pricing
-    // page had their DMS price skipped above, so the rule price stays.
+    // Pricing is applied in two layers, lowest priority first:
+    //   1. Global Pricing Rule — the "underneath" layer (optional).
+    //   2. DMS payload price   — always wins, applied last (below).
+    // A rule price only stays visible when the DMS payload carries no
+    // usable price of its own.
     if ($pid && class_exists('\Tigon\DmsConnect\Admin\Pricing_Page')) {
         try {
             \Tigon\DmsConnect\Admin\Pricing_Page::apply_matching_rule((int) $pid);
@@ -1164,6 +1210,11 @@ function tigon_dms_ensure_woo_product($cart_data, $cart_id) {
             // Non-fatal: sync should never fail because pricing rule application failed.
             error_log('[DMS Pricing] apply_matching_rule failed for product ' . $pid . ': ' . $e->getMessage());
         }
+    }
+
+    // DMS price always wins — stamp the payload price on top of any rule.
+    if ($pid) {
+        tigon_dms_apply_dms_price((int) $pid, $cart_data, $cart_id);
     }
 
     // Purge the WP Rocket cache so visitors see fresh inventory. New products
@@ -1640,24 +1691,8 @@ function tigon_dms_create_woo_product($cart_id, $title, $price, $cart_data, $spe
         update_post_meta($product_id, '_sku', sanitize_text_field($sku));
     }
 
-    // Price fields for WooCommerce compatibility (only set if valid price)
-    // Prices must be stored as decimal strings (e.g. "7995.00") for valid structured data
-    if (!empty($price) && floatval($price) > 0) {
-        $formatted_price = number_format(floatval($price), 2, '.', '');
-        update_post_meta($product_id, '_regular_price', $formatted_price);
-        update_post_meta($product_id, '_price', $formatted_price);
-
-        // Sale price
-        $sale_price = $cart_data['salePrice'] ?? '';
-        if (!empty($sale_price) && floatval($sale_price) > 0 && floatval($sale_price) < floatval($price)) {
-            $formatted_sale = number_format(floatval($sale_price), 2, '.', '');
-            update_post_meta($product_id, '_sale_price', $formatted_sale);
-            update_post_meta($product_id, '_price', $formatted_sale);
-        }
-    } else {
-        // Log warning for products with no valid price
-        error_log('DMS Sync: Product ' . $product_id . ' (cart ' . $cart_id . ') has no valid retailPrice: ' . var_export($price, true));
-    }
+    // Price is applied centrally by tigon_dms_apply_dms_price() after the
+    // pricing-rule layer, so the DMS payload price always wins.
 
     // Enable shipping (not virtual)
     update_post_meta($product_id, '_virtual', 'no');
@@ -1761,23 +1796,8 @@ function tigon_dms_update_woo_product($product_id, $title, $price, $cart_data, $
     $model = $cart_data['cartType']['model'] ?? '';
     $store_id = $cart_data['cartLocation']['locationId'] ?? '';
 
-    // Update price (only if retailPrice is valid AND Pricing page is not managing this product)
-    // Prices must be stored as decimal strings (e.g. "7995.00") for valid structured data
-    if (!empty($price) && floatval($price) > 0 && !tigon_dms_is_price_managed($product_id)) {
-        $formatted_price = number_format(floatval($price), 2, '.', '');
-        update_post_meta($product_id, '_regular_price', $formatted_price);
-        update_post_meta($product_id, '_price', $formatted_price);
-
-        // Sale price
-        $sale_price = $cart_data['salePrice'] ?? '';
-        if (!empty($sale_price) && floatval($sale_price) > 0 && floatval($sale_price) < floatval($price)) {
-            $formatted_sale = number_format(floatval($sale_price), 2, '.', '');
-            update_post_meta($product_id, '_sale_price', $formatted_sale);
-            update_post_meta($product_id, '_price', $formatted_sale);
-        } else {
-            delete_post_meta($product_id, '_sale_price');
-        }
-    }
+    // Price is applied centrally by tigon_dms_apply_dms_price() after the
+    // pricing-rule layer, so the DMS payload price always wins on every sync.
 
     // SKU (VIN > Serial > Generated fallback) — keep in sync on updates
     $sku = '';
