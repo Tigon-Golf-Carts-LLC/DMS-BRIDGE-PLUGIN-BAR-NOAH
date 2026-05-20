@@ -96,6 +96,31 @@ add_action('wp_ajax_tigon_dms_recrop_primary_images', 'tigon_dms_recrop_primary_
 
 /**
  * ============================================================================
+ * WP ROCKET CACHE PURGING — belt-and-suspenders safety net
+ * ============================================================================
+ *
+ * The DMS sync purges the WP Rocket cache explicitly at every write point
+ * (see \Tigon\DmsConnect\Includes\Cache). These hooks are an additional
+ * safety net: any product change made through the WooCommerce API — admin
+ * edits, the WC REST API, or a future integration — also purges the cache,
+ * so inventory pages never serve stale data.
+ *
+ * The DMS sync itself writes via raw wp_insert_post()/update_post_meta() and
+ * does NOT fire these WooCommerce hooks, so there is no double-purge during
+ * a sync. During a bulk resync, Cache::purge_product() is a no-op anyway.
+ */
+function tigon_dms_purge_rocket_on_product_change($product_id) {
+    if (class_exists('\Tigon\DmsConnect\Includes\Cache')) {
+        \Tigon\DmsConnect\Includes\Cache::purge_product((int) $product_id, true);
+    }
+}
+add_action('woocommerce_update_product', 'tigon_dms_purge_rocket_on_product_change', 10, 1);
+add_action('woocommerce_new_product',    'tigon_dms_purge_rocket_on_product_change', 10, 1);
+add_action('woocommerce_delete_product', 'tigon_dms_purge_rocket_on_product_change', 10, 1);
+add_action('woocommerce_trash_product',  'tigon_dms_purge_rocket_on_product_change', 10, 1);
+
+/**
+ * ============================================================================
  * SEO & STRUCTURED DATA FIXES
  * Fixes Google Search Console errors for Product structured data (JSON-LD):
  * - Invalid floating point number in "price"
@@ -1137,6 +1162,13 @@ function tigon_dms_ensure_woo_product($cart_data, $cart_id) {
             // Non-fatal: sync should never fail because pricing rule application failed.
             error_log('[DMS Pricing] apply_matching_rule failed for product ' . $pid . ': ' . $e->getMessage());
         }
+    }
+
+    // Purge the WP Rocket cache so visitors see fresh inventory. New products
+    // also purge the homepage feed. Deferred automatically during a bulk
+    // resync (see Cache::begin_bulk() in DMS_Sync::sync_inventory()).
+    if ($pid) {
+        \Tigon\DmsConnect\Includes\Cache::purge_product((int) $pid, !$existing_product_id);
     }
 
     return $pid;

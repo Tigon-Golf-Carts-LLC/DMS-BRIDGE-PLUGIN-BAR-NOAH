@@ -430,6 +430,10 @@ class Core
         ignore_user_abort(true);
         set_time_limit(600);
 
+        // Defer per-product WP Rocket purges — one domain purge runs in
+        // end_bulk() once the whole resync completes.
+        \Tigon\DmsConnect\Includes\Cache::begin_bulk();
+
         $stats = [
             'updated' => 0,
             'created' => 0,
@@ -609,6 +613,9 @@ class Core
             \DMS_API::clear_caches();
         }
 
+        // Purge the full WP Rocket cache once if anything changed.
+        \Tigon\DmsConnect\Includes\Cache::end_bulk();
+
         wp_send_json_success($stats);
     }
 
@@ -628,6 +635,10 @@ class Core
 
         ignore_user_abort(true);
         set_time_limit(600);
+
+        // Defer per-product WP Rocket purges — one domain purge runs in
+        // end_bulk() once the whole resync completes.
+        \Tigon\DmsConnect\Includes\Cache::begin_bulk();
 
         $sync_type = sanitize_text_field($_POST['sync_type'] ?? 'all');
 
@@ -798,6 +809,9 @@ class Core
         if (class_exists('DMS_API')) {
             \DMS_API::clear_caches();
         }
+
+        // Purge the full WP Rocket cache once if anything changed.
+        \Tigon\DmsConnect\Includes\Cache::end_bulk();
 
         wp_send_json_success($stats);
     }
@@ -1542,6 +1556,9 @@ class Core
                             continue;
                         }
                         clean_post_cache($pid);
+                        // Product is now live on the storefront — purge its
+                        // WP Rocket cache and the inventory feed.
+                        \Tigon\DmsConnect\Includes\Cache::purge_product((int) $pid, true);
                         $published++;
                     } else {
                         $already++;
@@ -2326,6 +2343,9 @@ class Core
                     update_post_meta((int) $pid, '_dms_readiness_missing',
                         wp_json_encode(['Images (imageUrls is empty)']));
                     $drafted++;
+                    // Product is now a draft and off the storefront — purge
+                    // its WP Rocket cache and the inventory feed.
+                    \Tigon\DmsConnect\Includes\Cache::purge_product((int) $pid, true);
                 } catch (\Throwable $e) {
                     $errors++;
                 }

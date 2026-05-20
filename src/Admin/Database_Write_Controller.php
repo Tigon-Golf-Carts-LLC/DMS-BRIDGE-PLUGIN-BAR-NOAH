@@ -57,6 +57,13 @@ final class Database_Write_Controller {
             tigon_dms_refresh_wc_product_data($post_id);
         }
 
+        // Purge the WP Rocket cache so visitors see fresh inventory. New
+        // products also purge the homepage feed. Deferred automatically
+        // during a bulk resync (see Cache::begin_bulk()).
+        if ($post_id) {
+            \Tigon\DmsConnect\Includes\Cache::purge_product((int) $post_id, empty($posts['ID']));
+        }
+
         return $post_id;
     }
 
@@ -118,6 +125,10 @@ final class Database_Write_Controller {
             );
 		}
         
+        // Purge the WP Rocket cache while the post still exists, so its
+        // permalink and archive URLs can still be resolved.
+        \Tigon\DmsConnect\Includes\Cache::purge_product($id, true);
+
         $posts = $wpdb->delete($wpdb->prefix.'posts', ['ID' => $id]);
         $postmeta = $wpdb->delete($wpdb->prefix.'postmeta', ['post_id' => $id]);
         $terms = $wpdb->delete($wpdb->prefix.'term_relationships', ['object_id' => $id]);
