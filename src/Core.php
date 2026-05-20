@@ -441,6 +441,7 @@ class Core
             'updated' => 0,
             'created' => 0,
             'skipped' => 0,
+            'removed' => 0,
             'errors'  => 0,
             'total'   => 0,
             'error_details' => [],
@@ -552,15 +553,21 @@ class Core
             $vin = strtoupper($cart['vinNo'] ?? '');
             if (str_contains($serial, 'DELETE') || str_contains($vin, 'DELETE')) {
                 $cart_del_id = $cart['_id'] ?? '';
+                $was_removed = false;
                 if ($cart_del_id) {
                     $existing_pid = function_exists('tigon_dms_find_existing_product')
                         ? tigon_dms_find_existing_product($cart_del_id, $cart)
                         : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_del_id) : false);
                     if ($existing_pid) {
                         \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
+                        $was_removed = true;
                     }
                 }
-                $stats['skipped']++;
+                if ($was_removed) {
+                    $stats['removed']++;
+                } else {
+                    $stats['skipped']++;
+                }
                 continue;
             }
 
@@ -606,6 +613,22 @@ class Core
             }
         }
 
+        // Reconcile — delete products whose vehicle is no longer in the DMS
+        // feed (sold or delisted). Skipped if either fetch failed, since a
+        // partial feed must never drive deletions.
+        if ($used_raw !== false && $new_raw !== false) {
+            $active_ids = [];
+            foreach ($used_carts as $ac) {
+                $acid = $ac['_id'] ?? '';
+                if ($acid !== '') { $active_ids[$acid] = true; }
+            }
+            foreach ($new_carts as $ac) {
+                $acid = $ac['_id'] ?? '';
+                if ($acid !== '') { $active_ids[$acid] = true; }
+            }
+            $stats['removed'] += self::reconcile_removed_products($active_ids);
+        }
+
         // Refresh WooCommerce lookup tables
         if (function_exists('wc_update_product_lookup_tables')) {
             wc_update_product_lookup_tables();
@@ -649,6 +672,7 @@ class Core
             'updated' => 0,
             'created' => 0,
             'skipped' => 0,
+            'removed' => 0,
             'errors'  => 0,
             'total'   => 0,
             'error_details' => [],
@@ -659,12 +683,14 @@ class Core
         $all_carts = [];
         $page = 0;
         $page_size = 50;
+        $fetch_failed = false;
 
         while (true) {
             $batch = \DMS_API::get_carts($page, $page_size);
             if ($batch === false) {
                 $stats['errors']++;
                 $stats['error_details'][] = 'DMS API error on page ' . $page . ' — check API connectivity';
+                $fetch_failed = true;
                 break;
             }
             if (!is_array($batch) || empty($batch)) {
@@ -705,6 +731,7 @@ class Core
                     : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_id) : false);
                 if ($existing_pid) {
                     \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
+                    $stats['removed']++;
                 }
                 continue;
             }
@@ -716,6 +743,7 @@ class Core
                     : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_id) : false);
                 if ($existing_pid) {
                     \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
+                    $stats['removed']++;
                 }
                 continue;
             }
@@ -801,6 +829,18 @@ class Core
                 $stats['errors']++;
                 $stats['error_details'][] = $cart_id . ': [Fatal] ' . $e->getMessage();
             }
+        }
+
+        // Reconcile — on a full sync with a complete feed, delete products
+        // whose vehicle has left the DMS feed. Skipped for partial new/used
+        // syncs and when a feed page failed to load.
+        if ($sync_type === 'all' && !$fetch_failed) {
+            $active_ids = [];
+            foreach ($all_carts as $ac) {
+                $acid = $ac['_id'] ?? '';
+                if ($acid !== '') { $active_ids[$acid] = true; }
+            }
+            $stats['removed'] += self::reconcile_removed_products($active_ids);
         }
 
         // Refresh WooCommerce lookup tables
@@ -916,6 +956,8 @@ class Core
             $page_cache   = $meta['page_cache'] ?? [];
             $pages_done   = $meta['pages_done'] ?? false;
             $total_processed = $meta['processed'] ?? 0;
+            $active_ids   = $meta['active_ids'] ?? [];
+            $fetch_failed = $meta['fetch_failed'] ?? false;
 
             // If page cache is exhausted, fetch the next API page
             if ($page_cursor >= count($page_cache) && !$pages_done) {
@@ -923,6 +965,7 @@ class Core
                 $page_cache = \DMS_API::get_carts($current_page, $page_size);
                 if ($page_cache === false) {
                     $page_cache = [];
+                    $fetch_failed = true;
                 }
                 if (!is_array($page_cache)) {
                     $page_cache = [];
@@ -939,10 +982,20 @@ class Core
             $batch = array_slice($page_cache, $page_cursor, $batch_size);
             $page_cursor += count($batch);
 
+            // Record every cart id seen so the final batch can reconcile
+            // products whose vehicle has left the DMS feed.
+            foreach ($batch as $bc) {
+                $bcid = is_array($bc) ? ($bc['_id'] ?? '') : '';
+                if ($bcid !== '') {
+                    $active_ids[$bcid] = true;
+                }
+            }
+
             $stats = [
                 'created'       => 0,
                 'updated'       => 0,
                 'skipped'       => 0,
+                'removed'       => 0,
                 'errors'        => 0,
                 'error_details' => [],
                 'skip_details'  => [],
@@ -987,6 +1040,7 @@ class Core
                         : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_id) : false);
                     if ($existing_pid) {
                         \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
+                        $stats['removed']++;
                         $stats['skip_details'][] = "{$cart_label}: Deleted — not eligible ({$reason})";
                     } else {
                         $stats['skipped']++;
@@ -1002,6 +1056,7 @@ class Core
                         : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_id) : false);
                     if ($existing_pid) {
                         \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
+                        $stats['removed']++;
                         $stats['skip_details'][] = "{$cart_label}: Deleted — serial/VIN contains DELETE (product + assets removed)";
                     } else {
                         $stats['skipped']++;
@@ -1103,11 +1158,20 @@ class Core
             $meta['page_cache']   = $page_cache;
             $meta['pages_done']   = $pages_done;
             $meta['processed']    = $total_processed;
+            $meta['active_ids']   = $active_ids;
+            $meta['fetch_failed'] = $fetch_failed;
             set_transient($sync_id, $meta, HOUR_IN_SECONDS);
 
             // Clean up and finalize on last batch
             if ($done) {
                 delete_transient($sync_id);
+
+                // Reconcile — on a full sync with a complete feed, delete
+                // products whose vehicle has left the DMS feed.
+                if ($sync_type === 'all' && !$fetch_failed) {
+                    $stats['removed'] += self::reconcile_removed_products($active_ids);
+                }
+
                 if (function_exists('wc_update_product_lookup_tables')) {
                     wc_update_product_lookup_tables();
                 }
@@ -1147,6 +1211,7 @@ class Core
         set_time_limit(300);
 
         $errors = [];
+        $fetch_failed = false;
 
         // Fetch used carts
         $used_carts = [];
@@ -1163,9 +1228,11 @@ class Core
                 }
             } else {
                 $errors[] = 'Failed to fetch used carts from DMS API';
+                $fetch_failed = true;
             }
         } catch (\Exception $e) {
             $errors[] = 'Used cart fetch error: ' . $e->getMessage();
+            $fetch_failed = true;
         }
 
         // Fetch new carts
@@ -1183,9 +1250,11 @@ class Core
                 }
             } else {
                 $errors[] = 'Failed to fetch new carts from DMS API';
+                $fetch_failed = true;
             }
         } catch (\Exception $e) {
             $errors[] = 'New cart fetch error: ' . $e->getMessage();
+            $fetch_failed = true;
         }
 
         // Tag each cart with its type for the batch processor
@@ -1197,6 +1266,7 @@ class Core
         // Deduplicate new carts and delete products flagged DELETE
         $seen_new = [];
         $filtered_new = [];
+        $removed = 0;
         foreach ($new_carts as $cart) {
             $serial = strtoupper($cart['serialNo'] ?? '');
             $vin = strtoupper($cart['vinNo'] ?? '');
@@ -1208,6 +1278,7 @@ class Core
                         : (function_exists('tigon_dms_get_product_by_cart_id') ? tigon_dms_get_product_by_cart_id($cart_del_id) : false);
                     if ($existing_pid) {
                         \Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $existing_pid);
+                        $removed++;
                     }
                 }
                 continue;
@@ -1234,12 +1305,26 @@ class Core
         // Combine used + filtered new
         $all_carts = array_merge($used_carts, $filtered_new);
 
+        // Active set = every cart id in the feed; the final batch uses it to
+        // reconcile products whose vehicle has left the DMS feed.
+        $active_ids = [];
+        foreach ($used_carts as $ac) {
+            $acid = $ac['_id'] ?? '';
+            if ($acid !== '') { $active_ids[$acid] = true; }
+        }
+        foreach ($new_carts as $ac) {
+            $acid = $ac['_id'] ?? '';
+            if ($acid !== '') { $active_ids[$acid] = true; }
+        }
+
         // Store in transient (structured: carts + offset for server-managed batching)
         $sync_id = 'dms_msync_' . wp_generate_password(16, false);
         set_transient($sync_id, [
-            'carts'      => $all_carts,
-            'offset'     => 0,
-            'batch_size' => 3,
+            'carts'        => $all_carts,
+            'offset'       => 0,
+            'batch_size'   => 3,
+            'active_ids'   => $active_ids,
+            'fetch_failed' => $fetch_failed,
         ], HOUR_IN_SECONDS);
 
         wp_send_json_success([
@@ -1248,6 +1333,7 @@ class Core
             'batch_size' => 3,
             'used_count' => count($used_carts),
             'new_count'  => count($filtered_new),
+            'removed'    => $removed,
             'errors'     => $errors,
         ]);
         } catch (\Throwable $e) {
@@ -1286,6 +1372,7 @@ class Core
             'created'       => 0,
             'updated'       => 0,
             'skipped'       => 0,
+            'removed'       => 0,
             'errors'        => 0,
             'error_details' => [],
         ];
@@ -1364,6 +1451,13 @@ class Core
 
         if ($done) {
             delete_transient($sync_id);
+
+            // Reconcile — delete products whose vehicle has left the DMS
+            // feed. Skipped when the init fetch was incomplete.
+            if (empty($meta['fetch_failed'])) {
+                $stats['removed'] += self::reconcile_removed_products($meta['active_ids'] ?? []);
+            }
+
             if (function_exists('wc_update_product_lookup_tables')) {
                 wc_update_product_lookup_tables();
             }
@@ -1384,6 +1478,56 @@ class Core
         } catch (\Throwable $e) {
             wp_send_json_error('Mapped batch error: ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Permanently delete WooCommerce products whose DMS cart is no longer
+     * in the feed (sold or delisted). Shared end-of-sync reconciliation.
+     *
+     * Callers MUST only invoke this after a complete, successful feed fetch —
+     * a partially-fetched feed must never reach this method or it would
+     * delete live inventory. The empty-set guard is a last-resort backstop,
+     * not a substitute for the caller's own fetch-success check.
+     *
+     * @param array<string,bool> $active_cart_ids Map of every cart _id in the feed.
+     * @return int Number of products deleted.
+     */
+    private static function reconcile_removed_products(array $active_cart_ids): int
+    {
+        if (empty($active_cart_ids)) {
+            return 0;
+        }
+
+        global $wpdb;
+        $rows = $wpdb->get_results(
+            "SELECT p.ID, pm.meta_value AS cart_id
+             FROM {$wpdb->posts} p
+             INNER JOIN {$wpdb->postmeta} pm
+                 ON pm.post_id = p.ID AND pm.meta_key = '_dms_cart_id'
+             WHERE p.post_type = 'product'
+               AND p.post_status IN ('publish', 'draft')",
+            ARRAY_A
+        );
+        if (empty($rows)) {
+            return 0;
+        }
+
+        $removed = 0;
+        foreach ($rows as $row) {
+            $cid = (string) $row['cart_id'];
+            if ($cid !== '' && isset($active_cart_ids[$cid])) {
+                continue; // still in the DMS feed
+            }
+            try {
+                if (\Tigon\DmsConnect\Includes\Product_Media::delete_product((int) $row['ID'])) {
+                    $removed++;
+                }
+            } catch (\Throwable $e) {
+                error_log('[DMS Sync] reconcile delete failed for product ' . $row['ID'] . ': ' . $e->getMessage());
+            }
+        }
+
+        return $removed;
     }
 
     // ─────────────────────────────────────────────────────────────────

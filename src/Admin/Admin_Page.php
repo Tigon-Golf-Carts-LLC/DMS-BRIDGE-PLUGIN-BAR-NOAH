@@ -1253,6 +1253,7 @@ class Admin_Page
         .sync-live-stats span{font-weight:600;}
         .sync-live-stats .created{color:#28a745;} .sync-live-stats .updated{color:#007bff;}
         .sync-live-stats .skipped{color:#856404;} .sync-live-stats .errors{color:#dc3545;} .sync-live-stats .total{color:#333;}
+        .sync-live-stats .removed{color:#9b2c2c;}
         </style>
         <script>
         jQuery(document).ready(function($) {
@@ -1445,6 +1446,7 @@ class Admin_Page
                     \'<span class="created">Created: <em>0</em></span>\' +
                     \'<span class="updated">Updated: <em>0</em></span>\' +
                     \'<span class="skipped">Skipped: <em>0</em></span>\' +
+                    \'<span class="removed">Removed: <em>0</em></span>\' +
                     \'<span class="errors">Errors: <em>0</em></span>\' +
                     \'</div></div>\'
                 ).show();
@@ -1459,6 +1461,7 @@ class Admin_Page
                 $results.find(".created em").text(stats.created);
                 $results.find(".updated em").text(stats.updated);
                 $results.find(".skipped em").text(stats.skipped || 0);
+                $results.find(".removed em").text(stats.removed || 0);
                 $results.find(".errors em").text(stats.errors);
             }
 
@@ -1470,6 +1473,7 @@ class Admin_Page
                 html += "<li><strong>Created:</strong> " + stats.created + "</li>";
                 html += "<li><strong>Updated:</strong> " + stats.updated + "</li>";
                 if (stats.skipped !== undefined) html += "<li><strong>Skipped:</strong> " + stats.skipped + "</li>";
+                if (stats.removed !== undefined) html += "<li><strong>Removed (sold / delisted):</strong> " + stats.removed + "</li>";
                 html += "<li><strong>Errors:</strong> " + stats.errors + "</li>";
                 html += "</ul>";
                 if (stats.skip_details && stats.skip_details.length > 0) {
@@ -1533,7 +1537,7 @@ class Admin_Page
                         var syncId = initResp.data.sync_id;
                         var total = initResp.data.total;
                         var batchSize = initResp.data.batch_size || 5;
-                        var cumulative = { created: 0, updated: 0, skipped: 0, errors: 0, error_details: [], skip_details: [] };
+                        var cumulative = { created: 0, updated: 0, skipped: 0, removed: 0, errors: 0, error_details: [], skip_details: [] };
                         var retries = 0;
                         var maxRetries = 3;
 
@@ -1570,6 +1574,7 @@ class Admin_Page
                                     cumulative.created += (d.created || 0);
                                     cumulative.updated += (d.updated || 0);
                                     cumulative.skipped += (d.skipped || 0);
+                                    cumulative.removed += (d.removed || 0);
                                     cumulative.skip_details = cumulative.skip_details.concat(d.skip_details || []);
                                     cumulative.errors += (d.errors || 0);
                                     cumulative.error_details = cumulative.error_details.concat(d.error_details || []);
@@ -1639,7 +1644,7 @@ class Admin_Page
                         var syncId = initResp.data.sync_id;
                         var total = initResp.data.total;
                         var batchSize = initResp.data.batch_size || 3;
-                        var cumulative = { created: 0, updated: 0, skipped: 0, errors: 0, error_details: [], skip_details: [] };
+                        var cumulative = { created: 0, updated: 0, skipped: 0, removed: 0, errors: 0, error_details: [], skip_details: [] };
                         var retries = 0;
                         var maxRetries = 3;
                         var processed = 0;
@@ -1647,6 +1652,10 @@ class Admin_Page
                         // Append init-phase errors
                         if (initResp.data.errors && initResp.data.errors.length > 0) {
                             cumulative.error_details = cumulative.error_details.concat(initResp.data.errors);
+                        }
+                        // Seed removed count with init-phase deletions (DELETE-flagged carts)
+                        if (initResp.data.removed) {
+                            cumulative.removed += initResp.data.removed;
                         }
 
                         $btn.text("Syncing mapped inventory...");
@@ -1682,6 +1691,7 @@ class Admin_Page
                                     cumulative.created += (d.created || 0);
                                     cumulative.updated += (d.updated || 0);
                                     cumulative.skipped += (d.skipped || 0);
+                                    cumulative.removed += (d.removed || 0);
                                     cumulative.errors += (d.errors || 0);
                                     cumulative.error_details = cumulative.error_details.concat(d.error_details || []);
                                     cumulative.skip_details = cumulative.skip_details.concat(d.skip_details || []);
